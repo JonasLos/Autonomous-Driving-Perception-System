@@ -3,6 +3,9 @@ import os
 
 import cv2
 import numpy as np
+import sensor_msgs.point_cloud2 as pc2
+
+from src.configs import T1
 
 np.float = np.float64
 from functools import wraps
@@ -11,18 +14,15 @@ import message_filters
 import ros_numpy
 import rospy
 import torch
+from geometry_msgs.msg import PointStamped
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, PointCloud2, PointField
 
 from sam2_ros.msg import DetectedRoadArea
-from src.configs import (
-    CAMERA_TOPIC,
-    LEFT_CONTOUR_TOPIC,
-    RIGHT_CONTOUR_TOPIC,
-    SEGMENTATION_MASK_TOPIC,
-    YOLO_BBOX_TOPIC,
-)
+from src.configs import (CAMERA_TOPIC, PROJ, SAM_LEFT_CONTOUR_TOPIC,
+                         SAM_RIGHT_CONTOUR_TOPIC, SAM_SEGMENTATION_MASK_TOPIC,
+                         SPHEREFORMER_CENTER_LINE_POINTS, YOLO_BBOX_TOPIC)
 from yolov9_ros.msg import BboxList
 
 
@@ -53,14 +53,36 @@ predictor = SAM2ImagePredictor(sam2_model)
 
 # Define points for initial segmentation prompt
 point_coords = np.array([[400, 700], [550, 700], [650, 700]])
-input_labels = [1, 1, 1]
+input_labels = [1,1,1]
 MIN_CONTOUR_AREA = 30000.0
 
 
+def inverse_rigid_transformation(arr: np.ndarray) -> np.ndarray:
+    Rt = arr[:3, :3].T
+    tt = -np.dot(Rt, arr[:3, 3])
+    return np.vstack((np.column_stack((Rt, tt)), [0, 0, 0, 1]))
+
+
+T_vel_cam = inverse_rigid_transformation(T1)
+
+@timer
 def process_image(image, detected_objects, publish_image=False):
     h_original, w_original = image.shape[:2]
     center_x = int(w_original * 0.75)
+    # point_coords = point_coords.append(auto)
+    # auto = np.array([auto[0][0], auto[1][0]], dtype=np.float32).reshape(1, 2)
+    # auto = np.vstack((u, v)).T.astype(np.float32)  # Use all points
 
+    # point_coords = np.array([[400, 700], [550, 700], [650, 700]])
+    # point_coords = np.array([])
+    # if point_coords.shape[0] == 0:
+    #     p = auto  # If empty, just use auto
+    # else:
+    #     p = np.vstack([point_coords, auto]).astype(np.float32)
+    # input_labels = [1,1,1]
+    # input_labels = np.ones(len(auto), dtype=np.int32).tolist()  # Match size
+    # print("auto:", auto)
+    # p = np.vstack([point_coords, auto]).astype(np.float32)
     # Predict masks using SAM2 model
     with torch.cuda.amp.autocast():
         predictor.set_image(image)
@@ -138,13 +160,15 @@ def process_image(image, detected_objects, publish_image=False):
             if point[0] < horizon_point[0]
             else right_boundary_points
         ).append(point)
-
+    left_boundary_points, right_boundary_points = np.array(left_boundary_points), np.array(right_boundary_points)
+    if is_straight_line(left_boundary_points):
+        rospy.logwarn("Boundary is nearly a straight horizontal line, skipping publication.")
+        return  None, None, None # Do not publish straight-line boundaries
+    if is_straight_line(right_boundary_points):
+        rospy.logwarn("Boundary is nearly a straight horizontal line, skipping publication.")
+        return  None, None, None # Do not publish straight-line boundaries
     overlay = create_overlay(
-        image,
-        road_mask,
-        left_boundary_points,
-        right_boundary_points,
-        publish_image,
+        image, road_mask, left_boundary_points, right_boundary_points, publish_image, point_coords
     )
 
     return overlay, left_boundary_points, right_boundary_points
@@ -176,11 +200,42 @@ def classify_boundaries_using_horizontal_bins(
                     left_boundary_points if point[0] < mean_x else right_boundary_points
                 ).append(point)
 
-    return np.array(left_boundary_points), np.array(right_boundary_points)
+    return left_boundary_points, right_boundary_points
 
+def is_straight_line(boundary, fraction=0.8):
+    """
+    Check if the boundary points form a nearly straight vertical or horizontal line.
+
+    Args:
+        boundary (np.ndarray): Array of shape (N, 2) with [X, Y] points.
+        fraction (float): Minimum fraction of points required to be aligned.
+
+    Returns:
+        str: 'vertical' if points form a vertical line,
+             'horizontal' if points form a horizontal line,
+             'none' if no clear line is detected.
+    """
+
+    total_points = boundary.shape[0]
+    tolerance = int(fraction * total_points)  # Minimum points required for alignment
+
+    # Count the most frequent X and Y coordinates
+    x_counts = np.bincount(boundary[:, 0].astype(int))
+    y_counts = np.bincount(boundary[:, 1].astype(int))
+
+    max_x_count = np.max(x_counts) if len(x_counts) > 0 else 0
+    max_y_count = np.max(y_counts) if len(y_counts) > 0 else 0
+
+    # Check if a major fraction of points align
+    if max_x_count >= tolerance:
+        return True
+    if max_y_count >= tolerance:
+        return True
+
+    return False
 
 def create_overlay(
-    image, binary_mask_np, left_boundary_points, right_boundary_points, publish_image
+    image, binary_mask_np, left_boundary_points, right_boundary_points, publish_image, point_coords
 ):
     if not publish_image:
         return None
@@ -196,7 +251,13 @@ def create_overlay(
     )
 
     for point in point_coords:
-        cv2.circle(overlay, tuple(point), radius=10, color=(255, 0, 0), thickness=-1)
+    # for point in p:
+        # print(point)
+        #     cv2.circle(overlay, tuple(point), radius=10, color=(255, 0, 0), thickness=-1)
+        cv2.circle(
+            overlay, tuple(map(int, point)), radius=10, color=(255, 0, 0), thickness=-1
+        )
+
     for point in left_boundary_points:
         cv2.circle(overlay, tuple(point), radius=3, color=(0, 255, 0), thickness=-2)
     for point in right_boundary_points:
@@ -208,44 +269,67 @@ def create_overlay(
 class RoadSegmentation:
     def __init__(self):
         rospy.loginfo("Initializing RoadSegmentation class.")
-        self.image_pub = rospy.Publisher(SEGMENTATION_MASK_TOPIC, Image, queue_size=1)
+        self.image_pub = rospy.Publisher(
+            SAM_SEGMENTATION_MASK_TOPIC, Image, queue_size=1
+        )
 
         self.image_sub = message_filters.Subscriber(
             CAMERA_TOPIC,
             Image,
             queue_size=1,
+            buff_size = 2**24
         )
         self.yolo_sub = message_filters.Subscriber(
             YOLO_BBOX_TOPIC, BboxList, queue_size=1
         )
-        # Time synchronizer for lidar, image, and radar data
+        self.center_line_sub = message_filters.Subscriber(
+            SPHEREFORMER_CENTER_LINE_POINTS,
+            PointCloud2,
+            queue_size=1,
+        )
+        # Time synchronizer
         ts = message_filters.ApproximateTimeSynchronizer(
-            [
-                self.image_sub,
-                self.yolo_sub,
-            ],
+            [self.image_sub, self.yolo_sub],
             15,
             0.4,
         )
+        # ts = message_filters.ApproximateTimeSynchronizer(
+        #     [self.image_sub, self.yolo_sub, self.center_line_sub],
+        #     queue_size=3,
+        #     slop=0.4,
+        # )
         ts.registerCallback(self.callback)
 
         self.left_boundary_pub = rospy.Publisher(
-            LEFT_CONTOUR_TOPIC, DetectedRoadArea, queue_size=1
+            SAM_LEFT_CONTOUR_TOPIC, DetectedRoadArea, queue_size=1
         )
         self.right_boundary_pub = rospy.Publisher(
-            RIGHT_CONTOUR_TOPIC, DetectedRoadArea, queue_size=1
+            SAM_RIGHT_CONTOUR_TOPIC, DetectedRoadArea, queue_size=1
         )
 
         self.ros_image = None
         self.publish_image = True
         self.detected_objects = []
+        self.centerline_points = None
         rospy.Timer(rospy.Duration(0.1), self.process_loop)
 
+    # def callback(self, ros_image, bboxes, centerline_points):
     def callback(self, ros_image, bboxes):
         self.ros_image = ros_image
         self.detected_objects = [
             (bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max) for bbox in bboxes.Bboxes
         ]
+        # Convert PointCloud2 message to NumPy array
+        # points = list(
+        #     pc2.read_points(centerline_msg, field_names=("x", "y", "z"), skip_nans=True)
+        # )
+
+        # if len(points) == 0:
+        #     rospy.logwarn("No valid centerline points received.")
+        #     self.centerline_points = None
+        #     return
+
+        # self.centerline_points = np.array(points)
 
     def objects_on_road(self, objects, road_mask):
         """
@@ -262,7 +346,6 @@ class RoadSegmentation:
                 return True
         return False
 
-    @timer
     def process_loop(self, event):
         """Process the image if available, called periodically by a ROS Timer."""
         if self.ros_image:
@@ -270,11 +353,40 @@ class RoadSegmentation:
 
     @timer
     def image_callback(self):
+        # if self.centerline_points is None or len(self.centerline_points) == 0:
+        #     rospy.logwarn("No valid centerline poi  nts received.")
+        #     return
+
+        # centerline_points = self.centerline_points  # Use the NumPy array directly
+        # Convert 3D points to homogeneous coordinates (add a row of 1s)
+        # ones_row = np.ones((1, centerline_points.shape[0]))  # Shape: (1, N)
+        # centerline_points_homogeneous = np.vstack(
+        #     (centerline_points.T, ones_row)
+        # )  # Shape: (4, N)
+
+        # if centerline_points.size == 0:
+        #     rospy.logwarn("No valid centerline points received.")
+        #     return
+
+        # Apply transformation and projection
+        # m1 = torch.matmul(
+        #     torch.tensor(T_vel_cam, dtype=torch.float32),
+        #     torch.tensor(centerline_points_homogeneous, dtype=torch.float32),
+        # )
+        # # uv1 = torch.matmul(torch.tensor(PROJ), m1)
+        # uv1 = torch.matmul(
+        #     torch.tensor(PROJ, dtype=torch.float32), m1.to(dtype=torch.float32)
+        # )
+        # u, v = (uv1[:2, :] / uv1[2, :]).numpy()
+        # print(u, v)
+        # Use all projected points instead of just one
+        # auto = np.vstack((u, v)).T.astype(np.float32)  # Use all `u, v` points
         img = ros_numpy.numpify(self.ros_image)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         overlay, left_boundary, right_boundary = process_image(
             img,
             self.detected_objects,
+            # auto,
             self.publish_image,
         )
 

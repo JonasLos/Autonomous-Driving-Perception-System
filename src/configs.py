@@ -6,19 +6,22 @@ LIDAR_TOPIC = "/lidar_tc/velodyne_points"
 RADAR_TRACKS_TOPIC = "/radar_fc/as_tx/radar_tracks"
 
 # YOLO output topics
-YOLO_IMAGE_TOPIC = "yolov9/published_image"
-YOLO_BBOX_TOPIC = "/yolov9/bboxInfo"
+YOLO_IMAGE_TOPIC = "yolo_published_image"
+YOLO_BBOX_TOPIC = "/yolo_bboxInfo"
 FUSED_BBOX_TOPIC = "/fused_bbox"
 
 # SAM output topics
-SEGMENTATION_MASK_TOPIC = "/road_segmentation"
-LEFT_CONTOUR_TOPIC = "/left_boundary"
-RIGHT_CONTOUR_TOPIC = "/right_boundary"
-LEFT_BOUNDARY = "/road_segment_3d/left_boundary"
-RIGHT_BOUNDARY = "/road_segment_3d/right_boundary"
+SAM_SEGMENTATION_MASK_TOPIC = "/sam_road_segmentation"
+SAM_LEFT_CONTOUR_TOPIC = "/sam_left_contour"
+SAM_RIGHT_CONTOUR_TOPIC = "/sam_right_contour"
+SAM_LEFT_BOUNDARY = "/sam_left_boundary"
+SAM_RIGHT_BOUNDARY = "/sam_right_boundary"
 
 # SPHEREFORMER output topics
-LIDAR_SEGMENTATION_TOPIC = "/colored_points"
+SPHEREFORMER_SEGMENTATION_TOPIC = "/sphereformer_road_segmentation"
+SPHEREFORMER_LEFT_BOUNDARY = '/sphereformer_left_boundary'
+SPHEREFORMER_RIGHT_BOUNDARY = '/sphereformer_right_boundary'
+SPHEREFORMER_CENTER_LINE_POINTS = '/sphereformer_centerline_points'
 LIDAR_BBOX_TOPIC = "/bounding_boxes"
 
 # ULTRAFAST output topics

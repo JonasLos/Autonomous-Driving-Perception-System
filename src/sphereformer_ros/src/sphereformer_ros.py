@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import struct
+from email import header
 from functools import wraps
 
 import numpy as np
@@ -12,14 +13,23 @@ import torch
 import torch.nn.parallel
 import torch.optim
 import torch.utils.data
+from geometry_msgs.msg import PointStamped
 from semantic_kitti_ros import SemanticKITTI
 from sensor_msgs.msg import PointCloud2, PointField
 from sklearn.cluster import DBSCAN
+from sklearn.linear_model import RANSACRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures
 from SphereFormer.util import config
 from SphereFormer_changes.unet_spherical_transformer import Semantic as Model
+# from std_msgs.msg import Float32MultiArray
 from visualization_msgs.msg import Marker, MarkerArray
 
-from src.configs import LIDAR_BBOX_TOPIC, LIDAR_SEGMENTATION_TOPIC, LIDAR_TOPIC
+from src.configs import (LIDAR_BBOX_TOPIC, LIDAR_TOPIC,
+                         SPHEREFORMER_CENTER_LINE_POINTS,
+                         SPHEREFORMER_LEFT_BOUNDARY,
+                         SPHEREFORMER_RIGHT_BOUNDARY,
+                         SPHEREFORMER_SEGMENTATION_TOPIC)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(
@@ -28,7 +38,9 @@ CONFIG_PATH = os.path.join(
 )
 CHECKPOINT_PATH = os.path.join(SCRIPT_DIR, "SphereFormer/model_semantic_kitti.pth")
 
-lim_x, lim_y, lim_z = [3, 80], [-20, 20], [-5, 10]
+lim_x, lim_y, lim_z = [-25, 50], [-20, 20], [-5, 10]
+# lim_x, lim_y, lim_z = [-2, 50], [-20, 20], [-5, 10]
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.cuda.set_per_process_memory_fraction(0.3, device=torch.device("cuda:0"))
 
@@ -58,18 +70,42 @@ class PointCloudInference:
         self.model = self._load_model()
         self.semkitti_dataset = SemanticKITTI(split="val")
         self.current_marker_ids = set()
+        self.previous_centerline = None  # Store previous centerline points
 
         # ROS publishers and subscribers
-        self.pub = rospy.Publisher(LIDAR_SEGMENTATION_TOPIC, PointCloud2, queue_size=1)
+        self.pub = rospy.Publisher(
+            SPHEREFORMER_SEGMENTATION_TOPIC, PointCloud2, queue_size=1
+        )
+        # Publishers
+        self.left_boundary_pub = rospy.Publisher(
+            SPHEREFORMER_LEFT_BOUNDARY, PointCloud2, queue_size=1
+        )
+        self.right_boundary_pub = rospy.Publisher(
+            SPHEREFORMER_RIGHT_BOUNDARY, PointCloud2, queue_size=1
+        )
         self.bounding_box_pub = rospy.Publisher(
             LIDAR_BBOX_TOPIC, MarkerArray, queue_size=1
         )
+        self.centerline_pub = rospy.Publisher(
+            SPHEREFORMER_CENTER_LINE_POINTS, PointCloud2, queue_size=10
+        )
+
         rospy.Subscriber(
             LIDAR_TOPIC,
             PointCloud2,
             self.ros_callback,
             queue_size=1,
+            buff_size=2**24,
         )
+        self.fields = [
+            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+            PointField(
+                name="intensity", offset=12, datatype=PointField.FLOAT32, count=1
+            ),
+            # PointField(name="rgb", offset=16, datatype=PointField.FLOAT32, count=1),
+        ]
 
     @timer
     def _load_model(self):
@@ -130,22 +166,163 @@ class PointCloudInference:
             )
             return
 
-        # Detect and cluster car points
-        # car_indices = np.where(output_labels.cpu().numpy() == 0)
-        # car_points = seg_points[car_indices]
-        # car_points_2d = self._prepare_car_points(car_points)
+        # Ensure seg_points is on CPU and converted to NumPy
+        seg_points = (
+            seg_points.cpu().numpy()
+            if hasattr(seg_points, "cpu")
+            else np.array(seg_points)
+        )
+        output_labels = (
+            output_labels.cpu().numpy()
+            if hasattr(output_labels, "cpu")
+            else np.array(output_labels)
+        )
 
-        # Cluster and create bounding boxes if car points exist
-        # bounding_boxes = self._cluster_points(car_points_2d)
-        # self.publish_bounding_boxes(bounding_boxes, msg.header)
+        # Get points where label is 8
+        mask = output_labels == 8
+        road_points = seg_points[mask]
+        road_points = road_points.view(np.float32).reshape(-1, 4)
+
+        # if road_points.size > 0:
+        #     clustering = DBSCAN(eps=0.5, min_samples=10).fit(road_points[:, :3])
+        #     labels = clustering.labels_
+        #     road_points = road_points[labels != -1]  # Remove outliers
+
+        left_points = []
+        right_points = []
+
+        if road_points.size > 0:
+            min_x = np.min(road_points[:, 0])
+            max_x = np.max(road_points[:, 0])
+            bins = np.linspace(min_x, max_x, num=30)
+
+            widths = []
+            for i in range(len(bins) - 1):
+                bin_mask = (road_points[:, 0] >= bins[i]) & (
+                    road_points[:, 0] < bins[i + 1]
+                )
+                bin_points = road_points[bin_mask]
+                if bin_points.size == 0:
+                    continue
+
+                leftmost_idx = np.argmax(bin_points[:, 1])  # Index of max y
+                rightmost_idx = np.argmin(bin_points[:, 1])  # Index of min y
+
+                left_points.append(bin_points[leftmost_idx])  # Full row
+                right_points.append(bin_points[rightmost_idx])  # Full row
+
+                width = bin_points[rightmost_idx, 1] - bin_points[leftmost_idx, 1]
+                widths.append(width)
+
+        left_points, right_points = np.array(left_points), np.array(right_points)
+
+        # Compute evenly spaced centerline points
+        if left_points.shape[0] > 0 and right_points.shape[0] > 0:
+            left_points_front = left_points[left_points[:, 0] > 0]
+            right_points_front = right_points[right_points[:, 0] > 0]
+            num_points = min(len(left_points_front), len(right_points_front))
+            centerline_points = (
+                left_points_front[: num_points - 1, :]
+                + right_points_front[: num_points - 1, :]
+            ) / 2  # Compute center points
+
+            # Apply smoothing
+            centerline_points = self.smooth_centerline(centerline_points)
+
+            # Select three evenly spaced points
+            num_points = centerline_points.shape[0]
+            if num_points >= 3:
+                indices = np.linspace(0, num_points - 1, num=3, dtype=int)
+                selected_center_points = centerline_points[indices, :3]  # Only X, Y, Z
+            else:
+                selected_center_points = centerline_points[
+                    :, :3
+                ]  # Use all if less than 3
+
+            print("Selected Center Points:", selected_center_points)
+
+            # Publish centerline points as PointCloud2
+            self.publish_centerline_points(msg, selected_center_points)
 
         # Convert labels to colors and create a colored point cloud
-        colors = self.label_to_color(output_labels.cpu().numpy())
-        colored_cloud = self.create_colored_pointcloud2(
-            ros_numpy.msgify(PointCloud2, seg_points), colors, msg.header
-        )
-        self.pub.publish(colored_cloud)
+        # colors = self.label_to_color(output_labels.cpu().numpy())
+        # colored_cloud = self.create_colored_pointcloud2(
+        #     ros_numpy.msgify(PointCloud2, seg_points),colors, msg.header
+        # )
+        # self.pub.publish(colored_cloud)
+
+        self.create_cloud(road_points, self.pub, msg)
+        if left_points.size > 0:
+            self.create_cloud(left_points, self.left_boundary_pub, msg)
+        if right_points.size > 0:
+            self.create_cloud(right_points, self.right_boundary_pub, msg)
         rospy.loginfo("Publishing the processed point cloud and bounding boxes.")
+
+    def smooth_centerline(self, new_centerline, alpha=0.3, num_fixed_points=10):
+        """
+        Apply exponential smoothing to stabilize centerline points.
+        - alpha: Smoothing factor (0.0 - no update, 1.0 - instant update)
+        - num_fixed_points: Ensure a fixed number of centerline points
+        """
+        if new_centerline.shape[0] == 0:
+            return (
+                self.previous_centerline
+                if self.previous_centerline is not None
+                else new_centerline
+            )
+
+        # Interpolate to ensure a fixed number of points
+        num_points = new_centerline.shape[0]
+        if num_points > 1:
+            interp_indices = np.linspace(
+                0, num_points - 1, num=num_fixed_points, dtype=int
+            )
+            new_centerline = new_centerline[interp_indices]
+        elif num_points == 1:
+            new_centerline = np.tile(
+                new_centerline, (num_fixed_points, 1)
+            )  # Duplicate same point
+
+        # Initialize previous centerline if None
+        if (
+            self.previous_centerline is None
+            or self.previous_centerline.shape != new_centerline.shape
+        ):
+            self.previous_centerline = new_centerline
+
+        # Apply exponential smoothing
+        self.previous_centerline = (
+            alpha * new_centerline + (1 - alpha) * self.previous_centerline
+        )
+        return self.previous_centerline
+
+    def publish_centerline_points(self, msg, selected_center_points):
+        """
+        Publish centerline points as a PointCloud2 message.
+        Keeps the header timestamp and allows multiple points to be stored.
+        """
+        header = msg.header  # Preserve timestamp and frame
+
+        # Define the fields: x, y, z as FLOAT32
+        fields = [
+            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+        ]
+
+        # Convert points to a list of tuples
+        point_cloud_data = [tuple(point) for point in selected_center_points]
+
+        # Create and publish PointCloud2 message
+        centerline_msg = pc2.create_cloud(header, fields, point_cloud_data)
+        self.centerline_pub.publish(centerline_msg)
+        rospy.loginfo("Published centerline points as PointCloud2")
+
+    def create_cloud(self, points_3d, publisher, msg):
+        header = msg.header
+        pointcloud = pc2.create_cloud(header, self.fields, points_3d)
+        publisher.publish(pointcloud)
+        rospy.loginfo("Published point cloud with %d points.", len(points_3d))
 
     @timer
     def inference_from_ros_message(self, ros_msg, model):
@@ -204,99 +381,6 @@ class PointCloudInference:
         points["z"] = np_points[:, 2]
         return points, output
 
-    def _prepare_car_points(self, car_points):
-        """Convert structured array to 2D array for clustering."""
-        if car_points.size == 0:
-            return np.empty((0, 3))
-        return np.array([list(point) for point in car_points[["x", "y", "z"]]])
-
-    # def _cluster_points(self, car_points_2d):
-    #     """Run DBSCAN clustering and create bounding boxes."""
-    #     if car_points_2d.shape[0] > 0:
-    #         clustering = DBSCAN(eps=1, min_samples=50).fit(car_points_2d)
-    #         cluster_labels = clustering.labels_
-    #         unique_labels = set(cluster_labels)
-    #         return [
-    #             ((np.min(cluster_points, axis=0)), (np.max(cluster_points, axis=0)))
-    #             for label in unique_labels
-    #             if label != -1
-    #             for cluster_points in [car_points_2d[np.where(cluster_labels == label)]]
-    #         ]
-    #     return []
-
-    def publish_bounding_boxes(self, bounding_boxes, header):
-        """Publish bounding boxes as markers to RViz."""
-        marker_array = MarkerArray()
-        new_marker_ids = set()
-
-        for i, (min_point, max_point) in enumerate(bounding_boxes):
-            marker_id = i
-            new_marker_ids.add(marker_id)
-            marker = self._create_marker(marker_id, header, min_point, max_point)
-            marker_array.markers.append(marker)
-
-        # Add DELETE action for old markers
-        for marker_id in self.current_marker_ids - new_marker_ids:
-            delete_marker = Marker()
-            delete_marker.header = header
-            delete_marker.ns = "bounding_boxes"
-            delete_marker.id = marker_id
-            delete_marker.action = Marker.DELETE
-            marker_array.markers.append(delete_marker)
-
-        self.bounding_box_pub.publish(marker_array)
-        self.current_marker_ids = new_marker_ids
-
-    @timer
-    def _create_marker(self, marker_id, header, min_point, max_point):
-        """Create a single bounding box marker."""
-        marker = Marker()
-        marker.header = header
-        marker.ns = "bounding_boxes"
-        marker.id = marker_id
-        marker.type = Marker.CUBE
-        marker.action = Marker.ADD
-        marker.pose.position.x = (min_point[0] + max_point[0]) / 2
-        marker.pose.position.y = (min_point[1] + max_point[1]) / 2
-        marker.pose.position.z = (min_point[2] + max_point[2]) / 2
-        marker.scale.x = max_point[0] - min_point[0]
-        marker.scale.y = max_point[1] - min_point[1]
-        marker.scale.z = max_point[2] - min_point[2]
-        marker.color.a = 0.5
-        marker.color.r = 0.0
-        marker.color.g = 1.0
-        marker.color.b = 0.0
-        return marker
-
-    def _run_model_inference(self, coord, xyz, feat, offset, inds_reverse, np_points):
-        """Run the model inference."""
-        inds_reverse = inds_reverse.to(device, non_blocking=True)
-        offset_ = offset.clone().to(device, non_blocking=True)
-        offset_[1:] = offset_[1:] - offset_[:-1]
-        batch = torch.cat(
-            [torch.tensor([ii] * o, device=device) for ii, o in enumerate(offset_)], 0
-        ).long()
-        coord = torch.cat([batch.unsqueeze(-1), coord.to(device)], -1)
-        spatial_shape = np.clip((coord.max(0)[0][1:] + 1).cpu().numpy(), 128, None)
-
-        inputs = (
-            coord.to(device, non_blocking=True),
-            xyz.to(device, non_blocking=True),
-            feat.to(device, non_blocking=True),
-            offset.to(device, non_blocking=True),
-            batch.to(device, non_blocking=True),
-        )
-        sinput = spconv.SparseConvTensor(inputs[2], inputs[0].int(), spatial_shape, 1)
-
-        # Ensure model is on the correct device
-        self.model = self.model.to(device)
-
-        with torch.cuda.amp.autocast, torch.no_grad():
-            output = self.model(sinput, xyz.to(device), batch)
-        output_pred = output.argmax(1).view(-1)[inds_reverse]
-
-        return np_points, output_pred
-
     def collation_fn_voxelmean(self, batch):
         coords, xyz, feats, labels, inds_recons = list(zip(*batch))
         inds_recons = list(inds_recons)
@@ -333,7 +417,7 @@ class PointCloudInference:
         labels = np.zeros(np_points_with_intensity.shape[0], dtype=np.uint32)
         return np.asarray(binary_points), labels.tobytes()
 
-    def create_colored_pointcloud2(self, original_cloud, colors, header):
+    def create_colored_pointcloud2(self, segmented_cloud, colors, header):
         fields = [
             PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
             PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
@@ -346,7 +430,9 @@ class PointCloudInference:
         new_points = []
         for point, color in zip(
             pc2.read_points(
-                original_cloud, field_names=("x", "y", "z", "intensity"), skip_nans=True
+                segmented_cloud,
+                field_names=("x", "y", "z", "intensity"),
+                skip_nans=True,
             ),
             colors,
         ):
@@ -395,12 +481,12 @@ class PointCloudInference:
             259: [0, 0, 0],
         }
         default_color = color_map[8]
+
         colors = np.array([color_map.get(label, default_color) for label in labels])
         return colors
 
 
 if __name__ == "__main__":
     rospy.init_node("pointcloud_inference", anonymous=True)
-    # checkpoint_path = "src/sphereformer_ros/src/SphereFormer/model_semantic_kitti.pth"
     inference_node = PointCloudInference(CONFIG_PATH, CHECKPOINT_PATH)
     rospy.spin()

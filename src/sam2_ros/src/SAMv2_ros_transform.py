@@ -14,8 +14,9 @@ from scipy.spatial import KDTree
 from sensor_msgs.msg import PointCloud2
 
 from sam2_ros.msg import DetectedRoadArea
-from src.configs import (LEFT_BOUNDARY, LEFT_CONTOUR_TOPIC, LIDAR_TOPIC, PROJ,
-                         RIGHT_BOUNDARY, RIGHT_CONTOUR_TOPIC, T1)
+from src.configs import (LIDAR_TOPIC, PROJ, SAM_LEFT_BOUNDARY,
+                         SAM_LEFT_CONTOUR_TOPIC, SAM_RIGHT_BOUNDARY,
+                         SAM_RIGHT_CONTOUR_TOPIC, T1)
 
 # Define limits
 lim_x, lim_y, lim_z, pixel_lim = [20, 50], [-10, 10], [-3.5, 1], 5
@@ -48,10 +49,10 @@ class RoadSegmentation3D:
 
         # Publishers
         self.left_boundary_pub = rospy.Publisher(
-            LEFT_BOUNDARY, PointCloud2, queue_size=1
+            SAM_LEFT_BOUNDARY, PointCloud2, queue_size=1
         )
         self.right_boundary_pub = rospy.Publisher(
-            RIGHT_BOUNDARY, PointCloud2, queue_size=1
+            SAM_RIGHT_BOUNDARY, PointCloud2, queue_size=1
         )
 
         # Define the point fields
@@ -73,10 +74,10 @@ class RoadSegmentation3D:
         # Subscribers
         self.sub_lidar = message_filters.Subscriber(LIDAR_TOPIC, PointCloud2)
         self.left_boundary_sub = message_filters.Subscriber(
-            LEFT_CONTOUR_TOPIC, DetectedRoadArea
+            SAM_LEFT_CONTOUR_TOPIC, DetectedRoadArea
         )
         self.right_boundary_sub = message_filters.Subscriber(
-            RIGHT_CONTOUR_TOPIC, DetectedRoadArea
+            SAM_RIGHT_CONTOUR_TOPIC, DetectedRoadArea
         )
 
         # Synchronize topics
