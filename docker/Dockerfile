@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y \
     gnupg2 \
     python3-pip \
     git \
+    nano \
+    vim \
+    gedit \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up locale
@@ -56,7 +59,10 @@ RUN sudo apt-get clean && \
 RUN sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/cache/apt/archives/*
 
 # Clone the GitHub Repository inside the container
-RUN git clone https://github.com/ParimiHarsha/Autonomous-Driving-Perception-System.git
+# RUN git clone https://github.com/ParimiHarsha/Autonomous-Driving-Perception-System.git
+
+# Copy the entire repo contents (excluding what's in .dockerignore)
+COPY . /home/ubuntuuser/Autonomous-Driving-Perception-System
 
 # Clone AVA_Planner repo and checkout the local-frame-planner branch
 # RUN git clone https://github.com/ava-share/AVA_Planner.git && \
@@ -66,11 +72,8 @@ RUN git clone https://github.com/ParimiHarsha/Autonomous-Driving-Perception-Syst
 # Set working directory inside the cloned repo
 WORKDIR /home/ubuntuuser/Autonomous-Driving-Perception-System
 
-# Copy the ROS installation script into the container
-COPY install_ros.sh /home/ubuntuuser/install_ros.sh
-
 # Make sure the script is executable
-RUN sudo chmod +x /home/ubuntuuser/install_ros.sh
+RUN sudo chmod +x docker/install_ros.sh
 
 # Set the default command to run the ROS installation script and start bash
 CMD ["/bin/bash", "-c", "/home/ubuntuuser/install_ros.sh && exec bash"]
