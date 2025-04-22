@@ -63,7 +63,7 @@ dependencies:
       - pyyaml==6.0.2
       - rosnumpy==0.0.6.2
       - rospkg==1.6.0
-      - sam-2==1.0
+#      - sam-2==1.0
       - scipy==1.15.2
       - six==1.17.0
       - sympy==1.13.1

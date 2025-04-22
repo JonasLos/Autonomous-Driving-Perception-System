@@ -17,12 +17,12 @@ RUN apt-get update && apt-get install -y \
     git \
     nano \
     vim \
-    gedit \
-    && rm -rf /var/lib/apt/lists/*
+    gedit 
+
 
 # Set up locale
 RUN locale-gen en_US.UTF-8
-ENV LANG en_US.UTF-8
+ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
 # Set up a non-root user with sudo access
@@ -50,19 +50,11 @@ RUN sudo ln -fs /usr/share/zoneinfo/UTC /etc/localtime && \
     sudo apt-get update && \
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
 
-# Free up space before installing ROS dependencies
-RUN sudo apt-get clean && \
-    sudo rm -rf /var/lib/apt/lists/* && \
-    sudo apt-get update
-
-# Remove unnecessary files after package installation
-RUN sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/cache/apt/archives/*
-
 # Clone the GitHub Repository inside the container
-# RUN git clone https://github.com/ParimiHarsha/Autonomous-Driving-Perception-System.git
+RUN git clone https://github.com/ParimiHarsha/Autonomous-Driving-Perception-System.git
 
 # Copy the entire repo contents (excluding what's in .dockerignore)
-COPY . /home/ubuntuuser/Autonomous-Driving-Perception-System
+# COPY . /home/ubuntuuser/Autonomous-Driving-Perception-System
 
 # Clone AVA_Planner repo and checkout the local-frame-planner branch
 # RUN git clone https://github.com/ava-share/AVA_Planner.git && \
@@ -73,7 +65,7 @@ COPY . /home/ubuntuuser/Autonomous-Driving-Perception-System
 WORKDIR /home/ubuntuuser/Autonomous-Driving-Perception-System
 
 # Make sure the script is executable
-RUN sudo chmod +x docker/install_ros.sh
+RUN sudo chmod +x /home/ubuntuuser/Autonomous-Driving-Perception-System/docker/install_ros.sh
 
 # Set the default command to run the ROS installation script and start bash
-CMD ["/bin/bash", "-c", "/home/ubuntuuser/install_ros.sh && exec bash"]
+CMD ["/bin/bash"]
