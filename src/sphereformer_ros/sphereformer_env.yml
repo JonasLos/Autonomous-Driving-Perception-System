@@ -1,4 +1,4 @@
-name: spherefomer
+name: sphereformer
 channels:
   - nvidia/label/cuda-11.7.0
   - nvidia/label/cuda-11.8.0
@@ -68,7 +68,7 @@ dependencies:
   - nsight-compute=2022.3.0.22
   - openssl=1.1.1l
   - pip=22.3.1
-  - python=3.7.9
+  - python=3.8
   - readline=8.2
   - setuptools=65.6.3
   - sqlite=3.41.2
@@ -128,18 +128,18 @@ dependencies:
       - scipy==1.7.3
       - six==1.16.0
       - spconv-cu113==2.1.25
-      - sptr==0.0.0
+      # - sptr==0.0.0
       - termcolor==2.3.0
       - threadpoolctl==3.1.0
       - timm==0.9.12
       - tomli==2.0.1
-      - torch==1.8.0+cu111
-      - torch-cluster==1.5.9
-      - torch-geometric==1.7.2
-      - torch-scatter==2.0.8
-      - torch-sparse==0.6.12
-      - torchaudio==0.8.0
-      - torchvision==0.9.0+cu111
+      # - torch==1.8.0+cu111
+      # - torch-cluster==1.5.9
+      # - torch-geometric==1.7.2
+      # - torch-scatter==2.0.8
+      # - torch-sparse==0.6.12   
+      # - torchaudio==0.8.0
+      # - torchvision==0.9.0+cu111
       - tqdm==4.67.0
       - typed-ast==1.5.5
       - typing-extensions==4.7.1
