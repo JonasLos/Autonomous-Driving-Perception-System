@@ -1,0 +1,23 @@
+version: '3.3'
+
+services:
+  perception:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: perception_dev
+    image: perception_image
+    hostname: perception
+    user: "1000:1000"  # Optional: match host user to avoid permission issues
+    working_dir: /home/ubuntuuser/Autonomous-Driving-Perception-System
+    stdin_open: true
+    tty: true
+    network_mode: "host"
+    ipc: "host"
+    volumes:
+      - /home/dev/anaconda3/envs:/opt/conda/envs  # Mount all conda environments
+      - /home/dev/Autonomous-Driving-Perception-System:/home/ubuntuuser/Autonomous-Driving-Perception-System
+    environment:
+      - CONDA_ENVS_PATH=/opt/conda/envs  # Point to the mounted environment path
+      - PATH=/opt/conda/envs/yolov9/bin:$PATH  # Example: Adjust for whichever env is active
+    command: /bin/bash
