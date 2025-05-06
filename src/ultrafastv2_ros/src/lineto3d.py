@@ -8,9 +8,15 @@ import sensor_msgs.point_cloud2 as pc2
 import std_msgs.msg
 from sensor_msgs.msg import PointCloud2
 
-from src.configs import (LEFT_LANE_BOUNDARY_TOPIC, LEFT_LANE_TOPIC,
-                         LIDAR_TOPIC, PROJ, RIGHT_LANE_BOUNDARY_TOPIC,
-                         RIGHT_LANE_TOPIC, T1)
+from src.configs import (
+    LEFT_LANE_BOUNDARY_TOPIC,
+    LEFT_LANE_TOPIC,
+    LIDAR_TOPIC,
+    PROJ,
+    RIGHT_LANE_BOUNDARY_TOPIC,
+    RIGHT_LANE_TOPIC,
+    T1,
+)
 from ultrafastv2_ros.msg import LanePoints
 
 
@@ -67,12 +73,8 @@ class realCoor:
         self.header.frame_id = "lidar_tc"
         pointcloud = []
 
-        self.left_pointSub = message_filters.Subscriber(
-            LEFT_LANE_TOPIC, LanePoints
-        )
-        self.right_pointSub = message_filters.Subscriber(
-            RIGHT_LANE_TOPIC, LanePoints
-        )
+        self.left_pointSub = message_filters.Subscriber(LEFT_LANE_TOPIC, LanePoints)
+        self.right_pointSub = message_filters.Subscriber(RIGHT_LANE_TOPIC, LanePoints)
 
         ts = message_filters.ApproximateTimeSynchronizer(
             [self.pcdSub, self.left_pointSub, self.right_pointSub],

@@ -22,14 +22,18 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import PolynomialFeatures
 from SphereFormer.util import config
 from SphereFormer_changes.unet_spherical_transformer import Semantic as Model
+
 # from std_msgs.msg import Float32MultiArray
 from visualization_msgs.msg import Marker, MarkerArray
 
-from src.configs import (LIDAR_BBOX_TOPIC, LIDAR_TOPIC,
-                         SPHEREFORMER_CENTER_LINE_POINTS,
-                         SPHEREFORMER_LEFT_BOUNDARY,
-                         SPHEREFORMER_RIGHT_BOUNDARY,
-                         SPHEREFORMER_SEGMENTATION_TOPIC)
+from src.configs import (
+    LIDAR_BBOX_TOPIC,
+    LIDAR_TOPIC,
+    SPHEREFORMER_CENTER_LINE_POINTS,
+    SPHEREFORMER_LEFT_BOUNDARY,
+    SPHEREFORMER_RIGHT_BOUNDARY,
+    SPHEREFORMER_SEGMENTATION_TOPIC,
+)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(
@@ -38,7 +42,7 @@ CONFIG_PATH = os.path.join(
 )
 CHECKPOINT_PATH = os.path.join(SCRIPT_DIR, "SphereFormer/model_semantic_kitti.pth")
 
-lim_x, lim_y, lim_z = [-25, 50], [-20, 20], [-5, 10]
+lim_x, lim_y, lim_z = [-25, 100], [-20, 20], [-5, 10]
 # lim_x, lim_y, lim_z = [-2, 50], [-20, 20], [-5, 10]
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

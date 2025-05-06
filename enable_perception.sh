@@ -3,6 +3,7 @@
 # Export PYTHONPATH for custom directories
 echo "Setting PYTHONPATH..."
 export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH
+# export PYTHONPATH=$PWD/src/clrernet_ros/src:$PWD/src/clrernet_ros/src/clrernet:$PYTHONPATH
 
 # Source the ROS workspace
 echo "Sourcing the ROS workspace"

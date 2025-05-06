@@ -20,8 +20,8 @@ A ready-to-use system for autonomous driving, featuring YOLOv9 for object detect
 ### Prerequisites
 
 Before installing the Autonomous Driving Perception System, ensure the following prerequisites are met:
-- **ROS**: Make sure ROS-Noetic is installed on your system. For installation instructions, visit the [ROS Wiki](http://wiki.ros.org/ROS/Installation).
-- **Python**: Python 3.10 or later is required.
+- **ROS**: Make sure ROS-Melodic is installed on your system. For installation instructions, visit the [ROS Wiki](http://wiki.ros.org/ROS/Installation).
+- **Python**: Python versions are algorithm dependent. Please use the `environment.yml` files for the correct versions.
 - **Dependencies**: All necessary Python libraries and dependencies are listed in the corresponding `environment.yaml` files.
 
 ### Clone the Repository with Submodules
@@ -41,7 +41,7 @@ Each perception module requires its own environment:
 
 #### SAMv2 Installation
 ```bash
-conda create -n sam python=3.10
+conda create -n sam2 python=3.10
 conda activate sam
 cd src/road_segmentation/src/segment-anything-2
 pip install -e .

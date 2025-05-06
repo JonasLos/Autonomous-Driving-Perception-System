@@ -34,8 +34,14 @@ from radar_msgs.msg import RadarTrackArray
 from sensor_msgs.msg import PointCloud2
 from sklearn.cluster import DBSCAN
 
-from src.configs import (FUSED_BBOX_TOPIC, LIDAR_TOPIC, PROJ,
-                         RADAR_TRACKS_TOPIC, T1, YOLO_BBOX_TOPIC)
+from src.configs import (
+    FUSED_BBOX_TOPIC,
+    LIDAR_TOPIC,
+    PROJ,
+    RADAR_TRACKS_TOPIC,
+    T1,
+    YOLO_BBOX_TOPIC,
+)
 from yolov9_ros.msg import BboxList
 
 # Point cloud limits

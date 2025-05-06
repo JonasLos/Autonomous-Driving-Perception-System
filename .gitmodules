@@ -5,3 +5,6 @@
 [submodule "src/sphereformer_ros/src/SphereFormer"]
 	path = src/sphereformer_ros/src/SphereFormer
 	url = https://github.com/dvlab-research/SphereFormer
+[submodule "src/clrernet_ros/src/clrernet"]
+	path = src/clrernet_ros/src/clrernet
+	url = https://github.com/hirotomusiker/CLRerNet.git

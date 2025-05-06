@@ -11,8 +11,12 @@ import torch
 from sensor_msgs.msg import Image
 from UltraFast import ModelType, UltrafastLaneDetector
 
-from src.configs import (CAMERA_TOPIC, LANE_DETECTION_MASK_TOPIC,
-                         LEFT_LANE_TOPIC, RIGHT_LANE_TOPIC)
+from src.configs import (
+    CAMERA_TOPIC,
+    LANE_DETECTION_MASK_TOPIC,
+    LEFT_LANE_TOPIC,
+    RIGHT_LANE_TOPIC,
+)
 from ultrafastv2_ros.msg import LanePoint, LanePoints
 
 
@@ -30,9 +34,7 @@ class LaneDetectionNode:
         )
 
         # ROS setup
-        self.image_sub = rospy.Subscriber(
-            CAMERA_TOPIC, Image, self.image_callback
-        )
+        self.image_sub = rospy.Subscriber(CAMERA_TOPIC, Image, self.image_callback)
         self.image_pub = rospy.Publisher(LANE_DETECTION_MASK_TOPIC, Image, queue_size=1)
         self.left_lane_boundary_pub = rospy.Publisher(
             LEFT_LANE_TOPIC, LanePoints, queue_size=1
@@ -95,9 +97,11 @@ class LaneDetectionNode:
                         right_counts[i] += 1
 
             avg_left_dist = sum(
-                left_distances[i] / left_counts[i]
-                if left_counts[i] > 0
-                else float("inf")
+                (
+                    left_distances[i] / left_counts[i]
+                    if left_counts[i] > 0
+                    else float("inf")
+                )
                 for i in range(len(reference_points))
             ) / len(reference_points)
             if avg_left_dist < min_left_avg_dist:
@@ -105,9 +109,11 @@ class LaneDetectionNode:
                 closest_left_lane_id = lane_id
 
             avg_right_dist = sum(
-                right_distances[i] / right_counts[i]
-                if right_counts[i] > 0
-                else float("inf")
+                (
+                    right_distances[i] / right_counts[i]
+                    if right_counts[i] > 0
+                    else float("inf")
+                )
                 for i in range(len(reference_points))
             ) / len(reference_points)
             if avg_right_dist < min_right_avg_dist:

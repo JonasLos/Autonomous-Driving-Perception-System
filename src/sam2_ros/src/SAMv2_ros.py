@@ -20,9 +20,15 @@ from sam2.sam2_image_predictor import SAM2ImagePredictor
 from sensor_msgs.msg import Image, PointCloud2, PointField
 
 from sam2_ros.msg import DetectedRoadArea
-from src.configs import (CAMERA_TOPIC, PROJ, SAM_LEFT_CONTOUR_TOPIC,
-                         SAM_RIGHT_CONTOUR_TOPIC, SAM_SEGMENTATION_MASK_TOPIC,
-                         SPHEREFORMER_CENTER_LINE_POINTS, YOLO_BBOX_TOPIC)
+from src.configs import (
+    CAMERA_TOPIC,
+    PROJ,
+    SAM_LEFT_CONTOUR_TOPIC,
+    SAM_RIGHT_CONTOUR_TOPIC,
+    SAM_SEGMENTATION_MASK_TOPIC,
+    SPHEREFORMER_CENTER_LINE_POINTS,
+    YOLO_BBOX_TOPIC,
+)
 from yolov9_ros.msg import BboxList
 
 
@@ -53,7 +59,7 @@ predictor = SAM2ImagePredictor(sam2_model)
 
 # Define points for initial segmentation prompt
 point_coords = np.array([[400, 700], [550, 700], [650, 700]])
-input_labels = [1,1,1]
+input_labels = [1, 1, 1]
 MIN_CONTOUR_AREA = 30000.0
 
 
@@ -64,6 +70,7 @@ def inverse_rigid_transformation(arr: np.ndarray) -> np.ndarray:
 
 
 T_vel_cam = inverse_rigid_transformation(T1)
+
 
 @timer
 def process_image(image, detected_objects, publish_image=False):
@@ -160,15 +167,26 @@ def process_image(image, detected_objects, publish_image=False):
             if point[0] < horizon_point[0]
             else right_boundary_points
         ).append(point)
-    left_boundary_points, right_boundary_points = np.array(left_boundary_points), np.array(right_boundary_points)
+    left_boundary_points, right_boundary_points = np.array(
+        left_boundary_points
+    ), np.array(right_boundary_points)
     if is_straight_line(left_boundary_points):
-        rospy.logwarn("Boundary is nearly a straight horizontal line, skipping publication.")
-        return  None, None, None # Do not publish straight-line boundaries
+        rospy.logwarn(
+            "Boundary is nearly a straight horizontal line, skipping publication."
+        )
+        return None, None, None  # Do not publish straight-line boundaries
     if is_straight_line(right_boundary_points):
-        rospy.logwarn("Boundary is nearly a straight horizontal line, skipping publication.")
-        return  None, None, None # Do not publish straight-line boundaries
+        rospy.logwarn(
+            "Boundary is nearly a straight horizontal line, skipping publication."
+        )
+        return None, None, None  # Do not publish straight-line boundaries
     overlay = create_overlay(
-        image, road_mask, left_boundary_points, right_boundary_points, publish_image, point_coords
+        image,
+        road_mask,
+        left_boundary_points,
+        right_boundary_points,
+        publish_image,
+        point_coords,
     )
 
     return overlay, left_boundary_points, right_boundary_points
@@ -202,6 +220,7 @@ def classify_boundaries_using_horizontal_bins(
 
     return left_boundary_points, right_boundary_points
 
+
 def is_straight_line(boundary, fraction=0.8):
     """
     Check if the boundary points form a nearly straight vertical or horizontal line.
@@ -234,8 +253,14 @@ def is_straight_line(boundary, fraction=0.8):
 
     return False
 
+
 def create_overlay(
-    image, binary_mask_np, left_boundary_points, right_boundary_points, publish_image, point_coords
+    image,
+    binary_mask_np,
+    left_boundary_points,
+    right_boundary_points,
+    publish_image,
+    point_coords,
 ):
     if not publish_image:
         return None
@@ -251,7 +276,7 @@ def create_overlay(
     )
 
     for point in point_coords:
-    # for point in p:
+        # for point in p:
         # print(point)
         #     cv2.circle(overlay, tuple(point), radius=10, color=(255, 0, 0), thickness=-1)
         cv2.circle(
@@ -274,10 +299,7 @@ class RoadSegmentation:
         )
 
         self.image_sub = message_filters.Subscriber(
-            CAMERA_TOPIC,
-            Image,
-            queue_size=1,
-            buff_size = 2**24
+            CAMERA_TOPIC, Image, queue_size=1, buff_size=2**24
         )
         self.yolo_sub = message_filters.Subscriber(
             YOLO_BBOX_TOPIC, BboxList, queue_size=1

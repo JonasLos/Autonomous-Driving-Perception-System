@@ -85,9 +85,7 @@ class Detect:
             queue_size=1,
         )
         self.image_pub = rospy.Publisher(YOLO_IMAGE_TOPIC, Image, queue_size=1)
-        self.bboxInfo_pub = rospy.Publisher(
-            YOLO_BBOX_TOPIC, BboxList, queue_size=1
-        )
+        self.bboxInfo_pub = rospy.Publisher(YOLO_BBOX_TOPIC, BboxList, queue_size=1)
 
         # Initialize VideoWriter if write_file is True
         if write_file:

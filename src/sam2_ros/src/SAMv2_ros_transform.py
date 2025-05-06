@@ -14,9 +14,15 @@ from scipy.spatial import KDTree
 from sensor_msgs.msg import PointCloud2
 
 from sam2_ros.msg import DetectedRoadArea
-from src.configs import (LIDAR_TOPIC, PROJ, SAM_LEFT_BOUNDARY,
-                         SAM_LEFT_CONTOUR_TOPIC, SAM_RIGHT_BOUNDARY,
-                         SAM_RIGHT_CONTOUR_TOPIC, T1)
+from src.configs import (
+    LIDAR_TOPIC,
+    PROJ,
+    SAM_LEFT_BOUNDARY,
+    SAM_LEFT_CONTOUR_TOPIC,
+    SAM_RIGHT_BOUNDARY,
+    SAM_RIGHT_CONTOUR_TOPIC,
+    T1,
+)
 
 # Define limits
 lim_x, lim_y, lim_z, pixel_lim = [20, 50], [-10, 10], [-3.5, 1], 5

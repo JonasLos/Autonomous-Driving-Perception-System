@@ -19,9 +19,9 @@ SAM_RIGHT_BOUNDARY = "/sam_right_boundary"
 
 # SPHEREFORMER output topics
 SPHEREFORMER_SEGMENTATION_TOPIC = "/sphereformer_road_segmentation"
-SPHEREFORMER_LEFT_BOUNDARY = '/sphereformer_left_boundary'
-SPHEREFORMER_RIGHT_BOUNDARY = '/sphereformer_right_boundary'
-SPHEREFORMER_CENTER_LINE_POINTS = '/sphereformer_centerline_points'
+SPHEREFORMER_LEFT_BOUNDARY = "/sphereformer_left_boundary"
+SPHEREFORMER_RIGHT_BOUNDARY = "/sphereformer_right_boundary"
+SPHEREFORMER_CENTER_LINE_POINTS = "/sphereformer_centerline_points"
 LIDAR_BBOX_TOPIC = "/bounding_boxes"
 
 # ULTRAFAST output topics
@@ -32,7 +32,7 @@ LEFT_LANE_BOUNDARY_TOPIC = "/Left_Line3dPoints"
 RIGHT_LANE_BOUNDARY_TOPIC = "/Right_Line3dPoints"
 
 # 2D-3D Transformation
-LIDAR_2D_PROJ_TOPIC = '/lidar_2d_projection'
+LIDAR_2D_PROJ_TOPIC = "/lidar_2d_projection"
 
 # Calibration Parameters
 # Camera intrinsic parameters
