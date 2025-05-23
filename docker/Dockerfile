@@ -19,7 +19,6 @@ RUN apt-get update && apt-get install -y \
     vim \
     gedit 
 
-
 # Set up locale
 RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
@@ -50,22 +49,8 @@ RUN sudo ln -fs /usr/share/zoneinfo/UTC /etc/localtime && \
     sudo apt-get update && \
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
 
-# Clone the GitHub Repository inside the container
-RUN git clone https://github.com/ParimiHarsha/Autonomous-Driving-Perception-System.git
-
-# Copy the entire repo contents (excluding what's in .dockerignore)
-# COPY . /home/ubuntuuser/Autonomous-Driving-Perception-System
-
-# Clone AVA_Planner repo and checkout the local-frame-planner branch
-# RUN git clone https://github.com/ava-share/AVA_Planner.git && \
-#     cd AVA_Planner && \
-#     git checkout local-frame-planner
-
 # Set working directory inside the cloned repo
 WORKDIR /home/ubuntuuser/Autonomous-Driving-Perception-System
-
-# Make sure the script is executable
-RUN sudo chmod +x /home/ubuntuuser/Autonomous-Driving-Perception-System/docker/install_ros.sh
 
 # Set the default command to run the ROS installation script and start bash
 CMD ["/bin/bash"]

@@ -14,10 +14,12 @@ services:
     tty: true
     network_mode: "host"
     ipc: "host"
-    volumes:
-      - /home/dev/anaconda3/envs:/opt/conda/envs  # Mount all conda environments
-      - /home/dev/Autonomous-Driving-Perception-System:/home/ubuntuuser/Autonomous-Driving-Perception-System
+    runtime: nvidia 
     environment:
+      - NVIDIA_VISIBLE_DEVICES=all  # allow all GPUs
       - CONDA_ENVS_PATH=/opt/conda/envs  # Point to the mounted environment path
       - PATH=/opt/conda/envs/yolov9/bin:$PATH  # Example: Adjust for whichever env is active
+    volumes:
+      - /home/dev/anaconda3/envs:/opt/conda/envs  # Mount all conda environments
+      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/ubuntuuser/Autonomous-Driving-Perception-System
     command: /bin/bash
