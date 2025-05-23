@@ -2,7 +2,7 @@
 
 # List of ROS topics to check
 TOPICS=(
-  "resized/camera_fl/image_color"
+  "/camera_fl/image_color"
   "/lidar_tc/velodyne_points"
   "/radar_fc/as_tx/radar_tracks"
   "yolo_published_image"

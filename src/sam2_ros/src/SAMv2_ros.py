@@ -47,7 +47,7 @@ def timer(func):
 # Set device to GPU if available, otherwise use CPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 rospy.loginfo(f"Using device: {device}")
-torch.cuda.set_per_process_memory_fraction(0.4, device=torch.device("cuda:1"))
+#torch.cuda.set_per_process_memory_fraction(0.4, device=torch.device("cuda:0"))
 
 # Load SAM2 model
 base_path = os.path.dirname(os.path.abspath(__file__))
@@ -74,6 +74,7 @@ T_vel_cam = inverse_rigid_transformation(T1)
 
 @timer
 def process_image(image, detected_objects, publish_image=False):
+    image = cv2.resize(image, (2048//2, 1544//2))
     h_original, w_original = image.shape[:2]
     center_x = int(w_original * 0.75)
     # point_coords = point_coords.append(auto)
@@ -294,33 +295,35 @@ def create_overlay(
 class RoadSegmentation:
     def __init__(self):
         rospy.loginfo("Initializing RoadSegmentation class.")
-        self.image_pub = rospy.Publisher(
-            SAM_SEGMENTATION_MASK_TOPIC, Image, queue_size=1
+        
+        self.image_sub = rospy.Subscriber(
+            CAMERA_TOPIC, Image, self.callback, queue_size=1, buff_size=2**24, 
         )
 
-        self.image_sub = message_filters.Subscriber(
-            CAMERA_TOPIC, Image, queue_size=1, buff_size=2**24
-        )
-        self.yolo_sub = message_filters.Subscriber(
-            YOLO_BBOX_TOPIC, BboxList, queue_size=1
-        )
-        self.center_line_sub = message_filters.Subscriber(
-            SPHEREFORMER_CENTER_LINE_POINTS,
-            PointCloud2,
-            queue_size=1,
-        )
+        # self.yolo_sub = message_filters.Subscriber(
+        #     YOLO_BBOX_TOPIC, BboxList, queue_size=1
+        # )
+        # self.center_line_sub = message_filters.Subscriber(
+        #     SPHEREFORMER_CENTER_LINE_POINTS,
+        #     PointCloud2,
+        #     queue_size=1,
+        # )
         # Time synchronizer
-        ts = message_filters.ApproximateTimeSynchronizer(
-            [self.image_sub, self.yolo_sub],
-            15,
-            0.4,
-        )
+        # ts = message_filters.ApproximateTimeSynchronizer(
+        #     [self.image_sub],
+        #     15,
+        #     0.4,
+        # )
         # ts = message_filters.ApproximateTimeSynchronizer(
         #     [self.image_sub, self.yolo_sub, self.center_line_sub],
         #     queue_size=3,
         #     slop=0.4,
         # )
-        ts.registerCallback(self.callback)
+        # ts.registerCallback(self.callback)
+
+        self.image_pub = rospy.Publisher(
+            SAM_SEGMENTATION_MASK_TOPIC, Image, queue_size=1
+        )
 
         self.left_boundary_pub = rospy.Publisher(
             SAM_LEFT_CONTOUR_TOPIC, DetectedRoadArea, queue_size=1
@@ -336,11 +339,11 @@ class RoadSegmentation:
         rospy.Timer(rospy.Duration(0.1), self.process_loop)
 
     # def callback(self, ros_image, bboxes, centerline_points):
-    def callback(self, ros_image, bboxes):
+    def callback(self, ros_image):
         self.ros_image = ros_image
-        self.detected_objects = [
-            (bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max) for bbox in bboxes.Bboxes
-        ]
+        # self.detected_objects = [
+        #     (bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max) for bbox in bboxes.Bboxes
+        # ]
         # Convert PointCloud2 message to NumPy array
         # points = list(
         #     pc2.read_points(centerline_msg, field_names=("x", "y", "z"), skip_nans=True)
