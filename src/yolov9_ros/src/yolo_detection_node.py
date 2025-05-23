@@ -229,10 +229,10 @@ class Detect:
 
             if conf > conf_thres:  # Filter detections based on confidence
                 # Scale bounding box coordinates back to the original image dimensions
-                x_min = x1 * (1032 / 640)
-                y_min = y1 * (772 / 640)
-                x_max = x2 * (1032 / 640)
-                y_max = y2 * (772 / 640)
+                x_min = x1 * (1032*2 / 640)
+                y_min = y1 * (772*2 / 640)
+                x_max = x2 * (1032*2 / 640)
+                y_max = y2 * (772*2 / 640)
 
                 # Create a BboxCenter message for the bounding box
                 bbox_msg = Bbox()

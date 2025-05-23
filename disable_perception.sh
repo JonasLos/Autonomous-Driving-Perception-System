@@ -9,7 +9,7 @@ kill_processes() {
     if [ -z "$pids" ]; then
         echo "  No processes found for $process_name."
     else
-        kill -9 $pids
+        kill -15 $pids
     fi
 }
 
@@ -23,21 +23,21 @@ kill_processes "transform_and_fuse.py"
 
 # Kill SAM2 related processes
 echo "Terminating SAM2 processes..."
-kill_processes "SAMv2Ros.py"
-kill_processes "road_segmentation_3d.py"
+kill_processes "SAMv2_ros.py"
+kill_processes "SAMv2_ros_transform.py"
 
 # Kill Sphereformer related processes
 echo "Terminating Sphereformer Lidar Segmentation processes..."
-kill_processes "lidar_segmentation.py"
+kill_processes "sphereformer_ros.py"
 
 # Kill UltraFast related processes
 echo "Terminating UltraFast Lane Detection processes..."
 kill_processes "ulfast.py"
 kill_processes "lineto3d.py"
 
-# Kill roslaunch processes if any are left running
-echo "Terminating roslaunch processes..."
-kill_processes "roslaunch"
+# # Kill roslaunch processes if any are left running
+# echo "Terminating roslaunch processes..."
+# kill_processes "roslaunch"
 
 # Print statement for ending the disable process
 echo "Perception system has been successfully disabled."

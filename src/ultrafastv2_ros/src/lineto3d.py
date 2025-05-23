@@ -34,7 +34,7 @@ T_vel_cam = inverse_rigid_transformation(T1)
 lim_x = [2.5, 75]
 lim_y = [-15, 15]
 lim_z = [-3.5, 1]
-height, width = 772, 1024
+#height, width = 772, 1024
 pixel_lim = 5
 
 

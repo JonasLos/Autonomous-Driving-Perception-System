@@ -47,7 +47,7 @@ def timer(func):
 # Set device to GPU if available, otherwise use CPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 rospy.loginfo(f"Using device: {device}")
-torch.cuda.set_per_process_memory_fraction(0.4, device=torch.device("cuda:0"))
+torch.cuda.set_per_process_memory_fraction(0.4, device=torch.device("cuda:1"))
 
 # Load SAM2 model
 base_path = os.path.dirname(os.path.abspath(__file__))
@@ -58,7 +58,7 @@ sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device)
 predictor = SAM2ImagePredictor(sam2_model)
 
 # Define points for initial segmentation prompt
-point_coords = np.array([[400, 700], [550, 700], [650, 700]])
+point_coords = np.array([[400*2, 700*2], [550*2, 700*2], [650*2, 700*2]])
 input_labels = [1, 1, 1]
 MIN_CONTOUR_AREA = 30000.0
 
@@ -415,16 +415,46 @@ class RoadSegmentation:
         if self.publish_image and overlay is not None:
             self.publish_image_topic(self.ros_image, overlay)
 
+
         # Publish boundary points
         if left_boundary is not None:
+
+             # Remove points that are at the image boundary (x == width or y == height or 0)
+            mask = (
+                (left_boundary[:, 0] != 0) &
+                (left_boundary[:, 0] != img.shape[1]) &
+                (left_boundary[:, 1] != 0) &
+                (left_boundary[:, 1] != img.shape[0])
+            )
+            left_boundary = left_boundary[mask]
+
             self.publish_boundary(
                 left_boundary, self.left_boundary_pub, self.ros_image.header.stamp
             )
-
+        else:
+            left_boundary = []
+            # self.publish_boundary(
+            #     left_boundary, self.left_boundary_pub, self.ros_image.header.stamp
+            # )
         if right_boundary is not None:
+
+            # Remove points that are at the image boundary (x == width or y == height or 0)
+            mask = (
+                (right_boundary[:, 0] != 0) &
+                (right_boundary[:, 0] != img.shape[1]) &
+                (right_boundary[:, 1] != 0) &
+                (right_boundary[:, 1] != img.shape[0])
+            )
+            right_boundary = right_boundary[mask]
+
             self.publish_boundary(
                 right_boundary, self.right_boundary_pub, self.ros_image.header.stamp
             )
+        else:
+            right_boundary = []
+            # self.publish_boundary(
+            #     right_boundary, self.right_boundary_pub, self.ros_image.header.stamp
+            # )
 
     def publish_image_topic(self, ros_image, overlay):
         msg = Image()

@@ -25,7 +25,7 @@ from src.configs import (
 )
 
 # Define limits
-lim_x, lim_y, lim_z, pixel_lim = [20, 50], [-10, 10], [-3.5, 1], 5
+lim_x, lim_y, lim_z, pixel_lim = [2, 50], [-10, 10], [-3.5, 1], 5
 
 
 def inverse_rigid_transformation(arr: np.ndarray) -> np.ndarray:
@@ -91,7 +91,7 @@ class RoadSegmentation3D:
             [self.sub_lidar, self.left_boundary_sub, self.right_boundary_sub],
             queue_size=10,
             slop=0.3,
-            allow_headerless=False,
+            allow_headerless=True,
         )
         ts.registerCallback(self.callback)
 

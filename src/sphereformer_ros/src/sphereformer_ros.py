@@ -42,7 +42,7 @@ CONFIG_PATH = os.path.join(
 )
 CHECKPOINT_PATH = os.path.join(SCRIPT_DIR, "SphereFormer/model_semantic_kitti.pth")
 
-lim_x, lim_y, lim_z = [-25, 100], [-20, 20], [-5, 10]
+lim_x, lim_y, lim_z = [-50, 100], [-20, 20], [-5, 10]
 # lim_x, lim_y, lim_z = [-2, 50], [-20, 20], [-5, 10]
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -194,11 +194,11 @@ class PointCloudInference:
 
         left_points = []
         right_points = []
-
+        print(road_points.size)
         if road_points.size > 0:
             min_x = np.min(road_points[:, 0])
             max_x = np.max(road_points[:, 0])
-            bins = np.linspace(min_x, max_x, num=30)
+            bins = np.linspace(min_x, max_x, num=22)
 
             widths = []
             for i in range(len(bins) - 1):
