@@ -1,0 +1,90 @@
+topics:
+  raw:
+    camera: "/camera_fl/image_color"
+    lidar: "/lidar_tc/velodyne_points"
+    radar: "/radar_fc/as_tx/radar_tracks"
+
+  yolo:
+    image: "/yolov9/published_image"
+    bbox: "/yolov9/bboxInfo"
+    fused_bbox: "/fused_bbox"
+
+  sam:
+    segmentation_mask: "/sam_road_segmentation"
+    left_contour: "/sam_left_contour"
+    right_contour: "/sam_right_contour"
+    left_boundary: "/sam_left_boundary"
+    right_boundary: "/sam_right_boundary"
+
+  sphereformer:
+    segmentation: "/sphereformer_road_segmentation"
+    left_boundary: "/sphereformer_left_boundary"
+    right_boundary: "/sphereformer_right_boundary"
+    centerline_points: "/sphereformer_centerline_points"
+    lidar_bbox: "/bounding_boxes"
+
+  lane_detection:
+    mask: "/lane_detection/output"
+    left_lane: "/lane_detection/current_lane_left_boundary"
+    right_lane: "/lane_detection/current_lane_right_boundary"
+    left_lane_boundary: "/Left_Line3dPoints"
+    right_lane_boundary: "/Right_Line3dPoints"
+
+  transform:
+    lidar_2d_projection: "/lidar_2d_projection"
+
+  planning:
+    local_path: "/local_path"
+
+  controls:
+    ctrl_ref: "/ctrl_ref.*"
+    vehicle: "/vehicle.*"
+    lat_perf: "/lat_ctrl_perf"
+    fsm_status: "/current_fsm_status"
+
+  outputs:
+    lidar_2d_projection: "/lidar_2d_projection"
+    yolov9_image: "/yolo_detection_node/published_image"
+    yolov9_bbox: "/yoloLiveNode/bboxInfo"
+    tf_static: "/tf_static"
+
+categories:
+  raw:
+    - topics.raw.camera
+    - topics.raw.lidar
+    - topics.raw.radar
+
+  perception:
+    - topics.yolo.image
+    - topics.yolo.bbox
+    - topics.yolo.fused_bbox
+    - topics.sam.segmentation_mask
+    - topics.sam.left_contour
+    - topics.sam.right_contour
+    - topics.sam.left_boundary
+    - topics.sam.right_boundary
+    - topics.sphereformer.segmentation
+    - topics.sphereformer.left_boundary
+    - topics.sphereformer.right_boundary
+    - topics.sphereformer.centerline_points
+    - topics.sphereformer.lidar_bbox
+
+  planning:
+    - topics.planning.local_path
+    - topics.lane_detection.mask
+    - topics.lane_detection.left_lane
+    - topics.lane_detection.right_lane
+    - topics.lane_detection.left_lane_boundary
+    - topics.lane_detection.right_lane_boundary
+
+  controls:
+    - topics.controls.ctrl_ref
+    - topics.controls.vehicle
+    - topics.controls.lat_perf
+    - topics.controls.fsm_status
+
+  outputs:
+    - topics.outputs.yolov9_bbox
+    - topics.outputs.yolov9_image
+    - topics.outputs.tf_static
+    - topics.outputs.lidar_2d_projection

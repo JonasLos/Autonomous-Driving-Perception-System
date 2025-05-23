@@ -1,32 +1,5 @@
 #!/usr/bin/env python3
 # type: ignore
-"""
-YOLO Object Detection Node for ROS
-
-This module implements a ROS node for real-time object detection using the YOLO model.
-The detected objects are published as bounding box coordinates with class labels and
-confidence scores. Additionally, the module supports optional video recording of the
-detection results.
-
-Classes:
-    Detect: A class for handling YOLO object detection in ROS.
-
-Configuration parameters:
-    weights (str): Path to the YOLO model weights file.
-    img_size (int): Size to which input images are resized for detection.
-    conf_thres (float): Confidence threshold for filtering detections.
-    device (torch.device): Device to run the model on (CUDA if available, otherwise CPU).
-    view_img (bool): Flag to enable publishing detected images.
-    write_file (bool): Flag to enable video recording of detections.
-
-Usage:
-    Run the module as a python script using. Ensure the ROS environment is set up correctly
-    and the required topics are available.
-
-Example:
-    python yolo_detection_node.py
-
-"""
 
 import os
 from typing import List
@@ -42,40 +15,47 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import Header
 from ultralytics import YOLO
 
-from src.configs import CAMERA_TOPIC, YOLO_BBOX_TOPIC, YOLO_IMAGE_TOPIC
 from yolov9_ros.msg import Bbox, BboxList
 
 # Initialize CUDA device early
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-torch.cuda.set_per_process_memory_fraction(0.3, device=torch.device("cuda:0"))
+
 if device == "cpu":
     print("Using CPU and not GPU")
 if device != torch.device("cpu"):
     torch.cuda.init()  # Ensure CUDA is initialized early
 
 # Get the paths of the current script and other required files
-base_path = os.path.dirname(os.path.abspath(__file__))
-weights_path = os.path.join(base_path, "..", "best.pt")
-class_averages_path = os.path.join(base_path, "class_averages.yaml")
-suppressed_classes_path = os.path.join(base_path, "suppressed_classes.yaml")
+BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+WEIGHTS_PATH = os.path.join(BASE_PATH, "..", "best.pt")
+CLASS_AVERAGES_PATH = os.path.join(BASE_PATH, "class_averages.yaml")
+SUPPRESSED_CLASSES_PATH = os.path.join(BASE_PATH, "suppressed_classes.yaml")
+TOPICS_PATH = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
+
+with open(TOPICS_PATH, "r") as f:
+    topic_config = yaml.safe_load(f)
+
+# Assign topic variables
+CAMERA_TOPIC = topic_config["topics"]["raw"]["camera"]
+YOLO_BBOX_TOPIC = topic_config["topics"]["yolo"]["bbox"]
+YOLO_IMAGE_TOPIC = topic_config["topics"]["yolo"]["image"]
 
 # Configuration parameters
 img_size = 640
 conf_thres = 0.4
 view_img = True
-write_file = False  # Set this flag to control whether to write the video file
 
 # Average Class Dimensions
-with open(class_averages_path, "r", encoding="utf-8") as file:
+with open(CLASS_AVERAGES_PATH, "r", encoding="utf-8") as file:
     average_dimensions = yaml.safe_load(file)
 
-with open(suppressed_classes_path, "r", encoding="utf-8") as file:
+with open(SUPPRESSED_CLASSES_PATH, "r", encoding="utf-8") as file:
     suppressed_classes = yaml.safe_load(file)["suppressed_classes"]
 
 
 class Detect:
     def __init__(self) -> None:
-        self.model = YOLO(weights_path).to(device)
+        self.model = YOLO(WEIGHTS_PATH).to(device)
         self.model.conf = 0.5
         self.names: List[str] = self.model.names
         self.image_sub = rospy.Subscriber(
@@ -86,19 +66,6 @@ class Detect:
         )
         self.image_pub = rospy.Publisher(YOLO_IMAGE_TOPIC, Image, queue_size=1)
         self.bboxInfo_pub = rospy.Publisher(YOLO_BBOX_TOPIC, BboxList, queue_size=1)
-
-        # Initialize VideoWriter if write_file is True
-        if write_file:
-            self.video_writer = cv2.VideoWriter(
-                "video_output.mp4",
-                cv2.VideoWriter_fourcc(*"mp4v"),
-                30,  # Assuming 30 FPS, change if necessary
-                (img_size, img_size),
-            )
-            if not self.video_writer.isOpened():
-                rospy.logerr("Failed to open video writer")
-
-        rospy.on_shutdown(self.cleanup)  # Register cleanup function
         rospy.spin()
 
     # Add the classify_traffic_light function
@@ -211,17 +178,12 @@ class Detect:
             if view_img:
                 self.publish_image(img_resized, data.header.stamp)
 
-            # Write frame to video file if write_file is True
-            if write_file and self.video_writer.isOpened():
-                self.video_writer.write(img_resized)
-                rospy.loginfo("Frame written to video")
-
     def publish_bboxes(self, detections: torch.Tensor, stamp: rospy.Time) -> None:
         # Ensure the detections data is in the expected format
-        msg = BboxList()  # Create an instance of the BboxCentersClass message
+        msg = BboxList()
         msg.header = Header()
-        msg.header.stamp = stamp  # Add timestamp from the original ROS message
-        msg.Bboxes = []  # Initialize the list for bounding boxes
+        msg.header.stamp = stamp
+        msg.Bboxes = []
 
         for bbox in detections:
             # Parse detection data
@@ -229,10 +191,10 @@ class Detect:
 
             if conf > conf_thres:  # Filter detections based on confidence
                 # Scale bounding box coordinates back to the original image dimensions
-                x_min = x1 * (1032*2 / 640)
-                y_min = y1 * (772*2 / 640)
-                x_max = x2 * (1032*2 / 640)
-                y_max = y2 * (772*2 / 640)
+                x_min = x1 * (1032 * 2 / 640)
+                y_min = y1 * (772 * 2 / 640)
+                x_max = x2 * (1032 * 2 / 640)
+                y_max = y2 * (772 * 2 / 640)
 
                 # Create a BboxCenter message for the bounding box
                 bbox_msg = Bbox()
@@ -259,11 +221,6 @@ class Detect:
         msg.step = 3 * img_pil.width
         msg.data = np.array(img_pil).tobytes()
         self.image_pub.publish(msg)
-
-    def cleanup(self) -> None:
-        if write_file and self.video_writer.isOpened():
-            self.video_writer.release()
-            rospy.loginfo("Video writer released")
 
 
 if __name__ == "__main__":

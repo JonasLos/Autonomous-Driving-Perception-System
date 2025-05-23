@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
 # type: ignore
-"""
-This script transforms 2D bounding box coordinates from image space to 3D lidar space
-and integrates radar object data. It uses ROS (Robot Operating System) to synchronize
-and process data from lidar, image, and radar sensors. The result is a fused 3D bounding
-box representation of detected objects which is published as a ROS message.
-
-Usage:
-- This script should be executed within a ROS environment where the required
- topics (`/lidar_tc/velodyne_points`,`/yoloLiveNode/bboxInfo`, `/radar_fc/as_tx/objects`)
- are being published.
-- It assumes the presence of specific message types and sensor configurations
-as defined in the imported message types.
-
-Example:
-    python transform_and_fuse.py
-"""
-
 
 import os
 from collections import defaultdict
@@ -34,14 +17,7 @@ from radar_msgs.msg import RadarTrackArray
 from sensor_msgs.msg import PointCloud2
 from sklearn.cluster import DBSCAN
 
-from src.configs import (
-    FUSED_BBOX_TOPIC,
-    LIDAR_TOPIC,
-    PROJ,
-    RADAR_TRACKS_TOPIC,
-    T1,
-    YOLO_BBOX_TOPIC,
-)
+from src.configs import PROJ, T1
 from yolov9_ros.msg import BboxList
 
 # Point cloud limits
@@ -49,14 +25,25 @@ lim_x, lim_y, lim_z = [2.5, 100], [-10, 10], [-3.5, 1.5]
 pixel_lim = 20
 
 # Radar Limit Cutoff
-radar_limit = 20  # meters
-close_distance_threshold = 7  # meters
+RADAR_LIMIT = 20  # meters
+CLOSE_DISTANCE_THRESHOLD = 7  # meters
 
 # Average Class Dimensions
-base_path = os.path.dirname(os.path.abspath(__file__))
-class_averages_path = os.path.join(base_path, "class_averages.yaml")
-with open(class_averages_path, "r", encoding="utf-8") as file:
+BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+CLASS_AVERAGE_PATH = os.path.join(BASE_PATH, "class_averages.yaml")
+with open(CLASS_AVERAGE_PATH, "r", encoding="utf-8") as file:
     average_dimensions = yaml.safe_load(file)
+
+# === Load YAML configs ===
+TOPICS_PATH = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
+with open(TOPICS_PATH, "r") as f:
+    topic_config = yaml.safe_load(f)
+
+# === Assign topic variables ===
+LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar"]
+RADAR_TRACKS_TOPIC = topic_config["topics"]["raw"]["radar"]
+YOLO_BBOX_TOPIC = topic_config["topics"]["yolo"]["bbox"]
+FUSED_BBOX_TOPIC = topic_config["topics"]["yolo"]["fused_bbox"]
 
 
 def inverse_rigid_transformation(arr):
@@ -221,7 +208,7 @@ class TransformFuse:
                     ]
                 )
                 distance = np.linalg.norm(cam_position - rad_position)
-                if rad_position[0] > 75 and distance < close_distance_threshold:
+                if rad_position[0] > 75 and distance < CLOSE_DISTANCE_THRESHOLD:
                     matched_pairs.append((i, j))
 
         rospy.loginfo(f"Matched pairs: {matched_pairs}")
@@ -272,7 +259,7 @@ class TransformFuse:
                 )
 
                 # Apply radar limit check based on x-coordinate of the radar position
-                if rad_position[0] > radar_limit:
+                if rad_position[0] > RADAR_LIMIT:
                     bbox = BoundingBox()
                     bbox.header = msgRadar.header
                     bbox.pose.position.x = rad_position[

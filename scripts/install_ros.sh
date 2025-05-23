@@ -10,11 +10,11 @@ curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo ap
 sudo apt-get update
 
 # Install ROS Melodic Desktop Full
-sudo apt-get install -y ros-melodic-desktop-full
+sudo apt-get install -y ros-melodic-ros-base
 
 # Install dependencies for building ROS packages
 echo "Installing dependencies for building ROS packages..."
-sudo apt-get install -y python-rosdep python-rosinstall python-rosinstall-generator python-wstool build-essential
+sudo apt-get install -y python-rosdep python-rosinstall python-rosinstall-generator python-wstool build-essential python-catkin-pkg
 
 # Initialize rosdep
 sudo rosdep init

@@ -1,24 +1,46 @@
 #!/bin/bash
 
-# === Define Topic Categories ===
-declare -A TOPIC_SETS
+# === Path to topics.yaml ===
+TOPIC_FILE="/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
 
-TOPIC_SETS[raw]="/camera_fl/image_color /lidar_tc/velodyne_points /radar_fc/as_tx/radar_tracks"
-TOPIC_SETS[perception]="/yolov9/published_image /yolov9/bboxInfo /fused_bbox /road_segmentation /road_segment_3d/left_boundary /road_segment_3d/right_boundary /colored_points /bounding_boxes"
-TOPIC_SETS[planning]="/local_path /lane_detection/output /lane_detection/current_lane_left_boundary /lane_detection/current_lane_right_boundary /Left_Line3dPoints /Right_Line3dPoints"
-TOPIC_SETS[controls]="/ctrl_ref.* /vehicle.* /lat_ctrl_perf /current_fsm_status"
-TOPIC_SETS[outputs]="/yoloLiveNode/bboxInfo /yolo_detection_node/published_image /tf_static /lidar_2d_projection"
-
-# === Get Category Argument or Default ===
-CATEGORY=${1:-raw}
-
-if [[ -z "${TOPIC_SETS[$CATEGORY]}" ]]; then
-    echo "[ERROR] Invalid category: '$CATEGORY'"
-    echo "Valid categories: ${!TOPIC_SETS[@]}"
+# === Check if yq is installed ===
+if ! command -v yq &> /dev/null; then
+    echo "[ERROR] 'yq' is not installed. Install it using: sudo apt install yq"
     exit 1
 fi
 
-TOPICS="${TOPIC_SETS[$CATEGORY]}"
+# === Parse and Validate Input Categories ===
+if [[ $# -eq 0 ]]; then
+    echo "[INFO] No category arguments provided. Defaulting to 'raw'."
+    CATEGORIES=("raw")
+else
+    CATEGORIES=("$@")
+fi
+
+ALL_TOPICS=""
+INVALID_CATEGORIES=()
+
+for CATEGORY in "${CATEGORIES[@]}"; do
+    # Extract topic paths for this category
+    TOPIC_PATHS=$(yq e ".categories.${CATEGORY}[]" "$TOPIC_FILE" 2>/dev/null)
+
+    if [[ -z "$TOPIC_PATHS" ]]; then
+        INVALID_CATEGORIES+=("$CATEGORY")
+        continue
+    fi
+
+    while IFS= read -r path; do
+        topic=$(yq e ".$path" "$TOPIC_FILE")
+        ALL_TOPICS+=" $topic"
+    done <<< "$TOPIC_PATHS"
+done
+
+# === Handle Invalid Categories ===
+if [[ ${#INVALID_CATEGORIES[@]} -gt 0 ]]; then
+    echo "[ERROR] Invalid categories: ${INVALID_CATEGORIES[*]}"
+    echo "Valid categories are: $(yq e '.categories | keys | join(" ")' "$TOPIC_FILE")"
+    exit 1
+fi
 
 # === Prompt for Metadata ===
 read -p "Enter location [Unknown location]: " LOCATION
@@ -42,22 +64,22 @@ ROAD_TYPE=${ROAD_TYPE:-"Unknown"}
 read -p "Enter road condition [Unknown]: " ROAD_CONDITION
 ROAD_CONDITION=${ROAD_CONDITION:-"Unknown"}
 
-# === Compose Metadata String ===
-METADATA="location: $LOCATION, vehicle: $VEHICLE, passengers: $PASSENGERS, road_type: $ROAD_TYPE, road_condition: $ROAD_CONDITION, comments: $COMMENTS, maneuver: $MANEUVER"
+# === Metadata String ===
+JOINED_CATEGORIES=$(IFS=_ ; echo "${CATEGORIES[*]}")
+METADATA="location: $LOCATION, vehicle: $VEHICLE, passengers: $PASSENGERS, road_type: $ROAD_TYPE, road_condition: $ROAD_CONDITION, comments: $COMMENTS, maneuver: $MANEUVER, categories: $JOINED_CATEGORIES"
 
 # === File and Folder Setup ===
 TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
-BAG_BASENAME="rosbag_${CATEGORY}_${TIMESTAMP}"
+BAG_BASENAME="rosbag_${JOINED_CATEGORIES// /_}_${TIMESTAMP}"
 BAG_NAME="$BAG_BASENAME.bag"
 TXT_NAME="$BAG_BASENAME.txt"
-SAVE_DIR="/media/dev/T9/rosbag record testing command"
+SAVE_DIR="/media/dev/T9/${JOINED_CATEGORIES// /_}_$TIMESTAMP"
 mkdir -p "$SAVE_DIR"
 
-# === Write Metadata to TXT File ===
-echo "[INFO] Writing metadata to $TXT_NAME"
+# === Write Metadata ===
 {
     echo "Rosbag Name: $BAG_NAME"
-    echo "Category: $CATEGORY"
+    echo "Categories: $JOINED_CATEGORIES"
     echo "Location: $LOCATION"
     echo "Vehicle: $VEHICLE"
     echo "Number of Passengers: $PASSENGERS"
@@ -66,17 +88,17 @@ echo "[INFO] Writing metadata to $TXT_NAME"
     echo "Comments: $COMMENTS"
     echo "Maneuver: $MANEUVER"
     echo "Recorded Topics:"
-    echo "$TOPICS"
+    echo "$ALL_TOPICS"
     echo "/rosbag_metadata"
 } > "$SAVE_DIR/$TXT_NAME"
 
-# === Publish Metadata as Latched Topic ===
+# === Publish Metadata to ROS ===
 echo "[INFO] Publishing metadata to /rosbag_metadata"
 rostopic pub -1 /rosbag_metadata std_msgs/String "data: \"$METADATA\"" &
 
-sleep 1  # Allow time for publishing
+sleep 1  # Give time for the message to be published
 
-# === Start Rosbag Recording ===
+# === Record Rosbag ===
 echo "[INFO] Starting rosbag recording..."
 echo "Saving to: $SAVE_DIR/$BAG_NAME"
-rosbag record -e --split --size=5000 -o "$SAVE_DIR/$BAG_BASENAME" $TOPICS /rosbag_metadata
+rosbag record -e --split --size=5000 -o "$SAVE_DIR/$BAG_BASENAME" $ALL_TOPICS /rosbag_metadata

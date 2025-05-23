@@ -35,9 +35,9 @@ echo "Terminating UltraFast Lane Detection processes..."
 kill_processes "ulfast.py"
 kill_processes "lineto3d.py"
 
-# # Kill roslaunch processes if any are left running
-# echo "Terminating roslaunch processes..."
-# kill_processes "roslaunch"
+# Lidar 2D Projection Transform
+echo "Terminating Lidar 2D Projection Transform..."
+kill_processes "transform.py"
 
 # Print statement for ending the disable process
 echo "Perception system has been successfully disabled."

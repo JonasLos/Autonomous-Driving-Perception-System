@@ -22,4 +22,6 @@ services:
     volumes:
       - /home/dev/anaconda3/envs:/opt/conda/envs  # Mount all conda environments
       - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/ubuntuuser/Autonomous-Driving-Perception-System
+      - /home/dev/Documents/AVA_Planner:/home/ubuntuuser/AVA_Planner
+      - /home/dev/Documents/AVA_Control:/home/ubuntuuser/AVA_Control
     command: /bin/bash

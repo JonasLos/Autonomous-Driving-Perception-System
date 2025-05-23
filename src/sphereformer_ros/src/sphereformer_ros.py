@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
+# type: ignore
+
 import os
-import struct
-from email import header
 from functools import wraps
 
 import numpy as np
@@ -10,30 +10,13 @@ import rospy
 import sensor_msgs.point_cloud2 as pc2
 import spconv.pytorch as spconv
 import torch
-import torch.nn.parallel
-import torch.optim
-import torch.utils.data
-from geometry_msgs.msg import PointStamped
+import yaml
 from semantic_kitti_ros import SemanticKITTI
 from sensor_msgs.msg import PointCloud2, PointField
 from sklearn.cluster import DBSCAN
-from sklearn.linear_model import RANSACRegressor
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import PolynomialFeatures
 from SphereFormer.util import config
 from SphereFormer_changes.unet_spherical_transformer import Semantic as Model
-
-# from std_msgs.msg import Float32MultiArray
-from visualization_msgs.msg import Marker, MarkerArray
-
-from src.configs import (
-    LIDAR_BBOX_TOPIC,
-    LIDAR_TOPIC,
-    SPHEREFORMER_CENTER_LINE_POINTS,
-    SPHEREFORMER_LEFT_BOUNDARY,
-    SPHEREFORMER_RIGHT_BOUNDARY,
-    SPHEREFORMER_SEGMENTATION_TOPIC,
-)
+from visualization_msgs.msg import MarkerArray
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(
@@ -42,8 +25,24 @@ CONFIG_PATH = os.path.join(
 )
 CHECKPOINT_PATH = os.path.join(SCRIPT_DIR, "SphereFormer/model_semantic_kitti.pth")
 
+# Path to the YAML file
+TOPICS_PATH = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
+
+# Load YAML config
+with open(TOPICS_PATH, "r") as f:
+    topic_config = yaml.safe_load(f)
+
+# === TOPICS ===
+LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar"]
+LIDAR_BBOX_TOPIC = topic_config["topics"]["sphereformer"]["lidar_bbox"]
+SPHEREFORMER_SEGMENTATION_TOPIC = topic_config["topics"]["sphereformer"]["segmentation"]
+SPHEREFORMER_LEFT_BOUNDARY = topic_config["topics"]["sphereformer"]["left_boundary"]
+SPHEREFORMER_RIGHT_BOUNDARY = topic_config["topics"]["sphereformer"]["right_boundary"]
+SPHEREFORMER_CENTER_LINE_POINTS = topic_config["topics"]["sphereformer"][
+    "centerline_points"
+]
+
 lim_x, lim_y, lim_z = [-50, 100], [-20, 20], [-5, 10]
-# lim_x, lim_y, lim_z = [-2, 50], [-20, 20], [-5, 10]
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.cuda.set_per_process_memory_fraction(0.3, device=torch.device("cuda:0"))
@@ -108,7 +107,6 @@ class PointCloudInference:
             PointField(
                 name="intensity", offset=12, datatype=PointField.FLOAT32, count=1
             ),
-            # PointField(name="rgb", offset=16, datatype=PointField.FLOAT32, count=1),
         ]
 
     @timer
@@ -247,13 +245,6 @@ class PointCloudInference:
 
             # Publish centerline points as PointCloud2
             self.publish_centerline_points(msg, selected_center_points)
-
-        # Convert labels to colors and create a colored point cloud
-        # colors = self.label_to_color(output_labels.cpu().numpy())
-        # colored_cloud = self.create_colored_pointcloud2(
-        #     ros_numpy.msgify(PointCloud2, seg_points),colors, msg.header
-        # )
-        # self.pub.publish(colored_cloud)
 
         self.create_cloud(road_points, self.pub, msg)
         if left_points.size > 0:
@@ -420,74 +411,6 @@ class PointCloudInference:
         binary_points = np_points_with_intensity.astype(np.float32).tobytes()
         labels = np.zeros(np_points_with_intensity.shape[0], dtype=np.uint32)
         return np.asarray(binary_points), labels.tobytes()
-
-    def create_colored_pointcloud2(self, segmented_cloud, colors, header):
-        fields = [
-            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
-            PointField(
-                name="intensity", offset=12, datatype=PointField.FLOAT32, count=1
-            ),
-            PointField(name="rgb", offset=16, datatype=PointField.FLOAT32, count=1),
-        ]
-        new_points = []
-        for point, color in zip(
-            pc2.read_points(
-                segmented_cloud,
-                field_names=("x", "y", "z", "intensity"),
-                skip_nans=True,
-            ),
-            colors,
-        ):
-            rgb_packed = struct.pack("BBBB", color[2], color[1], color[0], 255)
-            rgb_float = struct.unpack("f", rgb_packed)[0]
-            new_points.append([point[0], point[1], point[2], point[3], rgb_float])
-        colored_cloud = pc2.create_cloud(header, fields, new_points)
-        return colored_cloud
-
-    def label_to_color(self, labels):
-        """Convert segmentation labels to RGB color."""
-        color_map = {
-            0: [0, 0, 255],
-            1: [0, 0, 0],
-            10: [0, 0, 0],
-            11: [0, 0, 0],
-            13: [0, 0, 0],
-            15: [0, 0, 0],
-            16: [0, 0, 0],
-            18: [0, 0, 0],
-            20: [0, 0, 0],
-            30: [0, 0, 0],
-            31: [0, 0, 0],
-            8: [255, 0, 0],
-            40: [0, 0, 0],
-            44: [0, 0, 0],
-            48: [0, 0, 0],
-            12: [0, 0, 0],
-            50: [0, 0, 0],
-            14: [0, 0, 0],
-            52: [0, 0, 0],
-            60: [0, 0, 0],
-            70: [0, 0, 0],
-            71: [0, 0, 0],
-            72: [0, 0, 0],
-            80: [0, 0, 0],
-            81: [0, 0, 0],
-            99: [0, 0, 0],
-            252: [0, 0, 0],
-            256: [0, 0, 0],
-            253: [0, 0, 0],
-            254: [0, 0, 0],
-            255: [0, 0, 0],
-            257: [0, 0, 0],
-            258: [0, 0, 0],
-            259: [0, 0, 0],
-        }
-        default_color = color_map[8]
-
-        colors = np.array([color_map.get(label, default_color) for label in labels])
-        return colors
 
 
 if __name__ == "__main__":

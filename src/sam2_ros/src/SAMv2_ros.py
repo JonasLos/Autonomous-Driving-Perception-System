@@ -4,6 +4,7 @@ import os
 import cv2
 import numpy as np
 import sensor_msgs.point_cloud2 as pc2
+import yaml
 
 from src.configs import T1
 
@@ -20,15 +21,6 @@ from sam2.sam2_image_predictor import SAM2ImagePredictor
 from sensor_msgs.msg import Image, PointCloud2, PointField
 
 from sam2_ros.msg import DetectedRoadArea
-from src.configs import (
-    CAMERA_TOPIC,
-    PROJ,
-    SAM_LEFT_CONTOUR_TOPIC,
-    SAM_RIGHT_CONTOUR_TOPIC,
-    SAM_SEGMENTATION_MASK_TOPIC,
-    SPHEREFORMER_CENTER_LINE_POINTS,
-    YOLO_BBOX_TOPIC,
-)
 from yolov9_ros.msg import BboxList
 
 
@@ -44,10 +36,25 @@ def timer(func):
     return wrapper
 
 
+# Path to the YAML file
+CONFIG_PATH = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
+
+# Load YAML config
+with open(CONFIG_PATH, "r") as f:
+    config = yaml.safe_load(f)
+
+# === Initialize topics ===
+CAMERA_TOPIC = config["topics"]["raw"]["camera"]
+YOLO_BBOX_TOPIC = config["topics"]["yolo"]["bbox"]
+SAM_SEGMENTATION_MASK_TOPIC = config["topics"]["sam"]["segmentation_mask"]
+SAM_LEFT_CONTOUR_TOPIC = config["topics"]["sam"]["left_contour"]
+SAM_RIGHT_CONTOUR_TOPIC = config["topics"]["sam"]["right_contour"]
+SPHEREFORMER_CENTER_LINE_POINTS = config["topics"]["sphereformer"]["centerline_points"]
+
 # Set device to GPU if available, otherwise use CPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 rospy.loginfo(f"Using device: {device}")
-#torch.cuda.set_per_process_memory_fraction(0.4, device=torch.device("cuda:0"))
+# torch.cuda.set_per_process_memory_fraction(0.4, device=torch.device("cuda:0"))
 
 # Load SAM2 model
 base_path = os.path.dirname(os.path.abspath(__file__))
@@ -58,7 +65,7 @@ sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device)
 predictor = SAM2ImagePredictor(sam2_model)
 
 # Define points for initial segmentation prompt
-point_coords = np.array([[400*2, 700*2], [550*2, 700*2], [650*2, 700*2]])
+point_coords = np.array([[400, 700], [550, 700], [650, 700]])
 input_labels = [1, 1, 1]
 MIN_CONTOUR_AREA = 30000.0
 
@@ -74,7 +81,7 @@ T_vel_cam = inverse_rigid_transformation(T1)
 
 @timer
 def process_image(image, detected_objects, publish_image=False):
-    image = cv2.resize(image, (2048//2, 1544//2))
+    image = cv2.resize(image, (2048 // 2, 1544 // 2))
     h_original, w_original = image.shape[:2]
     center_x = int(w_original * 0.75)
     # point_coords = point_coords.append(auto)
@@ -295,9 +302,13 @@ def create_overlay(
 class RoadSegmentation:
     def __init__(self):
         rospy.loginfo("Initializing RoadSegmentation class.")
-        
+
         self.image_sub = rospy.Subscriber(
-            CAMERA_TOPIC, Image, self.callback, queue_size=1, buff_size=2**24, 
+            CAMERA_TOPIC,
+            Image,
+            self.callback,
+            queue_size=1,
+            buff_size=2**24,
         )
 
         # self.yolo_sub = message_filters.Subscriber(
@@ -418,16 +429,15 @@ class RoadSegmentation:
         if self.publish_image and overlay is not None:
             self.publish_image_topic(self.ros_image, overlay)
 
-
         # Publish boundary points
         if left_boundary is not None:
 
-             # Remove points that are at the image boundary (x == width or y == height or 0)
+            # Remove points that are at the image boundary (x == width or y == height or 0)
             mask = (
-                (left_boundary[:, 0] != 0) &
-                (left_boundary[:, 0] != img.shape[1]) &
-                (left_boundary[:, 1] != 0) &
-                (left_boundary[:, 1] != img.shape[0])
+                (left_boundary[:, 0] != 0)
+                & (left_boundary[:, 0] != img.shape[1])
+                & (left_boundary[:, 1] != 0)
+                & (left_boundary[:, 1] != img.shape[0])
             )
             left_boundary = left_boundary[mask]
 
@@ -443,10 +453,10 @@ class RoadSegmentation:
 
             # Remove points that are at the image boundary (x == width or y == height or 0)
             mask = (
-                (right_boundary[:, 0] != 0) &
-                (right_boundary[:, 0] != img.shape[1]) &
-                (right_boundary[:, 1] != 0) &
-                (right_boundary[:, 1] != img.shape[0])
+                (right_boundary[:, 0] != 0)
+                & (right_boundary[:, 0] != img.shape[1])
+                & (right_boundary[:, 1] != 0)
+                & (right_boundary[:, 1] != img.shape[0])
             )
             right_boundary = right_boundary[mask]
 

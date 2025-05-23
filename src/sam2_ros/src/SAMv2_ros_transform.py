@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# type: ignore
 
 from functools import wraps
 
@@ -10,21 +11,13 @@ import ros_numpy
 import rospy
 import sensor_msgs.point_cloud2 as pc2
 import torch
+import yaml
 from scipy.spatial import KDTree
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Float32MultiArray
 
 from sam2_ros.msg import DetectedRoadArea
-from src.configs import (
-    LIDAR_TOPIC,
-    PROJ,
-    LIDAR_2D_PROJ_TOPIC,
-    SAM_LEFT_BOUNDARY,
-    SAM_LEFT_CONTOUR_TOPIC,
-    SAM_RIGHT_BOUNDARY,
-    SAM_RIGHT_CONTOUR_TOPIC,
-    T1,
-)
+from src.configs import T1
 
 # Define limits
 lim_x, lim_y, lim_z, pixel_lim = [2, 50], [-10, 10], [-3.5, 1], 5
@@ -50,6 +43,22 @@ def timer(func):
         return result
 
     return wrapper
+
+
+# Path to the YAML file
+CONFIG_PATH = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
+
+# Load YAML config
+with open(CONFIG_PATH, "r") as f:
+    config = yaml.safe_load(f)
+
+# === TOPICS ===
+LIDAR_TOPIC = config["topics"]["raw"]["lidar"]
+LIDAR_2D_PROJ_TOPIC = config["topics"]["transform"]["lidar_2d_projection"]
+SAM_LEFT_BOUNDARY = config["topics"]["sam"]["left_boundary"]
+SAM_RIGHT_BOUNDARY = config["topics"]["sam"]["right_boundary"]
+SAM_LEFT_CONTOUR_TOPIC = config["topics"]["sam"]["left_contour"]
+SAM_RIGHT_CONTOUR_TOPIC = config["topics"]["sam"]["right_contour"]
 
 
 class RoadSegmentation3D:
@@ -89,7 +98,7 @@ class RoadSegmentation3D:
         self.sub_right_contour = message_filters.Subscriber(
             SAM_RIGHT_CONTOUR_TOPIC, DetectedRoadArea
         )
-        
+
         # Synchronize topics
         ts = message_filters.ApproximateTimeSynchronizer(
             # [self.sub_lidar, self.sub_left_contour, self.sub_right_contour],
@@ -122,15 +131,20 @@ class RoadSegmentation3D:
         # pc_arr = np.column_stack((proj_data[:, 0], proj_data[:, 1], proj_data[:, 2], np.ones(proj_data.shape[0])))
         # u, v = proj_data[:, 0], proj_data[:, 1]
 
-
         # Convert PointCloud2 projected points to numpy structured array
-        pc_arr = ros_numpy.point_cloud2.pointcloud2_to_xyz_array(msgProj, remove_nans=True)
+        pc_arr = ros_numpy.point_cloud2.pointcloud2_to_xyz_array(
+            msgProj, remove_nans=True
+        )
 
         # We expect msgProj points to have 5 floats per point: x,y,z,u,v
         # ros_numpy returns only x,y,z by default; so we need a custom approach to extract u,v
 
         # Alternative: extract all fields including u,v using raw pointcloud2 reading:
-        points_list = list(pc2.read_points(msgProj, field_names=("x","y","z","u","v"), skip_nans=True))
+        points_list = list(
+            pc2.read_points(
+                msgProj, field_names=("x", "y", "z", "u", "v"), skip_nans=True
+            )
+        )
         if len(points_list) == 0:
             rospy.logwarn("No points in projected PointCloud2")
             return
@@ -148,10 +162,13 @@ class RoadSegmentation3D:
         )
 
         if left_boundary_3d.size > 0:
-            self.create_cloud(left_boundary_3d, self.left_boundary_pub, self.msgProj.header)
+            self.create_cloud(
+                left_boundary_3d, self.left_boundary_pub, self.msgProj.header
+            )
         if right_boundary_3d.size > 0:
-            self.create_cloud(right_boundary_3d, self.right_boundary_pub, self.msgProj.header)
-
+            self.create_cloud(
+                right_boundary_3d, self.right_boundary_pub, self.msgProj.header
+            )
 
     @timer
     def process_loop(self, event):
@@ -165,7 +182,6 @@ class RoadSegmentation3D:
         # if self.msgProj is None or self.msgLeftBoundary is None or self.msgRightBoundary is None:
         #     rospy.logwarn_throttle(5, "Waiting for synchronized messages...")
         #     return
-
 
         # pc_arr, u, v = self.process_pointcloud(self.msgLidar)
 
@@ -182,9 +198,13 @@ class RoadSegmentation3D:
         )
 
         if left_boundary_3d.size > 0:
-            self.create_cloud(left_boundary_3d, self.left_boundary_pub, self.msgProj.header)
+            self.create_cloud(
+                left_boundary_3d, self.left_boundary_pub, self.msgProj.header
+            )
         if right_boundary_3d.size > 0:
-            self.create_cloud(right_boundary_3d, self.right_boundary_pub, self.msgProj.header)
+            self.create_cloud(
+                right_boundary_3d, self.right_boundary_pub, self.msgProj.header
+            )
 
     def process_pointcloud(self, msgLidar):
         pc = ros_numpy.numpify(msgLidar)
