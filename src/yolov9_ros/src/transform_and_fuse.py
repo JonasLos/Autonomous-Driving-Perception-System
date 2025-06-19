@@ -18,6 +18,7 @@ from sensor_msgs.msg import PointCloud2
 from sklearn.cluster import DBSCAN
 
 from src.configs import PROJ, T1
+from src.utils import inverse_rigid_transform
 from yolov9_ros.msg import BboxList
 
 # Point cloud limits
@@ -44,19 +45,6 @@ LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar"]
 RADAR_TRACKS_TOPIC = topic_config["topics"]["raw"]["radar"]
 YOLO_BBOX_TOPIC = topic_config["topics"]["yolo"]["bbox"]
 FUSED_BBOX_TOPIC = topic_config["topics"]["yolo"]["fused_bbox"]
-
-
-def inverse_rigid_transformation(arr):
-    """
-    Compute the inverse of a rigid transformation matrix.
-    """
-    Rt = arr[:3, :3].T
-    tt = -np.dot(Rt, arr[:3, 3])
-    return np.vstack((np.column_stack((Rt, tt)), [0, 0, 0, 1]))
-
-
-# Inverse transformation matrix from camera to lidar
-T_vel_cam = inverse_rigid_transformation(T1)
 
 
 class TransformFuse:
@@ -131,7 +119,9 @@ class TransformFuse:
         # Crop point cloud and transform to camera frame
         pc_arr = self.crop_pointcloud(points)
         pc_arr_pick = np.transpose(pc_arr)
-        m1 = torch.matmul(torch.tensor(T_vel_cam), torch.tensor(pc_arr_pick))
+        m1 = torch.matmul(
+            torch.tensor(inverse_rigid_transform(T1)), torch.tensor(pc_arr_pick)
+        )
         uv1 = torch.matmul(torch.tensor(PROJ), m1)
         uv1[:2, :] /= uv1[2, :]
 

@@ -1,39 +1,24 @@
 #!/usr/bin/env python3
+# type: ignore
+
 import os
 
 import cv2
 import numpy as np
-import sensor_msgs.point_cloud2 as pc2
-import yaml
-
-from src.configs import T1
-
-np.float = np.float64
-from functools import wraps
-
-import message_filters
 import ros_numpy
 import rospy
+import sensor_msgs.point_cloud2 as pc2
 import torch
-from geometry_msgs.msg import PointStamped
+import yaml
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
-from sensor_msgs.msg import Image, PointCloud2, PointField
+from sensor_msgs.msg import Image
 
 from sam2_ros.msg import DetectedRoadArea
-from yolov9_ros.msg import BboxList
+from src.configs import T1
+from src.utils import inverse_rigid_transform, timer
 
-
-def timer(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start_time = rospy.Time.now().to_sec()
-        result = func(*args, **kwargs)
-        end_time = rospy.Time.now().to_sec()
-        print(f"{func.__name__} executed in {end_time - start_time:.4f} seconds")
-        return result
-
-    return wrapper
+# np.float = np.float64
 
 
 # Path to the YAML file
@@ -70,13 +55,13 @@ input_labels = [1, 1, 1]
 MIN_CONTOUR_AREA = 30000.0
 
 
-def inverse_rigid_transformation(arr: np.ndarray) -> np.ndarray:
+def inverse_rigid_transform(arr: np.ndarray) -> np.ndarray:
     Rt = arr[:3, :3].T
     tt = -np.dot(Rt, arr[:3, 3])
     return np.vstack((np.column_stack((Rt, tt)), [0, 0, 0, 1]))
 
 
-T_vel_cam = inverse_rigid_transformation(T1)
+T_vel_cam = inverse_rigid_transform(T1)
 
 
 @timer

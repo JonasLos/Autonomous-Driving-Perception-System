@@ -9,6 +9,7 @@ import yaml
 from sensor_msgs.msg import PointCloud2, PointField
 
 from src.configs import PROJ, T1
+from src.utils import inverse_rigid_transform
 
 # Path to the YAML file
 TOPICS_PATH = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
@@ -23,15 +24,6 @@ LIDAR_2D_PROJ_TOPIC = topic_config["topics"]["transform"]["lidar_2d_projection"]
 
 # Define limits
 lim_x, lim_y, lim_z = [10, 80], [-10, 10], [-3.5, 1]
-
-
-def inverse_rigid_transformation(arr: np.ndarray) -> np.ndarray:
-    rt = arr[:3, :3].T
-    tt = -np.dot(rt, arr[:3, 3])
-    return np.vstack((np.column_stack((rt, tt)), [0, 0, 0, 1]))
-
-
-T_vel_cam = inverse_rigid_transformation(T1)
 
 
 class LidarTo2DProjection:
@@ -61,7 +53,9 @@ class LidarTo2DProjection:
         pc_arr = self.voxel_downsample(points, voxel_size=2.0)
 
         # Apply transformation and projection
-        m1 = torch.matmul(torch.tensor(T_vel_cam), torch.tensor(pc_arr.T))
+        m1 = torch.matmul(
+            torch.tensor(inverse_rigid_transform(T1)), torch.tensor(pc_arr.T)
+        )
         uv1 = torch.matmul(torch.tensor(PROJ), m1)
         u, v = (uv1[:2, :] / uv1[2, :]).numpy()
         return pc_arr, u, v

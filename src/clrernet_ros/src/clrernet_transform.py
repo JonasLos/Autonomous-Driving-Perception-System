@@ -1,27 +1,16 @@
 #!/usr/bin/env python3
 
-import rospy
 import numpy as np
-from functools import wraps
-from scipy.spatial import KDTree
+import rospy
 import sensor_msgs.point_cloud2 as pc2
+from scipy.spatial import KDTree
 from sensor_msgs.msg import PointCloud2
+
+from src.configs import LEFT_LANE_BOUNDARY_TOPIC, LEFT_LANE_TOPIC, LIDAR_2D_PROJ_TOPIC
+from src.utils import timer
 from ultrafastv2_ros.msg import LanePoints
-from src.configs import LEFT_LANE_TOPIC, LIDAR_2D_PROJ_TOPIC, LEFT_LANE_BOUNDARY_TOPIC
 
 pixel_lim = 5  # pixels
-
-
-def timer(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start_time = rospy.Time.now().to_sec()
-        result = func(*args, **kwargs)
-        end_time = rospy.Time.now().to_sec()
-        print(f"{func.__name__} executed in {end_time - start_time:.4f} seconds")
-        return result
-
-    return wrapper
 
 
 class LaneTo3D:

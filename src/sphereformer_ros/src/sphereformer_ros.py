@@ -2,7 +2,6 @@
 # type: ignore
 
 import os
-from functools import wraps
 
 import numpy as np
 import ros_numpy
@@ -17,6 +16,8 @@ from sklearn.cluster import DBSCAN
 from SphereFormer.util import config
 from SphereFormer_changes.unet_spherical_transformer import Semantic as Model
 from visualization_msgs.msg import MarkerArray
+
+from src.utils import timer
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(
@@ -46,18 +47,6 @@ lim_x, lim_y, lim_z = [-50, 100], [-20, 20], [-5, 10]
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.cuda.set_per_process_memory_fraction(0.3, device=torch.device("cuda:0"))
-
-
-def timer(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start_time = rospy.Time.now().to_sec()
-        result = func(*args, **kwargs)
-        end_time = rospy.Time.now().to_sec()
-        print(f"{func.__name__} executed in {end_time - start_time:.4f} seconds")
-        return result
-
-    return wrapper
 
 
 class PointCloudInference:
@@ -210,8 +199,8 @@ class PointCloudInference:
                 leftmost_idx = np.argmax(bin_points[:, 1])  # Index of max y
                 rightmost_idx = np.argmin(bin_points[:, 1])  # Index of min y
 
-                left_points.append(bin_points[leftmost_idx])  # Full row
-                right_points.append(bin_points[rightmost_idx])  # Full row
+                left_points.append(bin_points[leftmost_idx])
+                right_points.append(bin_points[rightmost_idx])
 
                 width = bin_points[rightmost_idx, 1] - bin_points[leftmost_idx, 1]
                 widths.append(width)

@@ -2,42 +2,29 @@
 # type: ignore
 
 
-import rospy
+from pathlib import Path
+
 import cv2
+import ros_numpy
+import rospy
 import torch
+from clrernet.libs.utils.visualizer import visualize_lanes
+from inference import inference_one_image
 from mmdet.apis import init_detector
 from sensor_msgs.msg import Image
-from std_msgs.msg import Header
-from inference import inference_one_image
-from clrernet.libs.utils.visualizer import visualize_lanes
-import ros_numpy
-from functools import wraps
-import os
-from pathlib import Path
-from ultrafastv2_ros.msg import LanePoint, LanePoints
-from src.configs import (
+
+from src.configs import (  # Assuming you're using same topic config
     LEFT_LANE_TOPIC,
     RIGHT_LANE_TOPIC,
-)  # Assuming you're using same topic config
-
+)
+from src.utils import timer
+from ultrafastv2_ros.msg import LanePoint, LanePoints
 
 # Configuration parameters
 score_thr = 0.3
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 config = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src/clrernet/configs/clrernet/culane/clrernet_culane_dla34_ema.py"
 checkpoint = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src/clrernet_culane_dla34_ema.pth"
-
-
-def timer(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start_time = rospy.Time.now().to_sec()
-        result = func(*args, **kwargs)
-        end_time = rospy.Time.now().to_sec()
-        print(f"{func.__name__} executed in {end_time - start_time:.4f} seconds")
-        return result
-
-    return wrapper
 
 
 # Lane Detection Class
