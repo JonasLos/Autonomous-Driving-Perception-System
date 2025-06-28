@@ -18,7 +18,7 @@ from sensor_msgs.msg import PointCloud2
 from sklearn.cluster import DBSCAN
 
 from src.configs import PROJ, T1
-from src.utils import inverse_rigid_transform
+from src.utils import crop_pointcloud, inverse_rigid_transform
 from yolov9_ros.msg import BboxList
 
 # Point cloud limits
@@ -36,7 +36,9 @@ with open(CLASS_AVERAGE_PATH, "r", encoding="utf-8") as file:
     average_dimensions = yaml.safe_load(file)
 
 # === Load YAML configs ===
-TOPICS_PATH = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
+TOPICS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "topics.yaml"
+)
 with open(TOPICS_PATH, "r") as f:
     topic_config = yaml.safe_load(f)
 
@@ -117,7 +119,7 @@ class TransformFuse:
         points = np.vstack((pc["x"], pc["y"], pc["z"], np.ones(pc["x"].shape[0]))).T
 
         # Crop point cloud and transform to camera frame
-        pc_arr = self.crop_pointcloud(points)
+        pc_arr = crop_pointcloud(points, lim_x, lim_y, lim_z)
         pc_arr_pick = np.transpose(pc_arr)
         m1 = torch.matmul(
             torch.tensor(inverse_rigid_transform(T1)), torch.tensor(pc_arr_pick)
@@ -260,7 +262,7 @@ class TransformFuse:
                     bbox.dimensions.x = 1.5  # Adjust as needed
                     bbox.dimensions.y = 1.5  # Adjust as needed
                     bbox.dimensions.z = 1.5  # Adjust as needed
-                    bbox.label = 9999  # Label for radar detection (could be modified)
+                    bbox.label = 9999  # Label for radar detection
                     bbox_array.boxes.append(bbox)
 
         bbox_array.header.frame_id = msgLidar.header.frame_id
@@ -288,29 +290,6 @@ class TransformFuse:
                     camera_detections[i][0] - radar_detections[j].pose.pose.position.x
                 )
         return distance_matrix
-
-    def crop_pointcloud(self, pointcloud):
-        """
-        Crop the point cloud to the region of interest.
-
-        Args:
-            pointcloud (np.ndarray): Input point cloud data.
-
-        Returns:
-            np.ndarray: Cropped point cloud data.
-        """
-        mask = np.all(
-            [
-                (pointcloud[:, 0] >= lim_x[0]),
-                (pointcloud[:, 0] <= lim_x[1]),
-                (pointcloud[:, 1] >= lim_y[0]),
-                (pointcloud[:, 1] <= lim_y[1]),
-                (pointcloud[:, 2] >= lim_z[0]),
-                (pointcloud[:, 2] <= lim_z[1]),
-            ],
-            axis=0,
-        )
-        return pointcloud[mask]
 
 
 if __name__ == "__main__":

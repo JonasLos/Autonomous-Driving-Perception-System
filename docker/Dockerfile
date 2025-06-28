@@ -24,15 +24,15 @@ RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-# Set up a non-root user with sudo access
-RUN useradd -ms /bin/bash ubuntuuser && \
-    echo "ubuntuuser:ubuntuuser" | chpasswd && \
-    adduser ubuntuuser sudo && \
-    echo "ubuntuuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+# Set up a non-root user with sudo access (username: dev)
+RUN useradd -ms /bin/bash dev && \
+    echo "dev:dev" | chpasswd && \
+    adduser dev sudo && \
+    echo "dev ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Switch to the non-root user
-USER ubuntuuser
-WORKDIR /home/ubuntuuser
+USER dev
+WORKDIR /home/dev
 
 # Install Conda
 RUN curl -o ~/miniconda.sh -sSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \

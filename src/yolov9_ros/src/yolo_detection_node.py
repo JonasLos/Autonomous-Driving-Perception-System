@@ -30,8 +30,9 @@ BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 WEIGHTS_PATH = os.path.join(BASE_PATH, "..", "best.pt")
 CLASS_AVERAGES_PATH = os.path.join(BASE_PATH, "class_averages.yaml")
 SUPPRESSED_CLASSES_PATH = os.path.join(BASE_PATH, "suppressed_classes.yaml")
-TOPICS_PATH = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
-
+TOPICS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "topics.yaml"
+)
 with open(TOPICS_PATH, "r") as f:
     topic_config = yaml.safe_load(f)
 

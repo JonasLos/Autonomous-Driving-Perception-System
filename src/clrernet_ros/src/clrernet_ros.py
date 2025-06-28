@@ -13,10 +13,10 @@ from inference import inference_one_image
 from mmdet.apis import init_detector
 from sensor_msgs.msg import Image
 
-from src.configs import (  # Assuming you're using same topic config
-    LEFT_LANE_TOPIC,
-    RIGHT_LANE_TOPIC,
-)
+# from src.configs import (  # Assuming you're using same topic config
+#     LEFT_LANE_TOPIC,
+#     RIGHT_LANE_TOPIC,
+# )
 from src.utils import timer
 from ultrafastv2_ros.msg import LanePoint, LanePoints
 
@@ -52,12 +52,14 @@ class CLLanes:
         )
         self.w, self.h = None, None
         self.left_lane_boundary_pub = rospy.Publisher(
-            LEFT_LANE_TOPIC, LanePoints, queue_size=1
+            "/lane_detection/current_lane_left_boundary", LanePoints, queue_size=1
         )
         self.right_lane_boundary_pub = rospy.Publisher(
-            RIGHT_LANE_TOPIC, LanePoints, queue_size=1
+            "/lane_detection/current_lane_right_boundary", LanePoints, queue_size=1
         )
-        self.all_lane_pub = rospy.Publisher(LEFT_LANE_TOPIC, LanePoints, queue_size=1)
+        self.all_lane_pub = rospy.Publisher(
+            "/lane_detection/current_lane_left_boundary", LanePoints, queue_size=1
+        )
 
     @timer
     def image_callback(self, data: Image):

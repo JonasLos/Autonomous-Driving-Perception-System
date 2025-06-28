@@ -7,7 +7,6 @@ import cv2
 import numpy as np
 import ros_numpy
 import rospy
-import sensor_msgs.point_cloud2 as pc2
 import torch
 import yaml
 from sam2.build_sam import build_sam2
@@ -18,14 +17,12 @@ from sam2_ros.msg import DetectedRoadArea
 from src.configs import T1
 from src.utils import inverse_rigid_transform, timer
 
-# np.float = np.float64
-
-
-# Path to the YAML file
-CONFIG_PATH = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
+TOPICS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "topics.yaml"
+)
 
 # Load YAML config
-with open(CONFIG_PATH, "r") as f:
+with open(TOPICS_PATH, "r") as f:
     config = yaml.safe_load(f)
 
 # === Initialize topics ===
@@ -39,7 +36,6 @@ SPHEREFORMER_CENTER_LINE_POINTS = config["topics"]["sphereformer"]["centerline_p
 # Set device to GPU if available, otherwise use CPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 rospy.loginfo(f"Using device: {device}")
-# torch.cuda.set_per_process_memory_fraction(0.4, device=torch.device("cuda:0"))
 
 # Load SAM2 model
 base_path = os.path.dirname(os.path.abspath(__file__))

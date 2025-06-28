@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # type: ignore
 
+import os
+
 import message_filters
 import numpy as np
-
-# np.float = np.float64
 import ros_numpy
 import rospy
 import sensor_msgs.point_cloud2 as pc2
@@ -15,17 +15,18 @@ from sensor_msgs.msg import PointCloud2
 
 from sam2_ros.msg import DetectedRoadArea
 from src.configs import T1
-from src.utils import inverse_rigid_transform, timer
+from src.utils import crop_pointcloud, inverse_rigid_transform, timer
 
 # Define limits
 lim_x, lim_y, lim_z, pixel_lim = [2, 50], [-10, 10], [-3.5, 1], 5
 lim_x, lim_y, lim_z, pixel_lim = [2, 50], [-10, 10], [-3.5, 1], 5
 
-# Path to the YAML file
-CONFIG_PATH = "/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
+TOPICS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "topics.yaml"
+)
 
 # Load YAML config
-with open(CONFIG_PATH, "r") as f:
+with open(TOPICS_PATH, "r") as f:
     config = yaml.safe_load(f)
 
 # === TOPICS ===
@@ -90,9 +91,7 @@ class RoadSegmentation3D:
 
         rospy.loginfo("Node initialized and timer set.")
 
-    # def callback(self, msgLidar,  msgLeftBoundary, msgRightBoundary):
     def callback(self, msgProj, msgLeftBoundary, msgRightBoundary):
-        # self.msgLidar = msgLidar
         self.msgProj = msgProj
         self.msgLeftBoundary = msgLeftBoundary
         self.msgRightBoundary = msgRightBoundary
@@ -151,7 +150,7 @@ class RoadSegmentation3D:
     def process_pointcloud(self, msgLidar):
         pc = ros_numpy.numpify(msgLidar)
         points = np.vstack((pc["x"], pc["y"], pc["z"], np.ones(pc["x"].shape[0]))).T
-        pc_arr = self.crop_pointcloud(points)
+        pc_arr = crop_pointcloud(points, lim_x, lim_y, lim_z)
 
         # Apply transformation and projection
         m1 = torch.matmul(
@@ -179,17 +178,6 @@ class RoadSegmentation3D:
             matches = tree.query_ball_point(contour_point, pixel_lim)
             idx.extend(matches)
         return pc_arr[np.array(idx)] if idx else np.empty((0, 4))
-
-    def crop_pointcloud(self, pointcloud):
-        mask = (
-            (pointcloud[:, 0] >= lim_x[0])
-            & (pointcloud[:, 0] <= lim_x[1])
-            & (pointcloud[:, 1] >= lim_y[0])
-            & (pointcloud[:, 1] <= lim_y[1])
-            & (pointcloud[:, 2] >= lim_z[0])
-            & (pointcloud[:, 2] <= lim_z[1])
-        )
-        return pointcloud[mask]
 
 
 if __name__ == "__main__":

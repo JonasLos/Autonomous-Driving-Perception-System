@@ -43,9 +43,6 @@ topics:
     fsm_status: "/current_fsm_status"
 
   outputs:
-    lidar_2d_projection: "/lidar_2d_projection"
-    yolov9_image: "/yolo_detection_node/published_image"
-    yolov9_bbox: "/yoloLiveNode/bboxInfo"
     tf_static: "/tf_static"
 
 categories:

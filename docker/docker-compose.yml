@@ -8,8 +8,8 @@ services:
     container_name: perception_dev
     image: perception_image
     hostname: perception
-    user: "1000:1000"  # Optional: match host user to avoid permission issues
-    working_dir: /home/ubuntuuser/Autonomous-Driving-Perception-System
+    user: "1000:1000"  # Match host user to avoid permission issues
+    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
     stdin_open: true
     tty: true
     network_mode: "host"
@@ -18,10 +18,9 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all  # allow all GPUs
       - CONDA_ENVS_PATH=/opt/conda/envs  # Point to the mounted environment path
-      - PATH=/opt/conda/envs/yolov9/bin:$PATH  # Example: Adjust for whichever env is active
     volumes:
       - /home/dev/anaconda3/envs:/opt/conda/envs  # Mount all conda environments
-      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/ubuntuuser/Autonomous-Driving-Perception-System
-      - /home/dev/Documents/AVA_Planner:/home/ubuntuuser/AVA_Planner
-      - /home/dev/Documents/AVA_Control:/home/ubuntuuser/AVA_Control
+      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+      - /home/dev/Documents/AVA_Planner:/home/dev/Documents/AVA_Planner
+      - /home/dev/Documents/AVA_Control:/home/dev/Documents/AVA_Control
     command: /bin/bash

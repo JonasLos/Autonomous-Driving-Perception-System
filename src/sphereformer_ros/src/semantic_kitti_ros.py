@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import scipy
 import torch
@@ -48,7 +50,11 @@ class SemanticKITTI(torch.utils.data.Dataset):
         voxel_size=[0.1, 0.1, 0.1],
         split="train",
         return_ref=True,
-        label_mapping="/home/dev/Documents/Autonomous-Driving-Perception-System/src/sphereformer_ros/src/SphereFormer_changes/semantic-kitti.yaml",
+        label_mapping=os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "SphereFormer_changes",
+            "semantic-kitti.yaml",
+        ),
         rotate_aug=False,
         flip_aug=False,
         scale_aug=False,
