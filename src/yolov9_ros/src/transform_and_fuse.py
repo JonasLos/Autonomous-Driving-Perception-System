@@ -43,7 +43,7 @@ with open(TOPICS_PATH, "r") as f:
     topic_config = yaml.safe_load(f)
 
 # === Assign topic variables ===
-LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar"]
+LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar_tc"]
 RADAR_TRACKS_TOPIC = topic_config["topics"]["raw"]["radar"]
 YOLO_BBOX_TOPIC = topic_config["topics"]["yolo"]["bbox"]
 FUSED_BBOX_TOPIC = topic_config["topics"]["yolo"]["fused_bbox"]
@@ -259,9 +259,9 @@ class TransformFuse:
                     ]  # Using the computed radar position
                     bbox.pose.position.y = rad_position[1]
                     bbox.pose.position.z = rad_position[2]
-                    bbox.dimensions.x = 1.5  # Adjust as needed
-                    bbox.dimensions.y = 1.5  # Adjust as needed
-                    bbox.dimensions.z = 1.5  # Adjust as needed
+                    bbox.dimensions.x = 1.5
+                    bbox.dimensions.y = 1.5
+                    bbox.dimensions.z = 1.5
                     bbox.label = 9999  # Label for radar detection
                     bbox_array.boxes.append(bbox)
 

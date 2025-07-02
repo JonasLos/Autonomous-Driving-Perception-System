@@ -30,7 +30,6 @@ with open(TOPICS_PATH, "r") as f:
     config = yaml.safe_load(f)
 
 # === TOPICS ===
-LIDAR_TOPIC = config["topics"]["raw"]["lidar"]
 LIDAR_2D_PROJ_TOPIC = config["topics"]["transform"]["lidar_2d_projection"]
 SAM_LEFT_BOUNDARY = config["topics"]["sam"]["left_boundary"]
 SAM_RIGHT_BOUNDARY = config["topics"]["sam"]["right_boundary"]

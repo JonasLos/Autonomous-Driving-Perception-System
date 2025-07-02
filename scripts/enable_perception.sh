@@ -8,6 +8,7 @@ export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTH
 # Source the ROS workspace
 echo "Sourcing the ROS workspace"
 source devel/setup.bash
+# export ROS_HOSTNAME=localhost
 
 # Activate YOLOv9 conda environment and launch YOLOv9 nodes in a new terminal tab
 echo "Launching YOLOv9 object detection in a new terminal tab..."
@@ -50,7 +51,8 @@ gnome-terminal --tab --title="Sphereformer Lidar Segmentation" -- bash -c '
 
 # Launch Transformation Script (transform.py)
 echo "Launching Transformation Script in a new terminal tab..."
-gnome-terminal --tab --title="Lidar 2D Projection Transform" -- bash -c 'source /home/dev/anaconda3/etc/profile.d/conda.sh &&
+gnome-terminal --tab --title="Lidar 2D Projection Transform" -- bash -c '
+    source /home/dev/anaconda3/etc/profile.d/conda.sh &&
     conda activate yolov9 &&
     python /home/dev/Documents/Autonomous-Driving-Perception-System/src/transform.py; exec bash'
 

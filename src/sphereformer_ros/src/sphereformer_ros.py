@@ -33,7 +33,6 @@ with open(TOPICS_PATH, "r") as f:
     topic_config = yaml.safe_load(f)
 
 # === TOPICS ===
-LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar"]
 SPHEREFORMER_SEGMENTATION_TOPIC = topic_config["topics"]["sphereformer"]["segmentation"]
 SPHEREFORMER_LEFT_BOUNDARY = topic_config["topics"]["sphereformer"]["left_boundary"]
 SPHEREFORMER_RIGHT_BOUNDARY = topic_config["topics"]["sphereformer"]["right_boundary"]

@@ -14,8 +14,8 @@ sudo apt-get install -y ros-melodic-desktop
 
 # Install dependencies for building ROS packages
 echo "Installing dependencies for building ROS packages..."
-sudo apt-get install -y python-rosdep python-rosinstall python-rosinstall-generator python-wstool build-essential python-catkin-pkg libbullet-devs ros-melodic-drived-object-msgs
-
+sudo apt-get install -y python-rosdep python-rosinstall python-rosinstall-generator python-wstool build-essential python-catkin-pkg libbullet-dev ros-melodic-drived-object-msgs
+sudo apt install python3-catkin-pkg-modules python3-rospkg-modules python3-empy #for planner installation and python3 to ros melodic compatibility
 # Initialize rosdep
 sudo rosdep init
 rosdep update

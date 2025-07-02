@@ -1,8 +1,23 @@
 topics:
   raw:
     camera: "/camera_fl/image_color"
-    lidar: "/lidar_tc/velodyne_points"
     radar: "/radar_fc/as_tx/radar_tracks"
+    camera_fl: "/camera_fl/image_raw"
+    camera_fr: "/camera_fr/image_raw"
+    camera_rc: "/camera_rc/arena_camera_node/image_raw"
+    camera_tl: "/camera_tl/arena_camera_node/image_raw"
+    camera_tr: "/camera_tr/arena_camera_node/image_raw"
+    imu: "/imu/data_raw"
+    gps_imu: "/gps/imu"
+    lidar_tc_packets: "/lidar_tc/velodyne_packets"
+    lidar_tc: "/lidar_tc/velodyne_points"
+    lidar_tl_packets: "/lidar_tl/velodyne_packets"
+    lidar_tl: "/lidar_tl/velodyne_points"
+    lidar_tr_packets: "/lidar_tr/velodyne_packets"
+    lidar_tr: "/lidar_tr/velodyne_points"
+    radar_objects: "/radar_fc/as_tx/objects"
+    radar_tracks: "/radar_fc/as_tx/radar_tracks"
+    ins: "/novatel/oem7/odom"
 
   yolo:
     image: "/yolov9/published_image"
@@ -50,6 +65,20 @@ categories:
     - topics.raw.camera
     - topics.raw.lidar
     - topics.raw.radar
+    - topics.raw.ins
+    - topics.raw.camera_fl
+    - topics.raw.camera_fr
+    - topics.raw.camera_rc
+    - topics.raw.camera_tl
+    - topics.raw.camera_tr
+    - topics.raw.lidar_tc
+    - topics.raw.lidar_tl
+    - topics.raw.lidar_tr
+    - topics.raw.radar_tracks
+    - topics.raw.radar_objects
+    - topics.raw.imu
+    - topics.raw.gps_imu
+    - topics.raw.ins
 
   perception:
     - topics.yolo.image
