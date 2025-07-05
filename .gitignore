@@ -138,6 +138,7 @@ cython_debug/
 *.mp4
 .DS_Store
 .catkin_workspace
+*.bag
 
 # Trained models
 *.pt
