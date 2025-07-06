@@ -1,0 +1,125 @@
+version: '3.3'
+
+services:
+  # Build-only service
+  perception_image_builder:
+    profiles: ["builder"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: parimiharsha/perception_image
+    volumes:
+      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
+    command: >
+      bash -c "source ~/.bashrc &&
+              source /opt/ros/melodic/setup.bash &&
+              catkin_make &&
+              echo 'ROS workspace build complete.'"
+
+  yolo_node:
+    image: parimiharsha/perception_image
+    user: "1000:1000"
+    network_mode: "host"
+    ipc: "host"
+    runtime: nvidia
+    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
+    environment:
+      - ROS_MASTER_URI=http://localhost:11311
+      - CONDA_ENVS_PATH=/opt/conda/envs
+      - NVIDIA_VISIBLE_DEVICES=all 
+    volumes:
+      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+      - /home/dev/anaconda3/envs:/opt/conda/envs
+      - /home/dev/Documents/AVA_Planner:/home/dev/Documents/AVA_Planner
+      - /home/dev/Documents/AVA_Control:/home/dev/Documents/AVA_Control
+    command: >
+      bash -c "source ~/.bashrc &&
+               source /home/dev/miniconda/etc/profile.d/conda.sh &&
+               source /opt/ros/melodic/setup.bash &&
+               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
+               conda activate yolov9 &&
+               source devel/setup.bash &&
+               roslaunch yolov9_ros yolov9_ros.launch"
+
+  sam_node:
+    image: parimiharsha/perception_image
+    user: "1000:1000"
+    network_mode: "host"
+    ipc: "host"
+    environment:
+      - ROS_MASTER_URI=http://localhost:11311
+      - CONDA_ENVS_PATH=/opt/conda/envs
+      - NVIDIA_VISIBLE_DEVICES=all 
+    volumes:
+      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+      - /home/dev/anaconda3/envs:/opt/conda/envs
+      - /home/dev/Documents/AVA_Planner:/home/dev/Documents/AVA_Planner
+      - /home/dev/Documents/AVA_Control:/home/dev/Documents/AVA_Control
+    command: >
+      bash -c "source ~/.bashrc &&
+               source /home/dev/miniconda/etc/profile.d/conda.sh &&
+               source /opt/ros/melodic/setup.bash &&
+               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
+               conda activate sam2 &&
+               source devel/setup.bash &&
+               roslaunch sam2_ros sam2_ros.launch"
+
+  transform_node:
+    image: parimiharsha/perception_image
+    user: "1000:1000"
+    network_mode: "host"
+    ipc: "host"
+    environment:
+      - ROS_MASTER_URI=http://localhost:11311
+      - CONDA_ENVS_PATH=/opt/conda/envs
+      - NVIDIA_VISIBLE_DEVICES=all 
+    volumes:
+      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+      - /home/dev/anaconda3/envs:/opt/conda/envs
+      - /home/dev/Documents/AVA_Planner:/home/dev/Documents/AVA_Planner
+      - /home/dev/Documents/AVA_Control:/home/dev/Documents/AVA_Control
+    command: >
+      bash -c "source ~/.bashrc &&
+               source /home/dev/miniconda/etc/profile.d/conda.sh &&
+               source /opt/ros/melodic/setup.bash &&
+               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
+               conda activate yolov9 &&
+               source devel/setup.bash &&
+               python src/transform.py"
+
+  sphereformer_node:
+    image: parimiharsha/perception_image
+    user: "1000:1000"
+    network_mode: "host"
+    ipc: "host"
+    environment:
+      - ROS_MASTER_URI=http://localhost:11311
+      - CONDA_ENVS_PATH=/opt/conda/envs
+      - NVIDIA_VISIBLE_DEVICES=all 
+    volumes:
+      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+      - /home/dev/anaconda3/envs:/opt/conda/envs
+      - /home/dev/Documents/AVA_Planner:/home/dev/Documents/AVA_Planner
+      - /home/dev/Documents/AVA_Control:/home/dev/Documents/AVA_Control
+    command: >
+      bash -c "source ~/.bashrc &&
+              source /home/dev/miniconda/etc/profile.d/conda.sh &&
+              source /opt/ros/melodic/setup.bash &&
+              source devel/setup.bash &&
+              conda activate sphereformer &&
+              export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:\$PYTHONPATH &&
+              export LD_LIBRARY_PATH=\$\CONDA_PREFIX/lib:/usr/local/cuda/lib64:\$\LD_LIBRARY_PATH &&
+              roslaunch sphereformer_ros sphereformer_ros.launch"
+
+
+  # lane_detection_node:
+  #   image: parimiharsha/perception_image
+  #   user: "1000:1000"
+  #   network_mode: "host"
+  #   ipc: "host"
+  #   environment:
+  #     - ROS_MASTER_URI=http://localhost:11311
+  #   volumes:
+  #     - ./Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+  #   command: /bin/bash -c "source ~/.bashrc && conda activate yolov9 && rosrun lane_detection_node lane_detection_node.py"

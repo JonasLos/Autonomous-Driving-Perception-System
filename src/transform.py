@@ -21,11 +21,11 @@ with open(TOPICS_PATH, "r") as f:
     topic_config = yaml.safe_load(f)
 
 # === TOPICS ===
-LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar"]
+LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar_tc"]
 LIDAR_2D_PROJ_TOPIC = topic_config["topics"]["transform"]["lidar_2d_projection"]
 
 # Define limits
-lim_x, lim_y, lim_z = [-20, 100], [-10, 10], [-3.5, 1]
+lim_x, lim_y, lim_z = [-30, 100], [-10, 10], [-3.5, 1]
 
 
 class LidarTo2DProjection:
@@ -51,8 +51,8 @@ class LidarTo2DProjection:
     @timer
     def process_pointcloud(self, msgLidar):
         pc = ros_numpy.numpify(msgLidar)
-        points = np.vstack((pc["x"], pc["y"], pc["z"], np.ones(pc["x"].shape[0]))).T
-        pc_arr = crop_pointcloud(points, lim_x, lim_y, lim_z)
+        pc_arr = np.vstack((pc["x"], pc["y"], pc["z"], np.ones(pc["x"].shape[0]))).T
+        pc_arr = crop_pointcloud(pc_arr, lim_x, lim_y, lim_z)
 
         # Downsample to make it sparse
         pc_arr = self.voxel_downsample(pc_arr, voxel_size=0.1)
@@ -91,8 +91,8 @@ class LidarTo2DProjection:
         pc2_msg = pc2.create_cloud(header, fields, points)
 
         self.projection_pub.publish(pc2_msg)
-        rospy.loginfo(
-            f"Published PointCloud2 projection with {points.shape[0]} points."
+        rospy.loginfo_throttle(
+            2, f"Published PointCloud2 projection with {points.shape[0]} points."
         )
 
 

@@ -4,7 +4,7 @@ FROM ubuntu:18.04
 # Set non-interactive mode for APT
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Update and install necessary packages including git
+# Install necessary packages
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
@@ -16,21 +16,29 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     git \
     nano \
-    vim \
-    gedit 
+    bash \
+    tzdata \
+    bzip2  # Required for Miniconda
 
 # Set up locale
 RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-# Set up a non-root user with sudo access (username: dev)
+# Create a non-root user with sudo privileges
 RUN useradd -ms /bin/bash dev && \
     echo "dev:dev" | chpasswd && \
     adduser dev sudo && \
     echo "dev ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Switch to the non-root user
+# Copy ROS installation script into the container
+COPY ../scripts/install_ros.sh /home/dev/install_ros.sh
+RUN chmod +x /home/dev/install_ros.sh
+
+# Install ROS inside the image (non-interactive)
+RUN bash -c "source ~/.bashrc && /home/dev/install_ros.sh"
+
+# Switch to non-root user
 USER dev
 WORKDIR /home/dev
 
@@ -43,14 +51,14 @@ RUN curl -o ~/miniconda.sh -sSL https://repo.anaconda.com/miniconda/Miniconda3-l
     export PATH=$HOME/miniconda/bin:$PATH && \
     conda init bash
 
-# Set timezone non-interactively
+# Set timezone
 RUN sudo ln -fs /usr/share/zoneinfo/UTC /etc/localtime && \
     echo "UTC" | sudo tee /etc/timezone && \
     sudo apt-get update && \
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
 
-# Set working directory inside the cloned repo
-WORKDIR /home/ubuntuuser/Autonomous-Driving-Perception-System
+# Set working directory inside the repo
+WORKDIR /home/dev/Documents/Autonomous-Driving-Perception-System
 
-# Set the default command to run the ROS installation script and start bash
+# Default to bash shell
 CMD ["/bin/bash"]
