@@ -5,7 +5,7 @@ services:
   perception_image_builder:
     profiles: ["builder"]
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile
     image: parimiharsha/perception_image
     volumes:
