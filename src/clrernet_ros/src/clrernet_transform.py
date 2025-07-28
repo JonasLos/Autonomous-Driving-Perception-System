@@ -1,33 +1,65 @@
 #!/usr/bin/env python3
 
+import os
+
+import message_filters
 import numpy as np
+import ros_numpy
 import rospy
 import sensor_msgs.point_cloud2 as pc2
+import yaml
 from scipy.spatial import KDTree
 from sensor_msgs.msg import PointCloud2
 
-from src.configs import LEFT_LANE_BOUNDARY_TOPIC, LEFT_LANE_TOPIC, LIDAR_2D_PROJ_TOPIC
-from src.utils import timer
-from ultrafastv2_ros.msg import LanePoints
+from clrernet_ros.msg import LanePoints
 
-pixel_lim = 5  # pixels
+# from src.utils import timer
+
+pixel_lim = 10  # pixels
+
+TOPICS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "topics.yaml"
+)
+
+# Load YAML config
+with open(TOPICS_PATH, "r") as f:
+    config = yaml.safe_load(f)
+
+# === TOPICS ===
+LIDAR_2D_PROJ_TOPIC = config["topics"]["transform"]["lidar_2d_projection"]
+LEFT_LANE_TOPIC = config["topics"]["lane_detection"]["left_lane"]
+RIGHT_LANE_TOPIC = config["topics"]["lane_detection"]["right_lane"]
+LEFT_LANE_BOUNDARY_TOPIC = config["topics"]["lane_detection"]["left_lane_boundary"]
+RIGHT_LANE_BOUNDARY_TOPIC = config["topics"]["lane_detection"]["right_lane_boundary"]
 
 
 class LaneTo3D:
     def __init__(self):
-        rospy.init_node("lane_2d_to_3d")
-
         # Subscribers
-        self.sub_proj = rospy.Subscriber(
-            LIDAR_2D_PROJ_TOPIC, PointCloud2, self.proj_callback
+        self.sub_proj = message_filters.Subscriber(LIDAR_2D_PROJ_TOPIC, PointCloud2)
+        # self.sub_lanes = message_filters.Subscriber(LEFT_LANE_TOPIC, LanePoints)
+        self.left_pointSub = message_filters.Subscriber(LEFT_LANE_TOPIC, LanePoints)
+        self.right_pointSub = message_filters.Subscriber(RIGHT_LANE_TOPIC, LanePoints)
+
+        # Publishers
+        self.left_pcl_pub = rospy.Publisher(
+            LEFT_LANE_BOUNDARY_TOPIC, PointCloud2, queue_size=1
         )
-        self.sub_lanes = rospy.Subscriber(
-            LEFT_LANE_TOPIC, LanePoints, self.lanes_callback
+        self.right_pcl_pub = rospy.Publisher(
+            RIGHT_LANE_BOUNDARY_TOPIC, PointCloud2, queue_size=1
         )
 
         self.lane_3d_pub = rospy.Publisher(
             LEFT_LANE_BOUNDARY_TOPIC, PointCloud2, queue_size=1
         )
+        # Synchronize topics
+        ts = message_filters.ApproximateTimeSynchronizer(
+            [self.sub_proj, self.left_pointSub, self.right_pointSub],
+            queue_size=10,
+            slop=0.5,
+            allow_headerless=True,
+        )
+        ts.registerCallback(self.lanes_callback)
 
         self.fields = [
             pc2.PointField(
@@ -44,53 +76,68 @@ class LaneTo3D:
             ),
         ]
 
-        self.pc_arr = None
-        self.uv = None
-        self.header = None
+    # @timer
+    def lanes_callback(self, msgProj, msgLeftPoint: LanePoints, msgRightPoint):
+        # self.msgProj = msgProj
+        # self.msgLane = msgLane
 
-    def proj_callback(self, msg):
-        points_list = list(
-            pc2.read_points(msg, field_names=("x", "y", "z", "u", "v"), skip_nans=True)
+        # Convert PointCloud2 projected points to numpy structured array
+        pc_arr = ros_numpy.point_cloud2.pointcloud2_to_xyz_array(
+            msgProj, remove_nans=True
         )
-        if not points_list:
+        points_list = list(
+            pc2.read_points(
+                msgProj, field_names=("x", "y", "z", "u", "v"), skip_nans=True
+            )
+        )
+        if len(points_list) == 0:
+            rospy.logwarn("No points in projected PointCloud2")
             return
+
         points_np = np.array(points_list)
-        self.pc_arr = points_np[:, :3]
-        self.uv = points_np[:, 3:5]
-        self.header = msg.header
+        u = points_np[:, 3]
+        v = points_np[:, 4]
 
-    @timer
-    def lanes_callback(self, msg: LanePoints):
-        if self.pc_arr is None or self.uv is None:
-            rospy.logwarn("Projected LiDAR data not yet received.")
+        self.get_lane_points(
+            msgLeftPoint, u, v, pc_arr, self.left_pcl_pub, msgProj.header
+        )
+        self.get_lane_points(
+            msgRightPoint, u, v, pc_arr, self.right_pcl_pub, msgProj.header
+        )
+
+    def get_lane_points(self, msgLane, u, v, pc_arr, publisher, header):
+        if not msgLane or not msgLane.points:
+            rospy.logwarn("No lane points received")
             return
+        lane_uv = np.array([[p.x, p.y] for p in msgLane.points])
+        lanes_3d = self.find_matching_points_kdtree(lane_uv, u, v, pc_arr)
+        # print(lane_uv.shape, lanes_3d.shape, "uv and lanes shape")
+        if lanes_3d.size > 0:
+            self.create_cloud(lanes_3d, publisher, header)
 
-        lane_uv = np.array([[p.x, p.y] for p in msg.points])
-        if lane_uv.shape[0] == 0:
-            rospy.logwarn("No lane points received.")
-            return
+        rospy.loginfo(f"Published {lanes_3d.shape[0]} 3D lane points.")
 
-        # Match using KDTree
-        tree = KDTree(self.uv)
-        matched_indices = []
-        for uv in lane_uv:
-            matches = tree.query_ball_point(uv, pixel_lim)
-            matched_indices.extend(matches)
+    def find_matching_points_kdtree(self, boundary_points, u, v, pc_arr):
+        tree = KDTree(np.column_stack((u, v)))
+        idx = []
+        for contour_point in boundary_points:
+            matches = tree.query_ball_point(contour_point, pixel_lim)
+            idx.extend(matches)
+        return pc_arr[np.array(idx)] if idx else np.empty((0, 4))
 
-        matched_indices = list(set(matched_indices))
-        matched_3d = self.pc_arr[matched_indices]
+    def create_cloud(self, points_3d, publisher, header):
+        # Our fields expect 4 values per point (x, y, z, intensity)
+        # So add a dummy intensity value of 1.0 to every point.
+        intensity = np.ones((points_3d.shape[0], 1), dtype=np.float32)
+        cloud_data = np.hstack((points_3d, intensity))
 
-        if matched_3d.size == 0:
-            rospy.logwarn("No 3D points matched.")
-            return
-
-        intensity = np.ones((matched_3d.shape[0], 1), dtype=np.float32)
-        cloud_data = np.hstack((matched_3d, intensity))
-        cloud_msg = pc2.create_cloud(self.header, self.fields, cloud_data)
-        self.lane_3d_pub.publish(cloud_msg)
-        rospy.loginfo(f"Published {cloud_data.shape[0]} 3D lane points.")
+        # Create and publish the PointCloud2 message
+        cloud_msg = pc2.create_cloud(header, self.fields, cloud_data)
+        publisher.publish(cloud_msg)
+        rospy.loginfo("Published point cloud with %d points.", cloud_data.shape[0])
 
 
 if __name__ == "__main__":
+    rospy.init_node("clrernet_lane_to_3d", anonymous=True)
     LaneTo3D()
     rospy.spin()

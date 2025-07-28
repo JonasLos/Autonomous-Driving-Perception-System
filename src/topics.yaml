@@ -17,7 +17,10 @@ topics:
     lidar_tr: "/lidar_tr/velodyne_points"
     radar_objects: "/radar_fc/as_tx/objects"
     radar_tracks: "/radar_fc/as_tx/radar_tracks"
+    radar_markers: "/radar_fc/as_tx/radar_markers"
     ins: "/novatel/oem7/odom"
+    tf_static: "/tf_static"
+    camera_info: "/camera_fl/camera_info"
 
   yolo:
     image: "/yolov9/published_image"
@@ -57,10 +60,18 @@ topics:
     lat_perf: "/lat_ctrl_perf"
     fsm_status: "/current_fsm_status"
 
-  outputs:
-    tf_static: "/tf_static"
-
 categories:
+  perception_input:
+    - topics.raw.camera
+    - topics.raw.lidar_tc
+    - topics.raw.radar_tracks
+    - topics.raw.radar_objects
+    - topics.raw.radar_markers
+    - topics.raw.imu
+    - topics.raw.gps_imu
+    - topics.raw.ins
+    - topics.raw.camera_info
+
   raw:
     - topics.raw.camera
     - topics.raw.lidar
@@ -94,6 +105,7 @@ categories:
     - topics.sphereformer.right_boundary
     - topics.sphereformer.centerline_points
     - topics.sphereformer.lidar_bbox
+    - topics.raw.ins
 
   planning:
     - topics.planning.local_path

@@ -1,6 +1,5 @@
 import cv2
 import torch
-
 from libs.datasets.metrics.culane_metric import interp
 from libs.datasets.pipelines import Compose
 

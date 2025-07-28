@@ -45,11 +45,11 @@ include_directories(
 )
 
 ## Declare ROS messages and services
-add_message_files(
-  FILES
-  LanePoint.msg  # Add your custom message file
-  LanePoints.msg  # Add your custom message file
-)
+# add_message_files(
+#  FILES
+#  LanePoint.msg  # Add your custom message file
+#  LanePoints.msg  # Add your custom message file
+#)
 
 ## Generate added messages and services
 generate_messages(

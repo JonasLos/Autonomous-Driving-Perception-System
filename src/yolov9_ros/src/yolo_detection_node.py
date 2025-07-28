@@ -24,6 +24,7 @@ if device == "cpu":
     print("Using CPU and not GPU")
 if device != torch.device("cpu"):
     torch.cuda.init()  # Ensure CUDA is initialized early
+torch.cuda.set_per_process_memory_fraction(0.05, device=torch.device("cuda:0"))
 
 # Get the paths of the current script and other required files
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -121,7 +122,7 @@ class Detect:
         )
         img_tensor = img_tensor.permute(2, 0, 1).unsqueeze(0) / 255.0
 
-        with torch.no_grad():
+        with torch.no_grad(), torch.cuda.amp.autocast():
             detections = self.model(img_tensor)[0]
             bboxes: np.ndarray = detections.boxes.xyxy.cpu().numpy().astype(int)
             class_ids: np.ndarray = detections.boxes.cls.cpu().numpy().astype(int)

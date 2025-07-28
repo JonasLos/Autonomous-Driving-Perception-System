@@ -31,8 +31,6 @@ services:
     volumes:
       - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
       - /home/dev/anaconda3/envs:/opt/conda/envs
-      - /home/dev/Documents/AVA_Planner:/home/dev/Documents/AVA_Planner
-      - /home/dev/Documents/AVA_Control:/home/dev/Documents/AVA_Control
     command: >
       bash -c "source ~/.bashrc &&
                source /home/dev/miniconda/etc/profile.d/conda.sh &&
@@ -47,6 +45,8 @@ services:
     user: "1000:1000"
     network_mode: "host"
     ipc: "host"
+    runtime: nvidia
+    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
     environment:
       - ROS_MASTER_URI=http://localhost:11311
       - CONDA_ENVS_PATH=/opt/conda/envs
@@ -54,8 +54,6 @@ services:
     volumes:
       - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
       - /home/dev/anaconda3/envs:/opt/conda/envs
-      - /home/dev/Documents/AVA_Planner:/home/dev/Documents/AVA_Planner
-      - /home/dev/Documents/AVA_Control:/home/dev/Documents/AVA_Control
     command: >
       bash -c "source ~/.bashrc &&
                source /home/dev/miniconda/etc/profile.d/conda.sh &&
@@ -65,11 +63,38 @@ services:
                source devel/setup.bash &&
                roslaunch sam2_ros sam2_ros.launch"
 
+  clrernet_node:
+    image: parimiharsha/perception_image
+    user: "1000:1000"
+    network_mode: "host"
+    ipc: "host"
+    runtime: nvidia
+    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
+    environment:
+      # - ROS_MASTER_URI=http://localhost:11311
+      - CONDA_ENVS_PATH=/opt/conda/envs
+      - NVIDIA_VISIBLE_DEVICES=all 
+    volumes:
+      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+      - /home/dev/anaconda3/envs:/opt/conda/envs
+    command: >
+      bash -c "source ~/.bashrc &&
+               source /home/dev/miniconda/etc/profile.d/conda.sh &&
+               source /opt/ros/melodic/setup.bash &&
+               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
+               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src:/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src/clrernet:$PYTHONPATH &&
+               conda activate clrernet &&
+               source devel/setup.bash &&
+               roslaunch clrernet_ros clrernet_ros.launch"
+
+
   transform_node:
     image: parimiharsha/perception_image
     user: "1000:1000"
     network_mode: "host"
     ipc: "host"
+    runtime: nvidia
+    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
     environment:
       - ROS_MASTER_URI=http://localhost:11311
       - CONDA_ENVS_PATH=/opt/conda/envs
@@ -77,8 +102,6 @@ services:
     volumes:
       - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
       - /home/dev/anaconda3/envs:/opt/conda/envs
-      - /home/dev/Documents/AVA_Planner:/home/dev/Documents/AVA_Planner
-      - /home/dev/Documents/AVA_Control:/home/dev/Documents/AVA_Control
     command: >
       bash -c "source ~/.bashrc &&
                source /home/dev/miniconda/etc/profile.d/conda.sh &&
@@ -93,6 +116,8 @@ services:
     user: "1000:1000"
     network_mode: "host"
     ipc: "host"
+    runtime: nvidia
+    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
     environment:
       - ROS_MASTER_URI=http://localhost:11311
       - CONDA_ENVS_PATH=/opt/conda/envs
@@ -100,8 +125,6 @@ services:
     volumes:
       - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
       - /home/dev/anaconda3/envs:/opt/conda/envs
-      - /home/dev/Documents/AVA_Planner:/home/dev/Documents/AVA_Planner
-      - /home/dev/Documents/AVA_Control:/home/dev/Documents/AVA_Control
     command: >
       bash -c "source ~/.bashrc &&
               source /home/dev/miniconda/etc/profile.d/conda.sh &&
@@ -113,13 +136,35 @@ services:
               roslaunch sphereformer_ros sphereformer_ros.launch"
 
 
-  # lane_detection_node:
-  #   image: parimiharsha/perception_image
-  #   user: "1000:1000"
-  #   network_mode: "host"
-  #   ipc: "host"
-  #   environment:
-  #     - ROS_MASTER_URI=http://localhost:11311
-  #   volumes:
-  #     - ./Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
-  #   command: /bin/bash -c "source ~/.bashrc && conda activate yolov9 && rosrun lane_detection_node lane_detection_node.py"
+#    export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:\$PYTHONPATH &&
+#  export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src/clrernet:$PYTHONPATH &&
+
+
+  controller_node:
+    image: parimiharsha/perception_image
+    user: "1000:1000"
+    network_mode: "host"
+    ipc: "host"
+    working_dir: /home/dev/Documents/AVA_Control
+    environment:
+      - ROS_MASTER_URI=http://localhost:11311
+      - CONDA_ENVS_PATH=/opt/conda/envs
+      - NVIDIA_VISIBLE_DEVICES=all 
+    volumes:
+      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+      - /home/dev/anaconda3/envs:/opt/conda/envs
+      - /home/dev/Documents/AVA_Control:/home/dev/Documents/AVA_Control
+    command: >
+      bash -c "source ~/.bashrc &&
+              source /home/dev/miniconda/etc/profile.d/conda.sh &&
+              source /opt/ros/melodic/setup.bash &&
+              sudo apt install ros-melodic-raptor-dbw-msgs &&
+              catkin_make &&
+              source devel/setup.bash &&
+              chmod +x src/setup_permissions.sh &&
+              ./src/setup_permissions.sh &&
+              conda activate newcontrol &&
+              curl https://bootstrap.pypa.io/pip/2.7/get-pip.py -o get-pip.py &&
+              python2 get-pip.py &&
+              /home/dev/.local/bin/pip2 install scipy &&
+              roslaunch AVA_Control ctrl6.launch"

@@ -2,7 +2,7 @@
 <package format="2">
   <name>clrernet_ros</name>
   <version>0.0.0</version>
-  <description>Road segmentation using SAM2</description>
+  <description>Lane Detection using Clrernet</description>
 
   <!-- One maintainer tag required, multiple allowed, one person per tag -->
   <!-- Example:  -->
@@ -55,11 +55,14 @@
   <build_export_depend>rospy</build_export_depend>
   <build_export_depend>sensor_msgs</build_export_depend> 
   <build_export_depend>std_msgs</build_export_depend>
+  <build_export_depend>message_runtime</build_export_depend> <!-- Added for message runtime -->
+
+  <build_depend>message_generation</build_depend>
+
   <exec_depend>rospy</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>   
-
-  <build_depend>message_generation</build_depend>
+  <build_export_depend>message_runtime</build_export_depend> <!-- Added for message runtime -->
   <exec_depend>message_runtime</exec_depend>
 
   <!-- The export tag contains other, unspecified, tags -->

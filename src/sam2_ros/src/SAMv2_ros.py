@@ -34,7 +34,8 @@ SAM_RIGHT_CONTOUR_TOPIC = config["topics"]["sam"]["right_contour"]
 SPHEREFORMER_CENTER_LINE_POINTS = config["topics"]["sphereformer"]["centerline_points"]
 
 # Set device to GPU if available, otherwise use CPU
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+torch.cuda.set_per_process_memory_fraction(0.3, device=device)
 rospy.loginfo(f"Using device: {device}")
 
 # Load SAM2 model
@@ -46,23 +47,23 @@ sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device)
 predictor = SAM2ImagePredictor(sam2_model)
 
 # Define points for initial segmentation prompt
-point_coords = np.array([[400, 700], [550, 700], [650, 700]])
+point_coords = np.array(
+    [
+        [400 * 640 / 1024, 700 * 640 / 772],
+        [550 * 640 / 1024, 700 * 640 / 772],
+        [650 * 640 / 1024, 700 * 640 / 772],
+    ]
+)
 input_labels = [1, 1, 1]
 MIN_CONTOUR_AREA = 30000.0
-
-
-def inverse_rigid_transform(arr: np.ndarray) -> np.ndarray:
-    Rt = arr[:3, :3].T
-    tt = -np.dot(Rt, arr[:3, 3])
-    return np.vstack((np.column_stack((Rt, tt)), [0, 0, 0, 1]))
-
 
 T_vel_cam = inverse_rigid_transform(T1)
 
 
 @timer
 def process_image(image, detected_objects, publish_image=False):
-    image = cv2.resize(image, (2048 // 2, 1544 // 2))
+    # image = cv2.resize(image, (2048 // 2, 1544 // 2))
+    image = cv2.resize(image, (640, 640))
     h_original, w_original = image.shape[:2]
     center_x = int(w_original * 0.75)
     # point_coords = point_coords.append(auto)
@@ -79,8 +80,10 @@ def process_image(image, detected_objects, publish_image=False):
     # input_labels = np.ones(len(auto), dtype=np.int32).tolist()  # Match size
     # print("auto:", auto)
     # p = np.vstack([point_coords, auto]).astype(np.float32)
+
     # Predict masks using SAM2 model
-    with torch.cuda.amp.autocast():
+    # with torch.no_grad(), torch.cuda.amp.autocast():
+    with torch.inference_mode(), torch.cuda.amp.autocast():
         predictor.set_image(image)
         masks, _, _ = predictor.predict(
             point_coords=point_coords, point_labels=input_labels, multimask_output=False
@@ -159,16 +162,16 @@ def process_image(image, detected_objects, publish_image=False):
     left_boundary_points, right_boundary_points = np.array(
         left_boundary_points
     ), np.array(right_boundary_points)
-    if is_straight_line(left_boundary_points):
-        rospy.logwarn(
-            "Boundary is nearly a straight horizontal line, skipping publication."
-        )
-        return None, None, None  # Do not publish straight-line boundaries
-    if is_straight_line(right_boundary_points):
-        rospy.logwarn(
-            "Boundary is nearly a straight horizontal line, skipping publication."
-        )
-        return None, None, None  # Do not publish straight-line boundaries
+    # if is_straight_line(left_boundary_points):
+    #     rospy.logwarn(
+    #         "Boundary is nearly a straight horizontal line, skipping publication."
+    #     )
+    #     return None, None, None  # Do not publish straight-line boundaries
+    # if is_straight_line(right_boundary_points):
+    #     rospy.logwarn(
+    #         "Boundary is nearly a straight horizontal line, skipping publication."
+    #     )
+    #     return None, None, None  # Do not publish straight-line boundaries
     overlay = create_overlay(
         image,
         road_mask,
@@ -185,7 +188,7 @@ def classify_boundaries_using_horizontal_bins(
     contour_points, frame_height, num_bins=50
 ):
     if len(contour_points) == 0:
-        return np.array([]), np.array([])
+        return [], []
 
     y_min = contour_points[:, 1].min()
     bin_height = (frame_height - y_min) // num_bins
@@ -411,7 +414,7 @@ class RoadSegmentation:
             self.publish_image_topic(self.ros_image, overlay)
 
         # Publish boundary points
-        if left_boundary is not None:
+        if (left_boundary is not None) and left_boundary.size > 0:
 
             # Remove points that are at the image boundary (x == width or y == height or 0)
             mask = (
@@ -421,16 +424,19 @@ class RoadSegmentation:
                 & (left_boundary[:, 1] != img.shape[0])
             )
             left_boundary = left_boundary[mask]
-
+            # Resize the left boundary points to match the original image size
+            left_boundary[:, 0], left_boundary[:, 1] = left_boundary[:, 0] * (
+                2 * 1024 / 640
+            ), left_boundary[:, 1] * (2 * 772 / 640)
             self.publish_boundary(
                 left_boundary, self.left_boundary_pub, self.ros_image.header.stamp
             )
-        else:
-            left_boundary = []
-            # self.publish_boundary(
-            #     left_boundary, self.left_boundary_pub, self.ros_image.header.stamp
-            # )
-        if right_boundary is not None:
+        # else:
+        #     left_boundary = []
+        #     # self.publish_boundary(
+        #     #     left_boundary, self.left_boundary_pub, self.ros_image.header.stamp
+        #     # )
+        if (right_boundary is not None) and right_boundary.size > 0:
 
             # Remove points that are at the image boundary (x == width or y == height or 0)
             mask = (
@@ -440,15 +446,19 @@ class RoadSegmentation:
                 & (right_boundary[:, 1] != img.shape[0])
             )
             right_boundary = right_boundary[mask]
-
+            # Resize the right boundary points to match the original image size
+            right_boundary[:, 0], right_boundary[:, 1] = (
+                right_boundary[:, 0] * (2 * 1024 / 640),
+                right_boundary[:, 1] * (2 * 772 / 640),
+            )
             self.publish_boundary(
                 right_boundary, self.right_boundary_pub, self.ros_image.header.stamp
             )
-        else:
-            right_boundary = []
-            # self.publish_boundary(
-            #     right_boundary, self.right_boundary_pub, self.ros_image.header.stamp
-            # )
+        # else:
+        #     right_boundary = []
+        #     # self.publish_boundary(
+        #     #     right_boundary, self.right_boundary_pub, self.ros_image.header.stamp
+        #     # )
 
     def publish_image_topic(self, ros_image, overlay):
         msg = Image()

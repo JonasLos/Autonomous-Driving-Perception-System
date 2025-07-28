@@ -41,7 +41,7 @@ SPHEREFORMER_CENTER_LINE_POINTS = topic_config["topics"]["sphereformer"][
 ]
 LIDAR_2D_PROJ_TOPIC = topic_config["topics"]["transform"]["lidar_2d_projection"]
 
-lim_x, lim_y, lim_z = [-50, 100], [-20, 20], [-5, 10]
+lim_x, lim_y, lim_z = [-30, 100], [-10, 10], [-5, 10]
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.cuda.set_per_process_memory_fraction(0.3, device=torch.device("cuda:0"))
@@ -68,17 +68,18 @@ class PointCloudInference:
         )
         # Publishers
         self.left_boundary_pub = rospy.Publisher(
-            SPHEREFORMER_LEFT_BOUNDARY, PointCloud2, queue_size=1
+            SPHEREFORMER_LEFT_BOUNDARY, PointCloud2, queue_size=5
         )
         self.right_boundary_pub = rospy.Publisher(
-            SPHEREFORMER_RIGHT_BOUNDARY, PointCloud2, queue_size=1
+            SPHEREFORMER_RIGHT_BOUNDARY, PointCloud2, queue_size=5
         )
         self.centerline_pub = rospy.Publisher(
             SPHEREFORMER_CENTER_LINE_POINTS, PointCloud2, queue_size=10
         )
 
         rospy.Subscriber(
-            LIDAR_2D_PROJ_TOPIC,
+            # LIDAR_2D_PROJ_TOPIC,
+            "/filtered_points",
             PointCloud2,
             self.ros_callback,
             queue_size=1,
@@ -142,7 +143,8 @@ class PointCloudInference:
     def ros_callback(self, msg):
         """ROS callback to process incoming PointCloud2 messages."""
         rospy.loginfo("Received a message, starting inference...")
-        seg_points, output_labels = self.inference_from_ros_message(msg, self.model)
+        with torch.no_grad(), torch.cuda.amp.autocast():
+            seg_points, output_labels = self.inference_from_ros_message(msg, self.model)
         rospy.loginfo("Inference complete. Processing results...")
 
         # Check if seg_points is structured and has the required dtype fields
@@ -231,9 +233,9 @@ class PointCloudInference:
         #     self.publish_centerline_points(msg, selected_center_points)
 
         self.create_cloud(road_points, self.pub, msg)
-        if left_points.size > 0:
+        if left_points.size > 0 and right_points.size > 0:
             self.create_cloud(left_points, self.left_boundary_pub, msg)
-        if right_points.size > 0:
+        if right_points.size > 0 and left_points.size > 0:
             self.create_cloud(right_points, self.right_boundary_pub, msg)
         rospy.loginfo("Publishing the processed point cloud and bounding boxes.")
 
@@ -311,7 +313,7 @@ class PointCloudInference:
         pcd[:, 1] = pc["y"]
         pcd[:, 2] = pc["z"]
         np_points = np.asarray(pcd)
-        # np_points = crop_pointcloud(np_points, lim_x, lim_y, lim_z)
+        np_points = crop_pointcloud(np_points, lim_x, lim_y, lim_z)
         p_points = np_points[:, 0:3]
         intensities = np_points[:, 3]
         binary_points, binary_labels = self.convert_to_binary_format(

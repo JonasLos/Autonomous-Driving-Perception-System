@@ -119,10 +119,10 @@ class RoadSegmentation3D:
             np.array(self.msgRightBoundary.RoadArea.data).reshape(-1, 2), u, v, pc_arr
         )
 
-        if left_boundary_3d.size > 0:
-            self.create_cloud(
-                left_boundary_3d, self.left_boundary_pub, self.msgProj.header
-            )
+        left_boundary_3d = self.find_matching_points_kdtree(
+            np.array(self.msgLeftBoundary.RoadArea.data).reshape(-1, 2), u, v, pc_arr
+        )
+
         if right_boundary_3d.size > 0:
             self.create_cloud(
                 right_boundary_3d, self.right_boundary_pub, self.msgProj.header
