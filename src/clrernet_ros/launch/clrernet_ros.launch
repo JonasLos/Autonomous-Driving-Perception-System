@@ -1,5 +1,5 @@
 <launch>
   <!-- Launch road segmentation nodes -->
-  <node pkg="clrernet_ros" type="clrernet_ros_node.py" name="clrernet_ros_node" output="screen"/>
-  <node pkg="clrernet_ros" type="clrernet_transform.py" name="clrernet_transform" output="screen"/>
+  <node pkg="clrernet_ros" type="clrernet_lane_detection.py" name="clrernet_ros_node" output="screen"/>
+  <node pkg="clrernet_ros" type="clrernet_lane_transform.py" name="clrernet_transform" output="screen"/>
 </launch>

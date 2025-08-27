@@ -33,21 +33,21 @@ with open(TOPICS_PATH, "r") as f:
     topic_config = yaml.safe_load(f)
 
 # === TOPICS ===
-SPHEREFORMER_SEGMENTATION_TOPIC = topic_config["topics"]["sphereformer"]["segmentation"]
+SPHEREFORMER_SEGMENTATION_TOPIC = topic_config["topics"]["sphereformer"][
+    "segmentation_mask"
+]
 SPHEREFORMER_LEFT_BOUNDARY = topic_config["topics"]["sphereformer"]["left_boundary"]
 SPHEREFORMER_RIGHT_BOUNDARY = topic_config["topics"]["sphereformer"]["right_boundary"]
-SPHEREFORMER_CENTER_LINE_POINTS = topic_config["topics"]["sphereformer"][
-    "centerline_points"
-]
+RING_FILTERED_POINTS_TOPIC = topic_config["topics"]["sphereformer"]["ring_filtered"]
 LIDAR_2D_PROJ_TOPIC = topic_config["topics"]["transform"]["lidar_2d_projection"]
 
-lim_x, lim_y, lim_z = [-30, 100], [-10, 10], [-5, 10]
+lim_x, lim_y, lim_z = [-30, 100], [-10, 10], [-5, 0]
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-torch.cuda.set_per_process_memory_fraction(0.3, device=torch.device("cuda:0"))
+torch.cuda.set_per_process_memory_fraction(0.3, device)
 
 
-class PointCloudInference:
+class SphereformerLidarSegmentation:
     def __init__(
         self,
         config_path,
@@ -59,8 +59,6 @@ class PointCloudInference:
         self.cfg = config.load_cfg_from_cfg_file(self.config_path)
         self.model = self._load_model()
         self.semkitti_dataset = SemanticKITTI(split="val")
-        self.current_marker_ids = set()
-        self.previous_centerline = None  # Store previous centerline points
 
         # ROS publishers and subscribers
         self.pub = rospy.Publisher(
@@ -73,13 +71,9 @@ class PointCloudInference:
         self.right_boundary_pub = rospy.Publisher(
             SPHEREFORMER_RIGHT_BOUNDARY, PointCloud2, queue_size=5
         )
-        self.centerline_pub = rospy.Publisher(
-            SPHEREFORMER_CENTER_LINE_POINTS, PointCloud2, queue_size=10
-        )
 
         rospy.Subscriber(
-            # LIDAR_2D_PROJ_TOPIC,
-            "/filtered_points",
+            RING_FILTERED_POINTS_TOPIC,
             PointCloud2,
             self.ros_callback,
             queue_size=1,
@@ -93,6 +87,7 @@ class PointCloudInference:
                 name="intensity", offset=12, datatype=PointField.FLOAT32, count=1
             ),
         ]
+        self.cluster_pointcloud = False
 
     @timer
     def _load_model(self):
@@ -135,7 +130,9 @@ class PointCloudInference:
             k.replace("module.", ""): v for k, v in checkpoint["state_dict"].items()
         }
         model.load_state_dict(state_dict, strict=False)
-        model = model.cuda()
+        model = model.to(device)
+        if device.type == "cuda":
+            model = model.half()  # enable mixed precision
         model.eval()
         return model
 
@@ -171,14 +168,14 @@ class PointCloudInference:
         road_points = seg_points[mask]
         road_points = road_points.view(np.float32).reshape(-1, 4)
 
-        # if road_points.size > 0:
-        #     clustering = DBSCAN(eps=0.5, min_samples=10).fit(road_points[:, :3])
-        #     labels = clustering.labels_
-        #     road_points = road_points[labels != -1]  # Remove outliers
+        if self.cluster_pointcloud:
+            if road_points.size > 0:
+                clustering = DBSCAN(eps=0.5, min_samples=10).fit(road_points[:, :3])
+                labels = clustering.labels_
+                road_points = road_points[labels != -1]  # Remove outliers
 
         left_points = []
         right_points = []
-        print(road_points.size)
         if road_points.size > 0:
             min_x = np.min(road_points[:, 0])
             max_x = np.max(road_points[:, 0])
@@ -203,107 +200,23 @@ class PointCloudInference:
                 widths.append(width)
 
         left_points, right_points = np.array(left_points), np.array(right_points)
-
-        # Compute evenly spaced centerline points
-        # if left_points.shape[0] > 0 and right_points.shape[0] > 0:
-        #     left_points_front = left_points[left_points[:, 0] > 0]
-        #     right_points_front = right_points[right_points[:, 0] > 0]
-        #     num_points = min(len(left_points_front), len(right_points_front))
-        #     centerline_points = (
-        #         left_points_front[: num_points - 1, :]
-        #         + right_points_front[: num_points - 1, :]
-        #     ) / 2  # Compute center points
-
-        #     # Apply smoothing
-        #     centerline_points = self.smooth_centerline(centerline_points)
-
-        #     # Select three evenly spaced points
-        #     num_points = centerline_points.shape[0]
-        #     if num_points >= 3:
-        #         indices = np.linspace(0, num_points - 1, num=3, dtype=int)
-        #         selected_center_points = centerline_points[indices, :3]  # Only X, Y, Z
-        #     else:
-        #         selected_center_points = centerline_points[
-        #             :, :3
-        #         ]  # Use all if less than 3
-
-        #     print("Selected Center Points:", selected_center_points)
-
-        #     # Publish centerline points as PointCloud2
-        #     self.publish_centerline_points(msg, selected_center_points)
-
         self.create_cloud(road_points, self.pub, msg)
+
         if left_points.size > 0 and right_points.size > 0:
             self.create_cloud(left_points, self.left_boundary_pub, msg)
+
         if right_points.size > 0 and left_points.size > 0:
             self.create_cloud(right_points, self.right_boundary_pub, msg)
+
         rospy.loginfo("Publishing the processed point cloud and bounding boxes.")
 
-    # def smooth_centerline(self, new_centerline, alpha=0.3, num_fixed_points=10):
-    #     """
-    #     Apply exponential smoothing to stabilize centerline points.
-    #     - alpha: Smoothing factor (0.0 - no update, 1.0 - instant update)
-    #     - num_fixed_points: Ensure a fixed number of centerline points
-    #     """
-    #     if new_centerline.shape[0] == 0:
-    #         return (
-    #             self.previous_centerline
-    #             if self.previous_centerline is not None
-    #             else new_centerline
-    #         )
-
-    #     # Interpolate to ensure a fixed number of points
-    #     num_points = new_centerline.shape[0]
-    #     if num_points > 1:
-    #         interp_indices = np.linspace(
-    #             0, num_points - 1, num=num_fixed_points, dtype=int
-    #         )
-    #         new_centerline = new_centerline[interp_indices]
-    #     elif num_points == 1:
-    #         new_centerline = np.tile(
-    #             new_centerline, (num_fixed_points, 1)
-    #         )  # Duplicate same point
-
-    #     # Initialize previous centerline if None
-    #     if (
-    #         self.previous_centerline is None
-    #         or self.previous_centerline.shape != new_centerline.shape
-    #     ):
-    #         self.previous_centerline = new_centerline
-
-    #     # Apply exponential smoothing
-    #     self.previous_centerline = (
-    #         alpha * new_centerline + (1 - alpha) * self.previous_centerline
-    #     )
-    #     return self.previous_centerline
-
-    # def publish_centerline_points(self, msg, selected_center_points):
-    #     """
-    #     Publish centerline points as a PointCloud2 message.
-    #     Keeps the header timestamp and allows multiple points to be stored.
-    #     """
-    #     header = msg.header  # Preserve timestamp and frame
-
-    #     # Define the fields: x, y, z as FLOAT32
-    #     fields = [
-    #         PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
-    #         PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
-    #         PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
-    #     ]
-
-    #     # Convert points to a list of tuples
-    #     point_cloud_data = [tuple(point) for point in selected_center_points]
-
-    #     # Create and publish PointCloud2 message
-    #     centerline_msg = pc2.create_cloud(header, fields, point_cloud_data)
-    #     self.centerline_pub.publish(centerline_msg)
-    #     rospy.loginfo("Published centerline points as PointCloud2")
-
-    def create_cloud(self, points_3d, publisher, msg):
-        header = msg.header
-        pointcloud = pc2.create_cloud(header, self.fields, points_3d)
-        publisher.publish(pointcloud)
-        rospy.loginfo("Published point cloud with %d points.", len(points_3d))
+    def create_cloud(
+        self, points: np.ndarray, pub: rospy.Publisher, ref_msg: PointCloud2
+    ):
+        header = ref_msg.header
+        data = [tuple(p) for p in np.asarray(points, dtype=np.float32)]
+        pc_msg = pc2.create_cloud(header, self.fields, data)
+        pub.publish(pc_msg)
 
     @timer
     def inference_from_ros_message(self, ros_msg, model):
@@ -388,6 +301,6 @@ class PointCloudInference:
 
 
 if __name__ == "__main__":
-    rospy.init_node("pointcloud_inference", anonymous=True)
-    inference_node = PointCloudInference(CONFIG_PATH, CHECKPOINT_PATH)
+    rospy.init_node("Sphereformer Lidar Segmentation", anonymous=True)
+    SphereformerLidarSegmentation(CONFIG_PATH, CHECKPOINT_PATH)
     rospy.spin()

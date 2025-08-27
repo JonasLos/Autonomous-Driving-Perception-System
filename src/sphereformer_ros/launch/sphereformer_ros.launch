@@ -1,4 +1,10 @@
 <launch>
   <!-- Launch sphereformer lidar segmentation node -->
   <node pkg="sphereformer_ros" type="sphereformer_ros.py" name="sphereformer" output="screen"/>
+  <node pkg="points_downsampler" name="ring_filter" type="ring_filter" output="screen">
+    <param name="points_topic" value="/lidar_tc/veloydne_points" />
+    <remap from="/points_raw" to="/sync_drivers/points_raw" if="false" />
+    <param name="output_log" value="false" />
+    <param name="measurement_range" value="100" />
+  </node>
 </launch>

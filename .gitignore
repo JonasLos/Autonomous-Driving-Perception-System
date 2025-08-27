@@ -139,6 +139,7 @@ cython_debug/
 .DS_Store
 .catkin_workspace
 *.bag
+*.rst
 
 # Trained models
 *.pt

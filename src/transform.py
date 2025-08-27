@@ -2,6 +2,7 @@
 
 import os
 
+import cython
 import numpy as np
 import ros_numpy
 import rospy
@@ -23,9 +24,10 @@ with open(TOPICS_PATH, "r") as f:
 # === TOPICS ===
 LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar_tc"]
 LIDAR_2D_PROJ_TOPIC = topic_config["topics"]["transform"]["lidar_2d_projection"]
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # Define limits
-lim_x, lim_y, lim_z = [-30, 100], [-10, 10], [-3.5, 1]
+lim_x, lim_y, lim_z = [0, 100], [-10, 10], [-3.5, 1]
 
 
 class LidarTo2DProjection:
@@ -49,6 +51,7 @@ class LidarTo2DProjection:
         self.publish_projection(msgLidar.header, pc_arr, u, v)
 
     @timer
+    @cython.inline
     def process_pointcloud(self, msgLidar):
         pc = ros_numpy.numpify(msgLidar)
         pc_arr = np.vstack((pc["x"], pc["y"], pc["z"], np.ones(pc["x"].shape[0]))).T
@@ -63,9 +66,17 @@ class LidarTo2DProjection:
         )
         uv1 = torch.matmul(torch.tensor(PROJ), m1)
         u, v = (uv1[:2, :] / uv1[2, :]).numpy()
+        print(u.max(), u.min(), v.max(), v.min())
+
+        # Correct element-wise filtering
+        mask = (u > 0) & (u < 2048) & (v > 0) & (v < 1544)
+        pc_arr = pc_arr[mask]
+        u, v = u[mask], v[mask]
+
         return pc_arr, u, v
 
     @timer
+    @cython.inline
     def voxel_downsample(self, points, voxel_size):
         """Downsamples a pointcloud using voxel grid filtering."""
         # Only use x, y, z for voxelization

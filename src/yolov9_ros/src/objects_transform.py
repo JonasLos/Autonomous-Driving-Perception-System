@@ -49,7 +49,7 @@ YOLO_BBOX_TOPIC = topic_config["topics"]["yolo"]["bbox"]
 FUSED_BBOX_TOPIC = topic_config["topics"]["yolo"]["fused_bbox"]
 
 
-class TransformFuse:
+class ObjectsTransform:
     """
     Class to handle the transformation of detected bounding box coordinates
     from 2D image space to 3D lidar space.
@@ -100,9 +100,6 @@ class TransformFuse:
         )
         ts.registerCallback(self.callback)
 
-        rospy.loginfo("Initialization complete. Spinning...")
-        rospy.spin()
-
     def callback(self, msgLidar, msgPoint, msgRadar):
         """
         Callback function for synchronized lidar, image, and radar data.
@@ -135,7 +132,7 @@ class TransformFuse:
         for bbox_info in msgPoint.Bboxes:
             x_min, y_min = bbox_info.x_min, bbox_info.y_min
             x_max, y_max = bbox_info.x_max, bbox_info.y_max
-            class_id, confidence = bbox_info.class_id, bbox_info.confidence
+            class_id, _ = bbox_info.class_id, bbox_info.confidence
 
             # Calculate center of the bounding box
             center_x = (x_min + x_max) / 2
@@ -230,40 +227,40 @@ class TransformFuse:
                 bbox_array.boxes.append(bbox)
 
         # Add radar objects to bounding box array
-        # for i, obj in enumerate(msgRadar.tracks):  # radar detections
-        #     if i not in [g for f, g in matched_pairs]:
-        #         # Calculate the center of the radar track shape by averaging the points
-        #         track_shape = (
-        #             obj.track_shape.points
-        #         )  # Assuming 'track_shape' is part of 'obj'
-        #         rad_position = np.array(
-        #             [
-        #                 np.mean(
-        #                     [point.x for point in track_shape]
-        #                 ),  # Averaging x-coordinates
-        #                 np.mean(
-        #                     [point.y for point in track_shape]
-        #                 ),  # Averaging y-coordinates
-        #                 np.mean(
-        #                     [point.z for point in track_shape]
-        #                 ),  # Averaging z-coordinates
-        #             ]
-        #         )
+        for i, obj in enumerate(msgRadar.tracks):  # radar detections
+            if i not in [g for f, g in matched_pairs]:
+                # Calculate the center of the radar track shape by averaging the points
+                track_shape = (
+                    obj.track_shape.points
+                )  # Assuming 'track_shape' is part of 'obj'
+                rad_position = np.array(
+                    [
+                        np.mean(
+                            [point.x for point in track_shape]
+                        ),  # Averaging x-coordinates
+                        np.mean(
+                            [point.y for point in track_shape]
+                        ),  # Averaging y-coordinates
+                        np.mean(
+                            [point.z for point in track_shape]
+                        ),  # Averaging z-coordinates
+                    ]
+                )
 
-        #         # Apply radar limit check based on x-coordinate of the radar position
-        #         if rad_position[0] > RADAR_LIMIT:
-        #             bbox = BoundingBox()
-        #             bbox.header = msgRadar.header
-        #             bbox.pose.position.x = rad_position[
-        #                 0
-        #             ]  # Using the computed radar position
-        #             bbox.pose.position.y = rad_position[1]
-        #             bbox.pose.position.z = rad_position[2]
-        #             bbox.dimensions.x = 1.5
-        #             bbox.dimensions.y = 1.5
-        #             bbox.dimensions.z = 1.5
-        #             bbox.label = 9999  # Label for radar detection
-        #             bbox_array.boxes.append(bbox)
+                # Apply radar limit check based on x-coordinate of the radar position
+                if rad_position[0] > RADAR_LIMIT:
+                    bbox = BoundingBox()
+                    bbox.header = msgRadar.header
+                    bbox.pose.position.x = rad_position[
+                        0
+                    ]  # Using the computed radar position
+                    bbox.pose.position.y = rad_position[1]
+                    bbox.pose.position.z = rad_position[2]
+                    bbox.dimensions.x = 1.5
+                    bbox.dimensions.y = 1.5
+                    bbox.dimensions.z = 1.5
+                    bbox.label = 9999  # Label for radar detection
+                    bbox_array.boxes.append(bbox)
 
         bbox_array.header.frame_id = msgLidar.header.frame_id
         self.bbox_publish.publish(bbox_array)
@@ -293,5 +290,6 @@ class TransformFuse:
 
 
 if __name__ == "__main__":
-    rospy.init_node("TransformFuse")
-    TransformFuse()
+    rospy.init_node("Objects Transform", anonymous=True)
+    ObjectsTransform()
+    rospy.spin()

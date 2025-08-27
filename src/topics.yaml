@@ -4,7 +4,7 @@ topics:
     radar: "/radar_fc/as_tx/radar_tracks"
     camera_fl: "/camera_fl/image_raw"
     camera_fr: "/camera_fr/image_raw"
-    camera_rc: "/camera_rc/arena_camera_node/image_raw"
+    camera_rc: "/camera_rc/arena_camera_node/image_color"
     camera_tl: "/camera_tl/arena_camera_node/image_raw"
     camera_tr: "/camera_tr/arena_camera_node/image_raw"
     imu: "/imu/data_raw"
@@ -35,24 +35,28 @@ topics:
     right_boundary: "/sam_right_boundary"
 
   sphereformer:
-    segmentation: "/sphereformer_road_segmentation"
+    segmentation_mask: "/sphereformer_road_segmentation"
     left_boundary: "/sphereformer_left_boundary"
     right_boundary: "/sphereformer_right_boundary"
-    centerline_points: "/sphereformer_centerline_points"
-    lidar_bbox: "/bounding_boxes"
+    ring_filtered: "/filtered_points"
 
-  lane_detection:
-    mask: "/lane_detection/output"
-    left_lane: "/lane_detection/current_lane_left_boundary"
-    right_lane: "/lane_detection/current_lane_right_boundary"
-    left_lane_boundary: "/Left_Line3dPoints"
-    right_lane_boundary: "/Right_Line3dPoints"
+  clrernet:
+    lane_mask: "/clrernet/lane_mask"
+    all_lanes: "/clrernet/all_lanes"
+    left_lane: "/clrernet/left_lane"
+    right_lane: "/clrernet/right_lane"
+    centerline: "/clrernet/current_centerline"
 
   transform:
     lidar_2d_projection: "/lidar_2d_projection"
 
   planning:
     local_path: "/local_path"
+    global_trajectory: "/corrected_g_traj"
+    fsm_state: "/current_fsm_state"
+    gps_segment: "/gps_traj_segment"
+    obstacle_prediction: "/obstacle_traj_prediction"
+    target_trajectory: "/target_traj"
 
   controls:
     ctrl_ref: "/ctrl_ref.*"
@@ -71,6 +75,27 @@ categories:
     - topics.raw.gps_imu
     - topics.raw.ins
     - topics.raw.camera_info
+    - topics.raw.tf_static
+
+  perception_output:
+    - topics.yolo.image
+    - topics.yolo.bbox
+    - topics.yolo.fused_bbox
+    - topics.sam.segmentation_mask
+    - topics.sam.left_contour
+    - topics.sam.right_contour
+    - topics.sam.left_boundary
+    - topics.sam.right_boundary
+    - topics.sphereformer.segmentation_mask
+    - topics.sphereformer.left_boundary
+    - topics.sphereformer.right_boundary
+    - topics.raw.ins
+    - topics.raw.tf_static
+    - topics.clrernet.lane_mask
+    - topics.clrernet.all_lanes
+    - topics.clrernet.left_lane
+    - topics.clrernet.right_lane
+    - topics.clrernet.centerline
 
   raw:
     - topics.raw.camera
@@ -91,29 +116,13 @@ categories:
     - topics.raw.gps_imu
     - topics.raw.ins
 
-  perception:
-    - topics.yolo.image
-    - topics.yolo.bbox
-    - topics.yolo.fused_bbox
-    - topics.sam.segmentation_mask
-    - topics.sam.left_contour
-    - topics.sam.right_contour
-    - topics.sam.left_boundary
-    - topics.sam.right_boundary
-    - topics.sphereformer.segmentation
-    - topics.sphereformer.left_boundary
-    - topics.sphereformer.right_boundary
-    - topics.sphereformer.centerline_points
-    - topics.sphereformer.lidar_bbox
-    - topics.raw.ins
-
   planning:
     - topics.planning.local_path
-    - topics.lane_detection.mask
-    - topics.lane_detection.left_lane
-    - topics.lane_detection.right_lane
-    - topics.lane_detection.left_lane_boundary
-    - topics.lane_detection.right_lane_boundary
+    - topics.planning.global_trajectory
+    - topics.planning.fsm_state
+    - topics.planning.gps_segment
+    - topics.planning.obstacle_prediction
+    - topics.planning.target_trajectory
 
   controls:
     - topics.controls.ctrl_ref

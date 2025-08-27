@@ -55,20 +55,23 @@ with open(SUPPRESSED_CLASSES_PATH, "r", encoding="utf-8") as file:
     suppressed_classes = yaml.safe_load(file)["suppressed_classes"]
 
 
-class Detect:
+class Yolov9ObjectDetection:
     def __init__(self) -> None:
         self.model = YOLO(WEIGHTS_PATH).to(device)
         self.model.conf = 0.5
         self.names: List[str] = self.model.names
+
+        # Subscribers
         self.image_sub = rospy.Subscriber(
             CAMERA_TOPIC,
             Image,
-            self.camera_callback,
+            self.callback,
             queue_size=1,
         )
+
+        # Publishers
         self.image_pub = rospy.Publisher(YOLO_IMAGE_TOPIC, Image, queue_size=1)
         self.bboxInfo_pub = rospy.Publisher(YOLO_BBOX_TOPIC, BboxList, queue_size=1)
-        rospy.spin()
 
     # Add the classify_traffic_light function
     def classify_traffic_light(self, roi):
@@ -108,7 +111,7 @@ class Detect:
         else:
             return "Unknown"
 
-    def camera_callback(self, data: Image) -> None:
+    def callback(self, data: Image) -> None:
         img: np.ndarray = ros_numpy.numpify(data)  # Image size is (772, 1032, 3)
         img_resized: np.ndarray = cv2.resize(
             img, (img_size, img_size)
@@ -226,5 +229,6 @@ class Detect:
 
 
 if __name__ == "__main__":
-    rospy.init_node("YOLOv9")
-    Detect()
+    rospy.init_node("YOLOv9 Object Detection", anonymous=True)
+    Yolov9ObjectDetection()
+    rospy.spin()

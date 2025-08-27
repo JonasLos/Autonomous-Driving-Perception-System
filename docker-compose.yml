@@ -133,6 +133,7 @@ services:
               conda activate sphereformer &&
               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:\$PYTHONPATH &&
               export LD_LIBRARY_PATH=\$\CONDA_PREFIX/lib:/usr/local/cuda/lib64:\$\LD_LIBRARY_PATH &&
+              # export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libpcl_filters.so.1.8:$LD_LIBRARY_PATH &&
               roslaunch sphereformer_ros sphereformer_ros.launch"
 
 

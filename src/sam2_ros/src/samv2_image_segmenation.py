@@ -31,7 +31,6 @@ YOLO_BBOX_TOPIC = config["topics"]["yolo"]["bbox"]
 SAM_SEGMENTATION_MASK_TOPIC = config["topics"]["sam"]["segmentation_mask"]
 SAM_LEFT_CONTOUR_TOPIC = config["topics"]["sam"]["left_contour"]
 SAM_RIGHT_CONTOUR_TOPIC = config["topics"]["sam"]["right_contour"]
-SPHEREFORMER_CENTER_LINE_POINTS = config["topics"]["sphereformer"]["centerline_points"]
 
 # Set device to GPU if available, otherwise use CPU
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -46,43 +45,40 @@ model_cfg = "sam2_hiera_b+.yaml"
 sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device)
 predictor = SAM2ImagePredictor(sam2_model)
 
+# === Resize Configuration ===
+RESIZED_WIDTH = 400
+RESIZED_HEIGHT = 400
+ORIGINAL_WIDTH = 2048.0  # Original image width
+ORIGINAL_HEIGHT = 1544.0  # Original image height
+
 # Define points for initial segmentation prompt
 point_coords = np.array(
     [
-        [400 * 640 / 1024, 700 * 640 / 772],
-        [550 * 640 / 1024, 700 * 640 / 772],
-        [650 * 640 / 1024, 700 * 640 / 772],
+        [
+            400 * RESIZED_WIDTH / ORIGINAL_WIDTH * 2,
+            700 * RESIZED_HEIGHT / ORIGINAL_HEIGHT * 2,
+        ],
+        [
+            550 * RESIZED_WIDTH / ORIGINAL_WIDTH * 2,
+            700 * RESIZED_HEIGHT / ORIGINAL_HEIGHT * 2,
+        ],
+        [
+            650 * RESIZED_WIDTH / ORIGINAL_WIDTH * 2,
+            700 * RESIZED_HEIGHT / ORIGINAL_HEIGHT * 2,
+        ],
     ]
 )
 input_labels = [1, 1, 1]
-MIN_CONTOUR_AREA = 30000.0
+MIN_CONTOUR_AREA = 1000.0
 
 T_vel_cam = inverse_rigid_transform(T1)
 
 
 @timer
 def process_image(image, detected_objects, publish_image=False):
-    # image = cv2.resize(image, (2048 // 2, 1544 // 2))
-    image = cv2.resize(image, (640, 640))
-    h_original, w_original = image.shape[:2]
-    center_x = int(w_original * 0.75)
-    # point_coords = point_coords.append(auto)
-    # auto = np.array([auto[0][0], auto[1][0]], dtype=np.float32).reshape(1, 2)
-    # auto = np.vstack((u, v)).T.astype(np.float32)  # Use all points
+    image = cv2.resize(image, (RESIZED_WIDTH, RESIZED_HEIGHT))
+    center_x = int(RESIZED_WIDTH * 0.75)
 
-    # point_coords = np.array([[400, 700], [550, 700], [650, 700]])
-    # point_coords = np.array([])
-    # if point_coords.shape[0] == 0:
-    #     p = auto  # If empty, just use auto
-    # else:
-    #     p = np.vstack([point_coords, auto]).astype(np.float32)
-    # input_labels = [1,1,1]
-    # input_labels = np.ones(len(auto), dtype=np.int32).tolist()  # Match size
-    # print("auto:", auto)
-    # p = np.vstack([point_coords, auto]).astype(np.float32)
-
-    # Predict masks using SAM2 model
-    # with torch.no_grad(), torch.cuda.amp.autocast():
     with torch.inference_mode(), torch.cuda.amp.autocast():
         predictor.set_image(image)
         masks, _, _ = predictor.predict(
@@ -108,21 +104,9 @@ def process_image(image, detected_objects, publish_image=False):
     kernel = np.ones((6, 6), np.uint8)
     road_mask_cleaned = cv2.morphologyEx(unified_mask, cv2.MORPH_CLOSE, kernel)
 
-    # Subtract object mask from road mask
-    # road_mask_cleaned = cv2.bitwise_or(road_mask, cv2.bitwise_not(object_mask_dilated))
-
-    # Fill gaps in the road mask
-    # road_mask_filled = cv2.morphologyEx(road_mask_dilated, cv2.MORPH_CLOSE, kernel)
     contours, _ = cv2.findContours(
         road_mask_cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
     )
-
-    # # Dilate object mask to cover edges
-    # kernel = np.ones((6, 6), np.uint8)
-    # dilated_mask = cv2.dilate(road_mask, kernel, iterations=1)
-    # filled_mask = cv2.morphologyEx(dilated_mask, cv2.MORPH_CLOSE, kernel)
-
-    # contours, _ = cv2.findContours(filled_mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
 
     if not contours:
         rospy.logwarn("No contours found.")
@@ -134,7 +118,7 @@ def process_image(image, detected_objects, publish_image=False):
         return None, None, None
 
     # Filter road contour points
-    MIN_Y_COORD = int(0.8 * h_original)
+    MIN_Y_COORD = int(0.8 * RESIZED_HEIGHT)
     road_contour = [point for point in road_contour if point[0][1] < MIN_Y_COORD]
 
     if len(road_contour) < 2:
@@ -150,7 +134,7 @@ def process_image(image, detected_objects, publish_image=False):
         left_boundary_points,
         right_boundary_points,
     ) = classify_boundaries_using_horizontal_bins(
-        contour_points[contour_points[:, 1] < center_x], h_original
+        contour_points[contour_points[:, 1] < center_x], RESIZED_HEIGHT
     )
 
     for point in contour_points[contour_points[:, 1] >= center_x]:
@@ -162,16 +146,7 @@ def process_image(image, detected_objects, publish_image=False):
     left_boundary_points, right_boundary_points = np.array(
         left_boundary_points
     ), np.array(right_boundary_points)
-    # if is_straight_line(left_boundary_points):
-    #     rospy.logwarn(
-    #         "Boundary is nearly a straight horizontal line, skipping publication."
-    #     )
-    #     return None, None, None  # Do not publish straight-line boundaries
-    # if is_straight_line(right_boundary_points):
-    #     rospy.logwarn(
-    #         "Boundary is nearly a straight horizontal line, skipping publication."
-    #     )
-    #     return None, None, None  # Do not publish straight-line boundaries
+
     overlay = create_overlay(
         image,
         road_mask,
@@ -213,39 +188,6 @@ def classify_boundaries_using_horizontal_bins(
     return left_boundary_points, right_boundary_points
 
 
-def is_straight_line(boundary, fraction=0.8):
-    """
-    Check if the boundary points form a nearly straight vertical or horizontal line.
-
-    Args:
-        boundary (np.ndarray): Array of shape (N, 2) with [X, Y] points.
-        fraction (float): Minimum fraction of points required to be aligned.
-
-    Returns:
-        str: 'vertical' if points form a vertical line,
-             'horizontal' if points form a horizontal line,
-             'none' if no clear line is detected.
-    """
-
-    total_points = boundary.shape[0]
-    tolerance = int(fraction * total_points)  # Minimum points required for alignment
-
-    # Count the most frequent X and Y coordinates
-    x_counts = np.bincount(boundary[:, 0].astype(int))
-    y_counts = np.bincount(boundary[:, 1].astype(int))
-
-    max_x_count = np.max(x_counts) if len(x_counts) > 0 else 0
-    max_y_count = np.max(y_counts) if len(y_counts) > 0 else 0
-
-    # Check if a major fraction of points align
-    if max_x_count >= tolerance:
-        return True
-    if max_y_count >= tolerance:
-        return True
-
-    return False
-
-
 def create_overlay(
     image,
     binary_mask_np,
@@ -268,9 +210,6 @@ def create_overlay(
     )
 
     for point in point_coords:
-        # for point in p:
-        # print(point)
-        #     cv2.circle(overlay, tuple(point), radius=10, color=(255, 0, 0), thickness=-1)
         cv2.circle(
             overlay, tuple(map(int, point)), radius=10, color=(255, 0, 0), thickness=-1
         )
@@ -283,7 +222,7 @@ def create_overlay(
     return overlay
 
 
-class RoadSegmentation:
+class Samv2ImageSegmentation:
     def __init__(self):
         rospy.loginfo("Initializing RoadSegmentation class.")
 
@@ -294,27 +233,6 @@ class RoadSegmentation:
             queue_size=1,
             buff_size=2**24,
         )
-
-        # self.yolo_sub = message_filters.Subscriber(
-        #     YOLO_BBOX_TOPIC, BboxList, queue_size=1
-        # )
-        # self.center_line_sub = message_filters.Subscriber(
-        #     SPHEREFORMER_CENTER_LINE_POINTS,
-        #     PointCloud2,
-        #     queue_size=1,
-        # )
-        # Time synchronizer
-        # ts = message_filters.ApproximateTimeSynchronizer(
-        #     [self.image_sub],
-        #     15,
-        #     0.4,
-        # )
-        # ts = message_filters.ApproximateTimeSynchronizer(
-        #     [self.image_sub, self.yolo_sub, self.center_line_sub],
-        #     queue_size=3,
-        #     slop=0.4,
-        # )
-        # ts.registerCallback(self.callback)
 
         self.image_pub = rospy.Publisher(
             SAM_SEGMENTATION_MASK_TOPIC, Image, queue_size=1
@@ -333,38 +251,8 @@ class RoadSegmentation:
         self.centerline_points = None
         rospy.Timer(rospy.Duration(0.1), self.process_loop)
 
-    # def callback(self, ros_image, bboxes, centerline_points):
     def callback(self, ros_image):
         self.ros_image = ros_image
-        # self.detected_objects = [
-        #     (bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max) for bbox in bboxes.Bboxes
-        # ]
-        # Convert PointCloud2 message to NumPy array
-        # points = list(
-        #     pc2.read_points(centerline_msg, field_names=("x", "y", "z"), skip_nans=True)
-        # )
-
-        # if len(points) == 0:
-        #     rospy.logwarn("No valid centerline points received.")
-        #     self.centerline_points = None
-        #     return
-
-        # self.centerline_points = np.array(points)
-
-    def objects_on_road(self, objects, road_mask):
-        """
-        Check if any detected objects overlap with the road mask.
-        :param objects: List of bounding boxes [(x_min, y_min, x_max, y_max)].
-        :param road_mask: Binary mask of the road (numpy array).
-        :return: True if any objects overlap with the road mask.
-        """
-        for x_min, y_min, x_max, y_max in objects:
-            x_min, x_max = max(0, x_min), min(road_mask.shape[1], x_max)
-            y_min, y_max = max(0, y_min), min(road_mask.shape[0], y_max)
-            roi = road_mask[y_min:y_max, x_min:x_max]
-            if np.any(roi > 0):  # Check if there's overlap
-                return True
-        return False
 
     def process_loop(self, event):
         """Process the image if available, called periodically by a ROS Timer."""
@@ -373,40 +261,12 @@ class RoadSegmentation:
 
     @timer
     def image_callback(self):
-        # if self.centerline_points is None or len(self.centerline_points) == 0:
-        #     rospy.logwarn("No valid centerline poi  nts received.")
-        #     return
 
-        # centerline_points = self.centerline_points  # Use the NumPy array directly
-        # Convert 3D points to homogeneous coordinates (add a row of 1s)
-        # ones_row = np.ones((1, centerline_points.shape[0]))  # Shape: (1, N)
-        # centerline_points_homogeneous = np.vstack(
-        #     (centerline_points.T, ones_row)
-        # )  # Shape: (4, N)
-
-        # if centerline_points.size == 0:
-        #     rospy.logwarn("No valid centerline points received.")
-        #     return
-
-        # Apply transformation and projection
-        # m1 = torch.matmul(
-        #     torch.tensor(T_vel_cam, dtype=torch.float32),
-        #     torch.tensor(centerline_points_homogeneous, dtype=torch.float32),
-        # )
-        # # uv1 = torch.matmul(torch.tensor(PROJ), m1)
-        # uv1 = torch.matmul(
-        #     torch.tensor(PROJ, dtype=torch.float32), m1.to(dtype=torch.float32)
-        # )
-        # u, v = (uv1[:2, :] / uv1[2, :]).numpy()
-        # print(u, v)
-        # Use all projected points instead of just one
-        # auto = np.vstack((u, v)).T.astype(np.float32)  # Use all `u, v` points
         img = ros_numpy.numpify(self.ros_image)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         overlay, left_boundary, right_boundary = process_image(
             img,
             self.detected_objects,
-            # auto,
             self.publish_image,
         )
 
@@ -415,7 +275,6 @@ class RoadSegmentation:
 
         # Publish boundary points
         if (left_boundary is not None) and left_boundary.size > 0:
-
             # Remove points that are at the image boundary (x == width or y == height or 0)
             mask = (
                 (left_boundary[:, 0] != 0)
@@ -425,19 +284,14 @@ class RoadSegmentation:
             )
             left_boundary = left_boundary[mask]
             # Resize the left boundary points to match the original image size
-            left_boundary[:, 0], left_boundary[:, 1] = left_boundary[:, 0] * (
-                2 * 1024 / 640
-            ), left_boundary[:, 1] * (2 * 772 / 640)
+            left_boundary = left_boundary.astype(np.float32)
+            left_boundary[:, 0] *= ORIGINAL_WIDTH / RESIZED_WIDTH
+            left_boundary[:, 1] *= ORIGINAL_HEIGHT / RESIZED_HEIGHT
             self.publish_boundary(
                 left_boundary, self.left_boundary_pub, self.ros_image.header.stamp
             )
-        # else:
-        #     left_boundary = []
-        #     # self.publish_boundary(
-        #     #     left_boundary, self.left_boundary_pub, self.ros_image.header.stamp
-        #     # )
-        if (right_boundary is not None) and right_boundary.size > 0:
 
+        if (right_boundary is not None) and right_boundary.size > 0:
             # Remove points that are at the image boundary (x == width or y == height or 0)
             mask = (
                 (right_boundary[:, 0] != 0)
@@ -447,18 +301,12 @@ class RoadSegmentation:
             )
             right_boundary = right_boundary[mask]
             # Resize the right boundary points to match the original image size
-            right_boundary[:, 0], right_boundary[:, 1] = (
-                right_boundary[:, 0] * (2 * 1024 / 640),
-                right_boundary[:, 1] * (2 * 772 / 640),
-            )
+            right_boundary = right_boundary.astype(np.float32)
+            right_boundary[:, 0] *= ORIGINAL_WIDTH / RESIZED_WIDTH
+            right_boundary[:, 1] *= ORIGINAL_HEIGHT / RESIZED_HEIGHT
             self.publish_boundary(
                 right_boundary, self.right_boundary_pub, self.ros_image.header.stamp
             )
-        # else:
-        #     right_boundary = []
-        #     # self.publish_boundary(
-        #     #     right_boundary, self.right_boundary_pub, self.ros_image.header.stamp
-        #     # )
 
     def publish_image_topic(self, ros_image, overlay):
         msg = Image()
@@ -476,6 +324,6 @@ class RoadSegmentation:
 
 
 if __name__ == "__main__":
-    rospy.init_node("SAM2", anonymous=False)
-    RoadSegmentation()
+    rospy.init_node("Samv2 Image Segmentation", anonymous=False)
+    Samv2ImageSegmentation()
     rospy.spin()

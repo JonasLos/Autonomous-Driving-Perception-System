@@ -37,9 +37,8 @@ SAM_LEFT_CONTOUR_TOPIC = config["topics"]["sam"]["left_contour"]
 SAM_RIGHT_CONTOUR_TOPIC = config["topics"]["sam"]["right_contour"]
 
 
-class RoadSegmentation3D:
+class Samv2MaskTransform:
     def __init__(self):
-        rospy.init_node("segmentationTO3d")
 
         # Publishers
         self.left_boundary_pub = rospy.Publisher(
@@ -77,8 +76,8 @@ class RoadSegmentation3D:
         # Synchronize topics
         ts = message_filters.ApproximateTimeSynchronizer(
             [self.sub_proj, self.sub_left_contour, self.sub_right_contour],
-            queue_size=10,
-            slop=0.3,
+            queue_size=20,
+            slop=0.6,
             allow_headerless=True,
         )
         ts.registerCallback(self.callback)
@@ -119,13 +118,13 @@ class RoadSegmentation3D:
             np.array(self.msgRightBoundary.RoadArea.data).reshape(-1, 2), u, v, pc_arr
         )
 
-        left_boundary_3d = self.find_matching_points_kdtree(
-            np.array(self.msgLeftBoundary.RoadArea.data).reshape(-1, 2), u, v, pc_arr
-        )
-
         if right_boundary_3d.size > 0:
             self.create_cloud(
                 right_boundary_3d, self.right_boundary_pub, self.msgProj.header
+            )
+        if left_boundary_3d.size > 0:
+            self.create_cloud(
+                left_boundary_3d, self.left_boundary_pub, self.msgProj.header
             )
 
     @timer
@@ -180,5 +179,6 @@ class RoadSegmentation3D:
 
 
 if __name__ == "__main__":
-    RoadSegmentation3D()
+    rospy.init_node("Samv2 Mask Transform", anonymous=True)
+    Samv2MaskTransform()
     rospy.spin()
