@@ -90,7 +90,9 @@ categories:
     - topics.sphereformer.left_boundary
     - topics.sphereformer.right_boundary
     - topics.raw.ins
+    - topics.raw.imu
     - topics.raw.tf_static
+    - topics.raw.tadar_tracks
     - topics.clrernet.lane_mask
     - topics.clrernet.all_lanes
     - topics.clrernet.left_lane
