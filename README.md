@@ -58,7 +58,7 @@ conda activate yolo_env
 ```bash
 cd src/yolov9ros/
 ```
-Download the [trained model](https://drive.google.com/file/d/1UAX-7jSXQJcyRdumn8iXmwjfJxxyC9Tw/view?usp=sharing) here. And save it in yolov9_ros folder
+Download the [trained model](https://drive.google.com/file/d/1UAX-7jSXQJcyRdumn8iXmwjfJxxyC9Tw/view?usp=sharing) here. And save it in yolov9_ros folder (custom model based on yolov9c with fine tuning for added classes).
 
 #### Ultrafast Lane Detection and Sphereformer
 Follow the respective `README.md` files in their directories for installation details.
