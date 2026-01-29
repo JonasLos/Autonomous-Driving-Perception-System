@@ -1,5 +1,0 @@
-<launch>
-  <!-- Launch YOLOv9 nodes -->
-  <node pkg="yolov9_ros" type="yolov9_object_detection.py" name="YOLOv9_Object_Detection" output="screen"/>
-  <node pkg="yolov9_ros" type="objects_transform.py" name="Objects_Tranform" output="screen"/>
-</launch>

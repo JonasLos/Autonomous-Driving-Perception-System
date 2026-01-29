@@ -1,5 +1,0 @@
-<launch>
-  <!-- Launch road segmentation nodes -->
-  <node pkg="sam2_ros" type="samv2_image_segmenation.py" name="Samv2ImageSegmentation" output="screen"/>
-  <node pkg="sam2_ros" type="samv2_mask_transform.py" name="Samv2MaskTransform" output="screen"/>
-</launch>
