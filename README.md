@@ -1,6 +1,6 @@
 # Perception System for Autonomous Driving
 
-![Demo Video](https://github.com/user-attachments/assets/e6f0876c-9d8a-4220-9c69-085cf4ed74b0)
+![Demo Video](https://github.com/user-attachments/assets/e6f0876c-9d8a-4220-9c69-085cf4ed74b0) [ROS1 version]
 
 A ready-to-use system for autonomous driving, featuring YOLOv9 for object detection, SAMv2 for road segmentation, Ultrafast lane detection, and Sphereformer LiDAR segmentation. Fully integrated with ROS for seamless deployment in robotic systems. Ideal for developers and researchers focused on autonomous vehicle technologies.
 
@@ -9,7 +9,7 @@ A ready-to-use system for autonomous driving, featuring YOLOv9 for object detect
 ## Features
 - **Object Detection**: Utilizes YOLOv9 for real-time, accurate object detection.
 - **Road Segmentation**: Employs SAMv2 for robust and precise road segmentation.
-- **Lane Detection**: Implements Ultrafast lane detection for high-speed lane recognition.
+- **Lane Detection**: Implements clrernet lane detection for high-speed lane recognition.
 - **LiDAR Segmentation**: Uses Sphereformer for advanced 3D LiDAR-based segmentation.
 - **ROS Integration**: Fully integrated with ROS for seamless deployment and easy integration into robotic systems.
 
@@ -37,7 +37,7 @@ source install/setup.bash
 ```
 
 ### Create and Activate Environments
-Each perception module requires its own environment:
+Each perception module requires its own environment TBD:
 
 #### SAMv2 Installation
 ```bash
@@ -60,7 +60,7 @@ cd src/yolov9ros/
 ```
 Download the [trained model](https://drive.google.com/file/d/1UAX-7jSXQJcyRdumn8iXmwjfJxxyC9Tw/view?usp=sharing) here. And save it in yolov9_ros folder
 
-#### Ultrafast Lane Detection and Sphereformer
+#### Clrernet Lane Detection and Sphereformer
 Follow the respective `README.md` files in their directories for installation details.
 
 
