@@ -6,7 +6,8 @@ import os
 import message_filters
 import numpy as np
 import ros_numpy
-import rospy
+import rclpy
+from rclpy.node import Node
 import sensor_msgs.point_cloud2 as pc2
 import torch
 import yaml
@@ -37,16 +38,13 @@ SAM_LEFT_CONTOUR_TOPIC = config["topics"]["sam"]["left_contour"]
 SAM_RIGHT_CONTOUR_TOPIC = config["topics"]["sam"]["right_contour"]
 
 
-class Samv2MaskTransform:
+class Samv2MaskTransform(Node):
     def __init__(self):
+        super().__init__("samv2_mask_transform")
 
         # Publishers
-        self.left_boundary_pub = rospy.Publisher(
-            SAM_LEFT_BOUNDARY, PointCloud2, queue_size=1
-        )
-        self.right_boundary_pub = rospy.Publisher(
-            SAM_RIGHT_BOUNDARY, PointCloud2, queue_size=1
-        )
+        self.left_boundary_pub = self.create_publisher(PointCloud2, SAM_LEFT_BOUNDARY, 1)
+        self.right_boundary_pub = self.create_publisher(PointCloud2, SAM_RIGHT_BOUNDARY, 1)
 
         # Define the point fields
         self.fields = [
@@ -65,21 +63,12 @@ class Samv2MaskTransform:
         ]
 
         # Subscribers
-        self.sub_proj = message_filters.Subscriber(LIDAR_2D_PROJ_TOPIC, PointCloud2)
-        self.sub_left_contour = message_filters.Subscriber(
-            SAM_LEFT_CONTOUR_TOPIC, DetectedRoadArea
-        )
-        self.sub_right_contour = message_filters.Subscriber(
-            SAM_RIGHT_CONTOUR_TOPIC, DetectedRoadArea
-        )
+        self.sub_proj = message_filters.Subscriber(self, PointCloud2, LIDAR_2D_PROJ_TOPIC)
+        self.sub_left_contour = message_filters.Subscriber(self, DetectedRoadArea, SAM_LEFT_CONTOUR_TOPIC)
+        self.sub_right_contour = message_filters.Subscriber(self, DetectedRoadArea, SAM_RIGHT_CONTOUR_TOPIC)
 
         # Synchronize topics
-        ts = message_filters.ApproximateTimeSynchronizer(
-            [self.sub_proj, self.sub_left_contour, self.sub_right_contour],
-            queue_size=20,
-            slop=0.6,
-            allow_headerless=True,
-        )
+        ts = message_filters.ApproximateTimeSynchronizer([self.sub_proj, self.sub_left_contour, self.sub_right_contour], queue_size=20, slop=0.6)
         ts.registerCallback(self.callback)
 
         # Variables to store incoming data
@@ -87,7 +76,7 @@ class Samv2MaskTransform:
         self.msgRightBoundary = None
         self.msgProj = None
 
-        rospy.loginfo("Node initialized and timer set.")
+        self.get_logger().info("Node initialized and timer set.")
 
     def callback(self, msgProj, msgLeftBoundary, msgRightBoundary):
         self.msgProj = msgProj
@@ -104,7 +93,7 @@ class Samv2MaskTransform:
             )
         )
         if len(points_list) == 0:
-            rospy.logwarn("No points in projected PointCloud2")
+            self.get_logger().warning("No points in projected PointCloud2")
             return
 
         points_np = np.array(points_list)
@@ -112,28 +101,24 @@ class Samv2MaskTransform:
         v = points_np[:, 4]
 
         left_boundary_3d = self.find_matching_points_kdtree(
-            np.array(self.msgLeftBoundary.RoadArea.data).reshape(-1, 2), u, v, pc_arr
+            np.array(self.msgLeftBoundary.road_area.data).reshape(-1, 2), u, v, pc_arr
         )
         right_boundary_3d = self.find_matching_points_kdtree(
-            np.array(self.msgRightBoundary.RoadArea.data).reshape(-1, 2), u, v, pc_arr
+            np.array(self.msgRightBoundary.road_area.data).reshape(-1, 2), u, v, pc_arr
         )
 
         if right_boundary_3d.size > 0:
-            self.create_cloud(
-                right_boundary_3d, self.right_boundary_pub, self.msgProj.header
-            )
+            self.create_cloud(right_boundary_3d, self.right_boundary_pub, self.msgProj.header)
         if left_boundary_3d.size > 0:
-            self.create_cloud(
-                left_boundary_3d, self.left_boundary_pub, self.msgProj.header
-            )
+            self.create_cloud(left_boundary_3d, self.left_boundary_pub, self.msgProj.header)
 
     @timer
     def process_loop(self, event):
         left_boundary_3d = self.find_matching_points_kdtree(
-            np.array(self.msgLeftBoundary.RoadArea.data).reshape(-1, 2), u, v, pc_arr
+            np.array(self.msgLeftBoundary.road_area.data).reshape(-1, 2), u, v, pc_arr
         )
         right_boundary_3d = self.find_matching_points_kdtree(
-            np.array(self.msgRightBoundary.RoadArea.data).reshape(-1, 2), u, v, pc_arr
+            np.array(self.msgRightBoundary.road_area.data).reshape(-1, 2), u, v, pc_arr
         )
 
         if left_boundary_3d.size > 0:
@@ -167,7 +152,7 @@ class Samv2MaskTransform:
         # Create and publish the PointCloud2 message
         cloud_msg = pc2.create_cloud(header, self.fields, cloud_data)
         publisher.publish(cloud_msg)
-        rospy.loginfo("Published point cloud with %d points.", cloud_data.shape[0])
+        self.get_logger().info(f"Published point cloud with {cloud_data.shape[0]} points.")
 
     def find_matching_points_kdtree(self, boundary_points, u, v, pc_arr):
         tree = KDTree(np.column_stack((u, v)))
@@ -179,6 +164,11 @@ class Samv2MaskTransform:
 
 
 if __name__ == "__main__":
-    rospy.init_node("Samv2 Mask Transform", anonymous=True)
-    Samv2MaskTransform()
-    rospy.spin()
+    rclpy.init()
+    node = Samv2MaskTransform()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()

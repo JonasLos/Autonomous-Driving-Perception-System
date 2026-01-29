@@ -1,15 +1,15 @@
 from functools import wraps
 
+import time
 import numpy as np
-import rospy
 
 
 def timer(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        start_time = rospy.Time.now().to_sec()
+        start_time = time.time()
         result = func(*args, **kwargs)
-        end_time = rospy.Time.now().to_sec()
+        end_time = time.time()
         print(f"{func.__name__} executed in {end_time - start_time:.4f} seconds")
         return result
 

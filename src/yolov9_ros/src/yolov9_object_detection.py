@@ -7,7 +7,9 @@ from typing import List
 import cv2
 import numpy as np
 import ros_numpy
-import rospy
+import rclpy
+from rclpy.node import Node
+from cv_bridge import CvBridge
 import torch
 import yaml
 from PIL import Image as PILImage
@@ -55,23 +57,21 @@ with open(SUPPRESSED_CLASSES_PATH, "r", encoding="utf-8") as file:
     suppressed_classes = yaml.safe_load(file)["suppressed_classes"]
 
 
-class Yolov9ObjectDetection:
+class Yolov9ObjectDetection(Node):
     def __init__(self) -> None:
+        super().__init__("yolov9_object_detection")
         self.model = YOLO(WEIGHTS_PATH).to(device)
         self.model.conf = 0.5
         self.names: List[str] = self.model.names
 
+        self.bridge = CvBridge()
+
         # Subscribers
-        self.image_sub = rospy.Subscriber(
-            CAMERA_TOPIC,
-            Image,
-            self.callback,
-            queue_size=1,
-        )
+        self.create_subscription(Image, CAMERA_TOPIC, self.callback, 1)
 
         # Publishers
-        self.image_pub = rospy.Publisher(YOLO_IMAGE_TOPIC, Image, queue_size=1)
-        self.bboxInfo_pub = rospy.Publisher(YOLO_BBOX_TOPIC, BboxList, queue_size=1)
+        self.image_pub = self.create_publisher(Image, YOLO_IMAGE_TOPIC, 1)
+        self.bboxInfo_pub = self.create_publisher(BboxList, YOLO_BBOX_TOPIC, 1)
 
     # Add the classify_traffic_light function
     def classify_traffic_light(self, roi):
@@ -112,7 +112,8 @@ class Yolov9ObjectDetection:
             return "Unknown"
 
     def callback(self, data: Image) -> None:
-        img: np.ndarray = ros_numpy.numpify(data)  # Image size is (772, 1032, 3)
+        # Convert ROS Image to OpenCV image
+        img: np.ndarray = self.bridge.imgmsg_to_cv2(data, desired_encoding="bgr8")
         img_resized: np.ndarray = cv2.resize(
             img, (img_size, img_size)
         )  # Image resized to (640, 640)
@@ -176,14 +177,11 @@ class Yolov9ObjectDetection:
                     2,
                 )
 
-            self.publish_bboxes(
-                detections.boxes.data[filtered_indices],
-                data.header.stamp,
-            )
+            self.publish_bboxes(detections.boxes.data[filtered_indices], data.header.stamp)
             if view_img:
                 self.publish_image(img_resized, data.header.stamp)
 
-    def publish_bboxes(self, detections: torch.Tensor, stamp: rospy.Time) -> None:
+    def publish_bboxes(self, detections: torch.Tensor, stamp) -> None:
         # Ensure the detections data is in the expected format
         msg = BboxList()
         msg.header = Header()
@@ -215,7 +213,7 @@ class Yolov9ObjectDetection:
         # Publish the message
         self.bboxInfo_pub.publish(msg)
 
-    def publish_image(self, img: np.ndarray, stamp: rospy.Time) -> None:
+    def publish_image(self, img: np.ndarray, stamp) -> None:
         img_pil: PILImage = PILImage.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         msg: Image = Image()
         msg.header.stamp = stamp
@@ -229,6 +227,11 @@ class Yolov9ObjectDetection:
 
 
 if __name__ == "__main__":
-    rospy.init_node("YOLOv9 Object Detection", anonymous=True)
-    Yolov9ObjectDetection()
-    rospy.spin()
+    rclpy.init()
+    node = Yolov9ObjectDetection()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()

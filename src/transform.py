@@ -5,7 +5,8 @@ import os
 import cython
 import numpy as np
 import ros_numpy
-import rospy
+import rclpy
+from rclpy.node import Node
 import sensor_msgs.point_cloud2 as pc2
 import torch
 import yaml
@@ -30,21 +31,17 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 lim_x, lim_y, lim_z = [0, 100], [-10, 10], [-3.5, 1]
 
 
-class LidarTo2DProjection:
+class LidarTo2DProjection(Node):
     def __init__(self):
-        rospy.init_node("lidar_to_2d_projection")
+        super().__init__("lidar_to_2d_projection")
 
         # Publisher
-        self.projection_pub = rospy.Publisher(
-            LIDAR_2D_PROJ_TOPIC, PointCloud2, queue_size=1
-        )
+        self.projection_pub = self.create_publisher(PointCloud2, LIDAR_2D_PROJ_TOPIC, 1)
 
         # Subscriber
-        self.sub_lidar = rospy.Subscriber(
-            LIDAR_TOPIC, PointCloud2, self.lidar_callback, buff_size=2**24
-        )
+        self.create_subscription(PointCloud2, LIDAR_TOPIC, self.lidar_callback, 1)
 
-        rospy.loginfo("Node initialized and ready to publish 2D projections.")
+        self.get_logger().info("Node initialized and ready to publish 2D projections.")
 
     def lidar_callback(self, msgLidar):
         pc_arr, u, v = self.process_pointcloud(msgLidar)
@@ -102,11 +99,15 @@ class LidarTo2DProjection:
         pc2_msg = pc2.create_cloud(header, fields, points)
 
         self.projection_pub.publish(pc2_msg)
-        rospy.loginfo_throttle(
-            2, f"Published PointCloud2 projection with {points.shape[0]} points."
-        )
+        self.get_logger().info(f"Published PointCloud2 projection with {points.shape[0]} points.")
 
 
 if __name__ == "__main__":
+    rclpy.init()
     node = LidarTo2DProjection()
-    rospy.spin()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()

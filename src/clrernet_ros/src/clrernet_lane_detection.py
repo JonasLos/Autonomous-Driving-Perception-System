@@ -6,7 +6,9 @@ from pathlib import Path
 
 import cv2
 import ros_numpy
-import rospy
+import rclpy
+from rclpy.node import Node
+from cv_bridge import CvBridge
 import torch
 import yaml
 from clrernet.libs.utils.visualizer import visualize_lanes
@@ -43,8 +45,9 @@ CLRERNET_LANE_MASK_TOPIC = config["topics"]["clrernet"]["lane_mask"]
 CLRERNET_ALL_LANES_TOPIC = config["topics"]["clrernet"]["all_lanes"]
 
 
-class ClrernetLaneDetection:
+class ClrernetLaneDetection(Node):
     def __init__(self):
+        super().__init__("clrernet_lane_detection")
         dummy_file = Path("dataset/culane/list/test.txt")
         dummy_file.parent.mkdir(parents=True, exist_ok=True)
         if not dummy_file.exists():
@@ -54,22 +57,21 @@ class ClrernetLaneDetection:
         self.model.cfg.model.bbox_head.test_cfg.conf_threshold = CONF_THRESHOLD
         self.w, self.h = None, None
 
+        self.bridge = CvBridge()
+
         # Subscribers
-        self.image_sub = rospy.Subscriber(CAMERA_TOPIC, Image, self.callback)
+        self.create_subscription(Image, CAMERA_TOPIC, self.callback, 1)
 
         # Publishers
-        self.lane_mask_pub = rospy.Publisher(
-            CLRERNET_LANE_MASK_TOPIC, Image, queue_size=1
-        )
-        self.all_lanes_pub = rospy.Publisher(
-            CLRERNET_ALL_LANES_TOPIC, LanePoints, queue_size=1
-        )
+        self.lane_mask_pub = self.create_publisher(Image, CLRERNET_LANE_MASK_TOPIC, 1)
+        self.all_lanes_pub = self.create_publisher(LanePoints, CLRERNET_ALL_LANES_TOPIC, 1)
 
     def callback(self, data: Image):
         self.handle_image(data)
 
     def handle_image(self, data: Image):
-        img = ros_numpy.numpify(data)
+        # Convert ROS Image to OpenCV image
+        img = self.bridge.imgmsg_to_cv2(data, desired_encoding="bgr8")
         self.w, self.h = img.shape[1], img.shape[0]
         img_resized = cv2.resize(img, (1640, 590))
 
@@ -116,6 +118,11 @@ class ClrernetLaneDetection:
 
 
 if __name__ == "__main__":
-    rospy.init_node("Clrernet Lane Detection", anonymous=True)
-    ClrernetLaneDetection()
-    rospy.spin()
+    rclpy.init()
+    node = ClrernetLaneDetection()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()

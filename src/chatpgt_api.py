@@ -2,8 +2,8 @@ import base64
 import time
 
 import cv2
-import ros_numpy
-import rospy
+import rclpy
+from rclpy.node import Node
 from cv_bridge import CvBridge
 from openai import OpenAI
 from sensor_msgs.msg import Image
@@ -31,8 +31,9 @@ def image_callback(msg):
     last_request_time = current_time
 
     try:
-        img = ros_numpy.numpify(msg)
-        base64_image = encode_image(img)
+        # convert ROS Image to OpenCV image
+        cv_image = bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+        base64_image = encode_image(cv_image)
 
         a = time.time()
         response = client.chat.completions.create(
@@ -75,10 +76,23 @@ def image_callback(msg):
         print(f"Error processing image: {e}")
 
 
+class ImageListenerNode(Node):
+    def __init__(self):
+        super().__init__("image_listener")
+        self.get_logger().info("Subscribing to camera topic...")
+        self.create_subscription(Image, CAMERA_TOPIC, image_callback, 1)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = ImageListenerNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()
+
+
 if __name__ == "__main__":
-    print("Initializing ROS node...")
-    rospy.init_node("image_listener")
-    print("Subscribing to ROS camera topic...")
-    rospy.Subscriber(CAMERA_TOPIC, Image, image_callback)
-    print("Listening for images...")
-    rospy.spin()
+    main()

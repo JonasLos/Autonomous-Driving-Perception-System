@@ -5,7 +5,8 @@ import os
 
 import numpy as np
 import ros_numpy
-import rospy
+import rclpy
+from rclpy.node import Node
 import sensor_msgs.point_cloud2 as pc2
 import spconv.pytorch as spconv
 import torch
@@ -47,12 +48,13 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.cuda.set_per_process_memory_fraction(0.3, device)
 
 
-class SphereformerLidarSegmentation:
+class SphereformerLidarSegmentation(Node):
     def __init__(
         self,
         config_path,
         checkpoint_path,
     ):
+        super().__init__("sphereformer_lidar_segmentation")
         # Configuration and model initialization
         self.config_path = config_path
         self.checkpoint_path = checkpoint_path
@@ -60,24 +62,16 @@ class SphereformerLidarSegmentation:
         self.model = self._load_model()
         self.semkitti_dataset = SemanticKITTI(split="val")
 
-        # ROS publishers and subscribers
-        self.pub = rospy.Publisher(
-            SPHEREFORMER_SEGMENTATION_TOPIC, PointCloud2, queue_size=1
-        )
-        # Publishers
-        self.left_boundary_pub = rospy.Publisher(
-            SPHEREFORMER_LEFT_BOUNDARY, PointCloud2, queue_size=5
-        )
-        self.right_boundary_pub = rospy.Publisher(
-            SPHEREFORMER_RIGHT_BOUNDARY, PointCloud2, queue_size=5
-        )
+        # ROS2 publishers and subscribers
+        self.pub = self.create_publisher(PointCloud2, SPHEREFORMER_SEGMENTATION_TOPIC, 1)
+        self.left_boundary_pub = self.create_publisher(PointCloud2, SPHEREFORMER_LEFT_BOUNDARY, 5)
+        self.right_boundary_pub = self.create_publisher(PointCloud2, SPHEREFORMER_RIGHT_BOUNDARY, 5)
 
-        rospy.Subscriber(
-            RING_FILTERED_POINTS_TOPIC,
+        self.create_subscription(
             PointCloud2,
+            RING_FILTERED_POINTS_TOPIC,
             self.ros_callback,
-            queue_size=1,
-            buff_size=2**24,
+            1,
         )
         self.fields = [
             PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
@@ -93,7 +87,7 @@ class SphereformerLidarSegmentation:
     def _load_model(self):
         """Load and initialize the model."""
 
-        rospy.loginfo("Loading and initializing the model...")
+        self.get_logger().info("Loading and initializing the model...")
 
         # Model configuration
         self.cfg.patch_size = np.array(
@@ -124,7 +118,7 @@ class SphereformerLidarSegmentation:
         )
 
         # Load checkpoint
-        rospy.loginfo("Loading model weights from checkpoint...")
+        self.get_logger().info("Loading model weights from checkpoint...")
         checkpoint = torch.load(self.checkpoint_path)
         state_dict = {
             k.replace("module.", ""): v for k, v in checkpoint["state_dict"].items()
@@ -139,14 +133,14 @@ class SphereformerLidarSegmentation:
     @timer
     def ros_callback(self, msg):
         """ROS callback to process incoming PointCloud2 messages."""
-        rospy.loginfo("Received a message, starting inference...")
+        self.get_logger().info("Received a message, starting inference...")
         with torch.no_grad(), torch.cuda.amp.autocast():
             seg_points, output_labels = self.inference_from_ros_message(msg, self.model)
-        rospy.loginfo("Inference complete. Processing results...")
+        self.get_logger().info("Inference complete. Processing results...")
 
         # Check if seg_points is structured and has the required dtype fields
         if seg_points is None or seg_points.dtype.names is None:
-            rospy.logerr(
+            self.get_logger().error(
                 "Invalid data structure in seg_points. Ensure the point cloud data is structured correctly."
             )
             return
@@ -208,11 +202,9 @@ class SphereformerLidarSegmentation:
         if right_points.size > 0 and left_points.size > 0:
             self.create_cloud(right_points, self.right_boundary_pub, msg)
 
-        rospy.loginfo("Publishing the processed point cloud and bounding boxes.")
+        self.get_logger().info("Publishing the processed point cloud and bounding boxes.")
 
-    def create_cloud(
-        self, points: np.ndarray, pub: rospy.Publisher, ref_msg: PointCloud2
-    ):
+    def create_cloud(self, points: np.ndarray, pub, ref_msg: PointCloud2):
         header = ref_msg.header
         data = [tuple(p) for p in np.asarray(points, dtype=np.float32)]
         pc_msg = pc2.create_cloud(header, self.fields, data)
@@ -301,6 +293,27 @@ class SphereformerLidarSegmentation:
 
 
 if __name__ == "__main__":
-    rospy.init_node("Sphereformer Lidar Segmentation", anonymous=True)
-    SphereformerLidarSegmentation(CONFIG_PATH, CHECKPOINT_PATH)
-    rospy.spin()
+    rclpy.init()
+    node = SphereformerLidarSegmentation(CONFIG_PATH, CHECKPOINT_PATH)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = SphereformerLidarSegmentation(CONFIG_PATH, CHECKPOINT_PATH)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

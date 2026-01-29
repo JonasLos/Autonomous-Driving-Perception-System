@@ -1,0 +1,16 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from autoware_config_msgs/msg/ConfigRingFilter.msg
+// generated code does not contain a copyright notice
+
+
+module autoware_config_msgs {
+  module msg {
+    struct ConfigRingFilter {
+      int32 ring_div;
+
+      double voxel_leaf_size;
+
+      float measurement_range;
+    };
+  };
+};

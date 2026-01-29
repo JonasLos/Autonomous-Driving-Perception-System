@@ -6,7 +6,9 @@ import os
 import cv2
 import numpy as np
 import ros_numpy
-import rospy
+import rclpy
+from rclpy.node import Node
+from cv_bridge import CvBridge
 import torch
 import yaml
 from sam2.build_sam import build_sam2
@@ -35,7 +37,7 @@ SAM_RIGHT_CONTOUR_TOPIC = config["topics"]["sam"]["right_contour"]
 # Set device to GPU if available, otherwise use CPU
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.cuda.set_per_process_memory_fraction(0.3, device=device)
-rospy.loginfo(f"Using device: {device}")
+print(f"Using device: {device}")
 
 # Load SAM2 model
 base_path = os.path.dirname(os.path.abspath(__file__))
@@ -109,12 +111,12 @@ def process_image(image, detected_objects, publish_image=False):
     )
 
     if not contours:
-        rospy.logwarn("No contours found.")
+        print("[WARN] No contours found.")
         return None, None, None
 
     road_contour = max(contours, key=cv2.contourArea)
     if cv2.contourArea(road_contour) < MIN_CONTOUR_AREA:
-        rospy.logwarn("The contour area is below the threshold.")
+        print("[WARN] The contour area is below the threshold.")
         return None, None, None
 
     # Filter road contour points
@@ -122,9 +124,7 @@ def process_image(image, detected_objects, publish_image=False):
     road_contour = [point for point in road_contour if point[0][1] < MIN_Y_COORD]
 
     if len(road_contour) < 2:
-        rospy.logwarn(
-            "Filtered road contour is too small after removing bottom points."
-        )
+        print("[WARN] Filtered road contour is too small after removing bottom points.")
         return None, None, None
 
     contour_points = np.array(road_contour).reshape(-1, 2)
@@ -222,47 +222,37 @@ def create_overlay(
     return overlay
 
 
-class Samv2ImageSegmentation:
+class Samv2ImageSegmentation(Node):
     def __init__(self):
-        rospy.loginfo("Initializing RoadSegmentation class.")
+        super().__init__("samv2_image_segmentation")
+        self.get_logger().info("Initializing RoadSegmentation class.")
 
-        self.image_sub = rospy.Subscriber(
-            CAMERA_TOPIC,
-            Image,
-            self.callback,
-            queue_size=1,
-            buff_size=2**24,
-        )
+        self.bridge = CvBridge()
 
-        self.image_pub = rospy.Publisher(
-            SAM_SEGMENTATION_MASK_TOPIC, Image, queue_size=1
-        )
+        self.create_subscription(Image, CAMERA_TOPIC, self.callback, 1)
 
-        self.left_boundary_pub = rospy.Publisher(
-            SAM_LEFT_CONTOUR_TOPIC, DetectedRoadArea, queue_size=1
-        )
-        self.right_boundary_pub = rospy.Publisher(
-            SAM_RIGHT_CONTOUR_TOPIC, DetectedRoadArea, queue_size=1
-        )
+        self.image_pub = self.create_publisher(Image, SAM_SEGMENTATION_MASK_TOPIC, 1)
+        self.left_boundary_pub = self.create_publisher(DetectedRoadArea, SAM_LEFT_CONTOUR_TOPIC, 1)
+        self.right_boundary_pub = self.create_publisher(DetectedRoadArea, SAM_RIGHT_CONTOUR_TOPIC, 1)
 
         self.ros_image = None
         self.publish_image = True
         self.detected_objects = []
         self.centerline_points = None
-        rospy.Timer(rospy.Duration(0.1), self.process_loop)
+        self.create_timer(0.1, self.process_loop)
 
     def callback(self, ros_image):
         self.ros_image = ros_image
 
-    def process_loop(self, event):
-        """Process the image if available, called periodically by a ROS Timer."""
+    def process_loop(self):
+        """Process the image if available, called periodically by a timer."""
         if self.ros_image:
             self.image_callback()
 
     @timer
     def image_callback(self):
 
-        img = ros_numpy.numpify(self.ros_image)
+        img = self.bridge.imgmsg_to_cv2(self.ros_image, desired_encoding="bgr8")
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         overlay, left_boundary, right_boundary = process_image(
             img,
@@ -287,9 +277,7 @@ class Samv2ImageSegmentation:
             left_boundary = left_boundary.astype(np.float32)
             left_boundary[:, 0] *= ORIGINAL_WIDTH / RESIZED_WIDTH
             left_boundary[:, 1] *= ORIGINAL_HEIGHT / RESIZED_HEIGHT
-            self.publish_boundary(
-                left_boundary, self.left_boundary_pub, self.ros_image.header.stamp
-            )
+            self.publish_boundary(left_boundary, self.left_boundary_pub, self.ros_image.header.stamp)
 
         if (right_boundary is not None) and right_boundary.size > 0:
             # Remove points that are at the image boundary (x == width or y == height or 0)
@@ -304,9 +292,7 @@ class Samv2ImageSegmentation:
             right_boundary = right_boundary.astype(np.float32)
             right_boundary[:, 0] *= ORIGINAL_WIDTH / RESIZED_WIDTH
             right_boundary[:, 1] *= ORIGINAL_HEIGHT / RESIZED_HEIGHT
-            self.publish_boundary(
-                right_boundary, self.right_boundary_pub, self.ros_image.header.stamp
-            )
+            self.publish_boundary(right_boundary, self.right_boundary_pub, self.ros_image.header.stamp)
 
     def publish_image_topic(self, ros_image, overlay):
         msg = Image()
@@ -319,11 +305,16 @@ class Samv2ImageSegmentation:
     def publish_boundary(self, boundary, publisher, stamp):
         boundary_msg = DetectedRoadArea()
         boundary_msg.header.stamp = stamp
-        boundary_msg.RoadArea.data = [float(point) for point in boundary.flatten()]
+        boundary_msg.road_area.data = [float(point) for point in boundary.flatten()]
         publisher.publish(boundary_msg)
 
 
 if __name__ == "__main__":
-    rospy.init_node("Samv2 Image Segmentation", anonymous=False)
-    Samv2ImageSegmentation()
-    rospy.spin()
+    rclpy.init()
+    node = Samv2ImageSegmentation()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()

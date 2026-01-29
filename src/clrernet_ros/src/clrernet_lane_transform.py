@@ -6,7 +6,8 @@ import os
 import message_filters
 import numpy as np
 import ros_numpy
-import rospy
+import rclpy
+from rclpy.node import Node
 import sensor_msgs.point_cloud2 as pc2
 import yaml
 from scipy.spatial import KDTree
@@ -31,8 +32,9 @@ PIXEL_LIM = 10
 LIDAR_ORIGIN = np.array([0.0, 0.0, 0.0])
 
 
-class Clrernet_Lane_Transform:
+class Clrernet_Lane_Transform(Node):
     def __init__(self):
+        super().__init__("clrernet_lane_transform")
 
         self.fields = [
             pc2.PointField(
@@ -53,29 +55,16 @@ class Clrernet_Lane_Transform:
         self.prev_right_lane = None
         self.ema_alpha = 0.5  # EMA smoothing factor
 
-        # Subscribers
-        self.sub_proj = message_filters.Subscriber(LIDAR_2D_PROJ_TOPIC, PointCloud2)
-        self.sub_lanes = message_filters.Subscriber(
-            CLRERNET_ALL_LANES_TOPIC, LanePoints
-        )
+        # Subscribers (ROS2 message_filters subscribers require node reference)
+        self.sub_proj = message_filters.Subscriber(self, PointCloud2, LIDAR_2D_PROJ_TOPIC)
+        self.sub_lanes = message_filters.Subscriber(self, LanePoints, CLRERNET_ALL_LANES_TOPIC)
 
         # Publishers
-        self.left_pcl_pub = rospy.Publisher(
-            CLRERNET_LEFT_LANE_TOPIC, PointCloud2, queue_size=5
-        )
-        self.right_pcl_pub = rospy.Publisher(
-            CLRERNET_RIGHT_LANE_TOPIC, PointCloud2, queue_size=5
-        )
-        self.centerline_pub = rospy.Publisher(
-            CLRERNET_CENTERLINE_TOPIC, PointCloud2, queue_size=1
-        )
+        self.left_pcl_pub = self.create_publisher(PointCloud2, CLRERNET_LEFT_LANE_TOPIC, 5)
+        self.right_pcl_pub = self.create_publisher(PointCloud2, CLRERNET_RIGHT_LANE_TOPIC, 5)
+        self.centerline_pub = self.create_publisher(PointCloud2, CLRERNET_CENTERLINE_TOPIC, 1)
 
-        ts = message_filters.ApproximateTimeSynchronizer(
-            [self.sub_proj, self.sub_lanes],
-            queue_size=10,
-            slop=0.5,
-            allow_headerless=False,
-        )
+        ts = message_filters.ApproximateTimeSynchronizer([self.sub_proj, self.sub_lanes], queue_size=10, slop=0.5)
         ts.registerCallback(self.lanes_callback)
 
     @timer
@@ -89,8 +78,8 @@ class Clrernet_Lane_Transform:
                 msg_proj, field_names=("x", "y", "z", "u", "v"), skip_nans=True
             )
         )
-        if len(points_list) == 0:
-            rospy.logwarn("No points in projected PointCloud2")
+            if len(points_list) == 0:
+                self.get_logger().warning("No points in projected PointCloud2")
             return
 
         points_np = np.array(points_list)
@@ -103,16 +92,16 @@ class Clrernet_Lane_Transform:
 
         lanes = [np.array(pts) for _, pts in sorted(lane_dict.items())]
         if len(lanes) == 0:
-            rospy.logwarn("No lane points detected!")
+                self.get_logger().warning("No lane points detected!")
             return
 
         left_pts, right_pts, center_pts = self.get_closest_lane_pair_3d(
             lanes, u, v, pc_arr, LIDAR_ORIGIN
         )
         if len(left_pts) == 0 or len(right_pts) == 0:
-            rospy.logwarn("Unable to find left or right lane boundaries.")
+                self.get_logger().warning("Unable to find left or right lane boundaries.")
         if center_pts.shape[0] == 0:
-            rospy.logwarn("Centerline could not be computed.")
+                self.get_logger().warning("Centerline could not be computed.")
 
         self.publish_3d_lane(
             left_pts, u, v, pc_arr, self.left_pcl_pub, msg_proj.header, side="left"
@@ -132,7 +121,7 @@ class Clrernet_Lane_Transform:
             mask = dist < PIXEL_LIM
             matched_pts = pc_arr[idx[mask]]
             if matched_pts.shape[0] == 0:
-                rospy.logwarn("No 3D match found for a lane")
+                    self.get_logger().warning("No 3D match found for a lane")
             return matched_pts if matched_pts.shape[0] > 0 else np.empty((0, 3))
 
         def compute_centerline(pts1, pts2):
@@ -149,9 +138,7 @@ class Clrernet_Lane_Transform:
                 lanes_3d.append((lane, lane_3d, mean_y))
 
         if len(lanes_3d) < 2:
-            rospy.logwarn(
-                "Less than 2 valid 3D lanes detected. Cannot compute centerline."
-            )
+            self.get_logger().warning("Less than 2 valid 3D lanes detected. Cannot compute centerline.")
             return ([], [], np.empty((0, 3)))
 
         lanes_3d.sort(key=lambda tup: tup[2])
@@ -221,6 +208,11 @@ class Clrernet_Lane_Transform:
 
 
 if __name__ == "__main__":
-    rospy.init_node("Clrernet Lane Transform", anonymous=True)
-    Clrernet_Lane_Transform()
-    rospy.spin()
+    rclpy.init()
+    node = Clrernet_Lane_Transform()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()

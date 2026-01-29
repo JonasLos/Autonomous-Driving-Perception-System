@@ -5,9 +5,10 @@ import os
 from collections import defaultdict
 
 import message_filters
+import rclpy
+from rclpy.node import Node
 import numpy as np
 import ros_numpy
-import rospy
 import sensor_msgs.point_cloud2 as pc2
 import std_msgs.msg
 import torch
@@ -49,18 +50,17 @@ YOLO_BBOX_TOPIC = topic_config["topics"]["yolo"]["bbox"]
 FUSED_BBOX_TOPIC = topic_config["topics"]["yolo"]["fused_bbox"]
 
 
-class ObjectsTransform:
+class ObjectsTransform(Node):
     """
     Class to handle the transformation of detected bounding box coordinates
     from 2D image space to 3D lidar space.
     """
 
     def __init__(self):
-        rospy.loginfo("Initializing TransformFuse node...")
-        # Initialize ROS publishers
-        self.bbox_publish = rospy.Publisher(
-            FUSED_BBOX_TOPIC, BoundingBoxArray, queue_size=1
-        )
+        super().__init__("objects_transform")
+        self.get_logger().info("Initializing TransformFuse node...")
+        # Initialize ROS2 publishers
+        self.bbox_publish = self.create_publisher(BoundingBoxArray, FUSED_BBOX_TOPIC, 1)
 
         # Point field configuration for PointCloud2
         self.fields = [
@@ -78,26 +78,17 @@ class ObjectsTransform:
             ),
         ]
 
-        # Initialize ROS subscribers
-        self.sub_lidar = message_filters.Subscriber(LIDAR_TOPIC, PointCloud2)
-        self.sub_image = message_filters.Subscriber(
-            YOLO_BBOX_TOPIC, BboxList, queue_size=1
-        )
-        self.sub_radar = message_filters.Subscriber(
-            RADAR_TRACKS_TOPIC,
-            RadarTrackArray,
-            queue_size=10,
-            tcp_nodelay=True,
-        )
+        # Initialize ROS2 message_filters subscribers
+        self.sub_lidar = message_filters.Subscriber(self, PointCloud2, LIDAR_TOPIC)
+        self.sub_image = message_filters.Subscriber(self, BboxList, YOLO_BBOX_TOPIC)
+        self.sub_radar = message_filters.Subscriber(self, RadarTrackArray, RADAR_TRACKS_TOPIC)
 
         # Initialize header
         self.header = std_msgs.msg.Header()
         self.header.frame_id = "lidar_tc"
 
         # Time synchronizer for lidar, image, and radar data
-        ts = message_filters.ApproximateTimeSynchronizer(
-            [self.sub_lidar, self.sub_image, self.sub_radar], 15, 0.4
-        )
+        ts = message_filters.ApproximateTimeSynchronizer([self.sub_lidar, self.sub_image, self.sub_radar], 15, 0.4)
         ts.registerCallback(self.callback)
 
     def callback(self, msgLidar, msgPoint, msgRadar):
@@ -109,7 +100,7 @@ class ObjectsTransform:
             msgPoint (yolov9ros.msg.BboxCentersClass): Bounding box centers from image detection.
             msgRadar (derived_object_msgs.msg.ObjectWithCovarianceArray): Radar objects message.
         """
-        rospy.loginfo("Received synchronized messages.")
+        self.get_logger().info("Received synchronized messages.")
 
         # Convert lidar data to numpy array
         pc = ros_numpy.numpify(msgLidar)
@@ -152,7 +143,7 @@ class ObjectsTransform:
                         [pc_arr_pick[0][i], pc_arr_pick[1][i], pc_arr_pick[2][i], 1]
                     )
                     label.append([class_id])
-        rospy.loginfo(f"Found {len(center_3d)} camera detections.")
+        self.get_logger().info(f"Found {len(center_3d)} camera detections.")
 
         # Publishing the bounding boxes
         bbox_array = BoundingBoxArray()
@@ -172,7 +163,7 @@ class ObjectsTransform:
                     indices[0]
                 )  # Taking the first point in the cluster
 
-        rospy.loginfo(f"Found {len(unique_camera_indices)} unique camera detections.")
+        self.get_logger().info(f"Found {len(unique_camera_indices)} unique camera detections.")
 
         # Finding matching detections b/w camera and radar
         camera_detections = unique_camera_indices
@@ -200,7 +191,7 @@ class ObjectsTransform:
                 if rad_position[0] > 75 and distance < CLOSE_DISTANCE_THRESHOLD:
                     matched_pairs.append((i, j))
 
-        rospy.loginfo(f"Matched pairs: {matched_pairs}")
+        self.get_logger().info(f"Matched pairs: {matched_pairs}")
         matched_dict = defaultdict(list)
         for i, j in matched_pairs:
             matched_dict[i].append(j)
@@ -264,7 +255,7 @@ class ObjectsTransform:
 
         bbox_array.header.frame_id = msgLidar.header.frame_id
         self.bbox_publish.publish(bbox_array)
-        rospy.loginfo(f"Published {len(bbox_array.boxes)} fused bounding boxes.\n")
+        self.get_logger().info(f"Published {len(bbox_array.boxes)} fused bounding boxes.\n")
 
     def compute_distance_matrix(self, camera_detections, radar_detections):
         """
@@ -290,6 +281,11 @@ class ObjectsTransform:
 
 
 if __name__ == "__main__":
-    rospy.init_node("Objects Transform", anonymous=True)
-    ObjectsTransform()
-    rospy.spin()
+    rclpy.init()
+    node = ObjectsTransform()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()

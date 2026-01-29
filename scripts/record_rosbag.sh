@@ -94,11 +94,13 @@ mkdir -p "$SAVE_DIR"
 
 # === Publish Metadata to ROS ===
 echo "[INFO] Publishing metadata to /rosbag_metadata"
-rostopic pub -1 /rosbag_metadata std_msgs/String "data: \"$METADATA\"" &
+# Publish metadata via ROS2 topic (single message)
+ros2 topic pub -1 /rosbag_metadata std_msgs/msg/String "{data: \"$METADATA\"}" &
 
 sleep 1  # Give time for the message to be published
 
 # === Record Rosbag ===
-echo "[INFO] Starting rosbag recording..."
+echo "[INFO] Starting ros2 bag recording..."
 echo "Saving to: $SAVE_DIR/$BAG_NAME"
-rosbag record -e --split --size=5000 -o "$SAVE_DIR/$BAG_BASENAME" $ALL_TOPICS /rosbag_metadata
+# Note: ros2 bag CLI has different flags; using basic output option here.
+ros2 bag record -o "$SAVE_DIR/$BAG_BASENAME" $ALL_TOPICS /rosbag_metadata

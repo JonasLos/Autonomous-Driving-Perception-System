@@ -1,0 +1,36 @@
+{
+  "type_description_msg": {
+    "type_description": {
+      "type_name": "autoware_config_msgs/msg/ConfigVoxelGridFilter",
+      "fields": [
+        {
+          "name": "voxel_leaf_size",
+          "type": {
+            "type_id": 11,
+            "capacity": 0,
+            "string_capacity": 0,
+            "nested_type_name": ""
+          },
+          "default_value": ""
+        },
+        {
+          "name": "measurement_range",
+          "type": {
+            "type_id": 10,
+            "capacity": 0,
+            "string_capacity": 0,
+            "nested_type_name": ""
+          },
+          "default_value": ""
+        }
+      ]
+    },
+    "referenced_type_descriptions": []
+  },
+  "type_hashes": [
+    {
+      "type_name": "autoware_config_msgs/msg/ConfigVoxelGridFilter",
+      "hash_string": "RIHS01_c7878ce7ffc7cebc04897586726fa875c34d1590394427d1cba57782b9536898"
+    }
+  ]
+}

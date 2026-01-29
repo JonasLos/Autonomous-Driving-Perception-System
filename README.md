@@ -20,7 +20,7 @@ A ready-to-use system for autonomous driving, featuring YOLOv9 for object detect
 ### Prerequisites
 
 Before installing the Autonomous Driving Perception System, ensure the following prerequisites are met:
-- **ROS**: Make sure ROS-Melodic is installed on your system. For installation instructions, visit the [ROS Wiki](http://wiki.ros.org/ROS/Installation).
+-- **ROS**: This repository is being migrated to ROS2 (Jazzy). For ROS2 Jazzy installation instructions, visit the ROS2 documentation and install the `ros-jazzy-desktop` packages for your OS.
 - **Python**: Python versions are algorithm dependent. Please use the `environment.yml` files for the correct versions.
 - **Dependencies**: All necessary Python libraries and dependencies are listed in the corresponding `environment.yaml` files.
 
@@ -30,10 +30,10 @@ git clone --recursive https://github.com/ParimiHarsha/Autonomous-Driving-Percept
 cd Autonomous-Driving-Perception-System
 ```
 
-### Build the ROS Workspace
+### Build the ROS2 Workspace
 ```bash
-catkin build
-source devel/setup.bash
+colcon build --merge-install
+source install/setup.bash
 ```
 
 ### Create and Activate Environments

@@ -24,7 +24,7 @@ echo "------------------------------"
 
 while IFS= read -r topic; do
   echo "Topic: $topic"
-  timeout 3s rostopic hz "$topic" 2>/dev/null | grep -i "average rate" || echo "  No data or not publishing"
+  timeout 3s ros2 topic hz "$topic" 2>/dev/null | grep -i "average rate" || echo "  No data or not publishing"
   echo "------------------------------"
 done <<< "$TOPICS"
 

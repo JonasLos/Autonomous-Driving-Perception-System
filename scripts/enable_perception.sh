@@ -5,9 +5,9 @@ echo "Setting PYTHONPATH..."
 export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH
 export PYTHONPATH=$PWD/src/clrernet_ros/src:$PWD/src/clrernet_ros/src/clrernet:$PYTHONPATH
 
-# Source the ROS workspace
-echo "Sourcing the ROS workspace"
-source devel/setup.bash
+# Source the ROS2 workspace
+echo "Sourcing the ROS2 workspace"
+source install/setup.bash
 # export ROS_HOSTNAME=localhost
 
 # Activate YOLOv9 conda environment and launch YOLOv9 nodes in a new terminal tab
@@ -15,7 +15,7 @@ echo "Launching YOLOv9 object detection in a new terminal tab..."
 gnome-terminal --tab --title="YOLOv9 Object Detection" -- bash -c '
     source /home/dev/anaconda3/etc/profile.d/conda.sh &&
     conda activate yolov9 &&
-    roslaunch yolov9_ros yolov9_ros.launch &
+    ros2 launch yolov9_ros yolov9_ros.launch.py &
     sleep 2 &&
     printf "\033]0;YOLOv9 Object Detection\007" &&
     wait; exec bash'
@@ -25,7 +25,7 @@ echo "Launching SAM2 segmentation in a new terminal tab..."
 gnome-terminal --tab --title="SAM2 Segmentation" -- bash -c '
     source /home/dev/anaconda3/etc/profile.d/conda.sh &&
     conda activate sam2 &&
-    roslaunch sam2_ros sam2_ros.launch &
+    ros2 launch sam2_ros sam2_ros.launch.py &
     sleep 2 &&
     printf "\033]0;SAM2 Segmentation\007" &&
     wait; exec bash'
@@ -36,7 +36,7 @@ gnome-terminal --tab --title="Sphereformer Lidar Segmentation" -- bash -c '
     source /home/dev/anaconda3/etc/profile.d/conda.sh &&
     conda activate sphereformer &&
     export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH &&
-    roslaunch sphereformer_ros sphereformer_ros.launch &
+    ros2 launch sphereformer_ros sphereformer_ros.launch.py &
     sleep 2 &&
     printf "\033]0;Sphereformer Lidar Segmentation\007" &&
     wait; exec bash'

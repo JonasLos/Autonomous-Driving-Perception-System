@@ -1,0 +1,36 @@
+{
+  "type_description_msg": {
+    "type_description": {
+      "type_name": "autoware_config_msgs/msg/ConfigRandomFilter",
+      "fields": [
+        {
+          "name": "sample_num",
+          "type": {
+            "type_id": 6,
+            "capacity": 0,
+            "string_capacity": 0,
+            "nested_type_name": ""
+          },
+          "default_value": ""
+        },
+        {
+          "name": "measurement_range",
+          "type": {
+            "type_id": 10,
+            "capacity": 0,
+            "string_capacity": 0,
+            "nested_type_name": ""
+          },
+          "default_value": ""
+        }
+      ]
+    },
+    "referenced_type_descriptions": []
+  },
+  "type_hashes": [
+    {
+      "type_name": "autoware_config_msgs/msg/ConfigRandomFilter",
+      "hash_string": "RIHS01_209130ad82205b3c9e0eb5f684e218a71f3d7f717d2fa025ef9e75a56a727bf7"
+    }
+  ]
+}

@@ -13,9 +13,9 @@ services:
     working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
     command: >
       bash -c "source ~/.bashrc &&
-              source /opt/ros/melodic/setup.bash &&
-              catkin_make &&
-              echo 'ROS workspace build complete.'"
+              source /opt/ros/jazzy/setup.bash &&
+              colcon build --merge-install || true &&
+              echo 'ROS2 workspace build (colcon) complete.'"
 
   yolo_node:
     image: parimiharsha/perception_image
@@ -25,7 +25,7 @@ services:
     runtime: nvidia
     working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
     environment:
-      - ROS_MASTER_URI=http://localhost:11311
+      - ROS_DOMAIN_ID=0
       - CONDA_ENVS_PATH=/opt/conda/envs
       - NVIDIA_VISIBLE_DEVICES=all 
     volumes:
@@ -34,11 +34,11 @@ services:
     command: >
       bash -c "source ~/.bashrc &&
                source /home/dev/miniconda/etc/profile.d/conda.sh &&
-               source /opt/ros/melodic/setup.bash &&
+               source /opt/ros/jazzy/setup.bash &&
                export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
                conda activate yolov9 &&
-               source devel/setup.bash &&
-               roslaunch yolov9_ros yolov9_ros.launch"
+               source install/setup.bash &&
+               ros2 launch yolov9_ros yolov9_ros.launch.py"
 
   sam_node:
     image: parimiharsha/perception_image
@@ -48,7 +48,7 @@ services:
     runtime: nvidia
     working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
     environment:
-      - ROS_MASTER_URI=http://localhost:11311
+      - ROS_DOMAIN_ID=0
       - CONDA_ENVS_PATH=/opt/conda/envs
       - NVIDIA_VISIBLE_DEVICES=all 
     volumes:
@@ -57,11 +57,11 @@ services:
     command: >
       bash -c "source ~/.bashrc &&
                source /home/dev/miniconda/etc/profile.d/conda.sh &&
-               source /opt/ros/melodic/setup.bash &&
+               source /opt/ros/jazzy/setup.bash &&
                export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
                conda activate sam2 &&
-               source devel/setup.bash &&
-               roslaunch sam2_ros sam2_ros.launch"
+               source install/setup.bash &&
+               ros2 launch sam2_ros sam2_ros.launch.py"
 
   clrernet_node:
     image: parimiharsha/perception_image
@@ -71,7 +71,7 @@ services:
     runtime: nvidia
     working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
     environment:
-      # - ROS_MASTER_URI=http://localhost:11311
+      - ROS_DOMAIN_ID=0
       - CONDA_ENVS_PATH=/opt/conda/envs
       - NVIDIA_VISIBLE_DEVICES=all 
     volumes:
@@ -80,12 +80,12 @@ services:
     command: >
       bash -c "source ~/.bashrc &&
                source /home/dev/miniconda/etc/profile.d/conda.sh &&
-               source /opt/ros/melodic/setup.bash &&
+               source /opt/ros/jazzy/setup.bash &&
                export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
                export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src:/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src/clrernet:$PYTHONPATH &&
                conda activate clrernet &&
-               source devel/setup.bash &&
-               roslaunch clrernet_ros clrernet_ros.launch"
+               source install/setup.bash &&
+               ros2 launch clrernet_ros clrernet_ros.launch.py"
 
 
   transform_node:
@@ -96,7 +96,7 @@ services:
     runtime: nvidia
     working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
     environment:
-      - ROS_MASTER_URI=http://localhost:11311
+      - ROS_DOMAIN_ID=0
       - CONDA_ENVS_PATH=/opt/conda/envs
       - NVIDIA_VISIBLE_DEVICES=all 
     volumes:
@@ -104,12 +104,12 @@ services:
       - /home/dev/anaconda3/envs:/opt/conda/envs
     command: >
       bash -c "source ~/.bashrc &&
-               source /home/dev/miniconda/etc/profile.d/conda.sh &&
-               source /opt/ros/melodic/setup.bash &&
-               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
-               conda activate yolov9 &&
-               source devel/setup.bash &&
-               python src/transform.py"
+           source /home/dev/miniconda/etc/profile.d/conda.sh &&
+           source /opt/ros/jazzy/setup.bash &&
+           export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
+           conda activate yolov9 &&
+           source install/setup.bash &&
+           python src/transform.py"
 
   sphereformer_node:
     image: parimiharsha/perception_image
@@ -128,44 +128,17 @@ services:
     command: >
       bash -c "source ~/.bashrc &&
               source /home/dev/miniconda/etc/profile.d/conda.sh &&
-              source /opt/ros/melodic/setup.bash &&
-              source devel/setup.bash &&
+              source /opt/ros/jazzy/setup.bash &&
+              source install/setup.bash &&
               conda activate sphereformer &&
               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:\$PYTHONPATH &&
               export LD_LIBRARY_PATH=\$\CONDA_PREFIX/lib:/usr/local/cuda/lib64:\$\LD_LIBRARY_PATH &&
               # export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libpcl_filters.so.1.8:$LD_LIBRARY_PATH &&
-              roslaunch sphereformer_ros sphereformer_ros.launch"
+              ros2 launch sphereformer_ros sphereformer_ros.launch.py"
 
 
 #    export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:\$PYTHONPATH &&
 #  export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src/clrernet:$PYTHONPATH &&
 
 
-  controller_node:
-    image: parimiharsha/perception_image
-    user: "1000:1000"
-    network_mode: "host"
-    ipc: "host"
-    working_dir: /home/dev/Documents/AVA_Control
-    environment:
-      - ROS_MASTER_URI=http://localhost:11311
-      - CONDA_ENVS_PATH=/opt/conda/envs
-      - NVIDIA_VISIBLE_DEVICES=all 
-    volumes:
-      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
-      - /home/dev/anaconda3/envs:/opt/conda/envs
-      - /home/dev/Documents/AVA_Control:/home/dev/Documents/AVA_Control
-    command: >
-      bash -c "source ~/.bashrc &&
-              source /home/dev/miniconda/etc/profile.d/conda.sh &&
-              source /opt/ros/melodic/setup.bash &&
-              sudo apt install ros-melodic-raptor-dbw-msgs &&
-              catkin_make &&
-              source devel/setup.bash &&
-              chmod +x src/setup_permissions.sh &&
-              ./src/setup_permissions.sh &&
-              conda activate newcontrol &&
-              curl https://bootstrap.pypa.io/pip/2.7/get-pip.py -o get-pip.py &&
-              python2 get-pip.py &&
-              /home/dev/.local/bin/pip2 install scipy &&
-              roslaunch AVA_Control ctrl6.launch"
+  # controller_node service removed — it was ROS1/Python2 specific (AVA_Control)

@@ -1,0 +1,8 @@
+msg/ConfigDistanceFilter.idl
+msg/ConfigDistanceFilter.msg
+msg/ConfigRandomFilter.idl
+msg/ConfigRandomFilter.msg
+msg/ConfigRingFilter.idl
+msg/ConfigRingFilter.msg
+msg/ConfigVoxelGridFilter.idl
+msg/ConfigVoxelGridFilter.msg

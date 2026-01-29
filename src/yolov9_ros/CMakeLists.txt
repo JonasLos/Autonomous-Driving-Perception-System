@@ -1,18 +1,10 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.5)
 project(yolov9_ros)
 
-## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
-
-## Find catkin macros and libraries
-## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
-## is used, also find other catkin packages
-find_package(catkin REQUIRED COMPONENTS
-  rospy
-  std_msgs
-  message_generation
-  geometry_msgs
-)
+find_package(ament_cmake REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -48,11 +40,11 @@ find_package(catkin REQUIRED COMPONENTS
 ##   * add every package in MSG_DEP_SET to generate_messages(DEPENDENCIES ...)
 
 ## Generate messages in the 'msg' folder
- add_message_files(
-   FILES
-   BboxList.msg
-   Bbox.msg
- )
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Bbox.msg"
+  "msg/BboxList.msg"
+  DEPENDENCIES std_msgs geometry_msgs
+)
 
 ## Generate services in the 'srv' folder
 # add_service_files(
@@ -69,12 +61,7 @@ find_package(catkin REQUIRED COMPONENTS
 # )
 
 ## Generate added messages and services with any dependencies listed here
- generate_messages(
-   DEPENDENCIES
-   std_msgs
-   geometry_msgs
-   #file
- )
+## (ROS1 `generate_messages` removed for ROS2)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -105,12 +92,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
-catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES objdetection
-  CATKIN_DEPENDS rospy std_msgs message_runtime geometry_msgs
-#  DEPENDS system_lib
-)
+ament_package()
 
 ###########
 ## Build ##
@@ -119,8 +101,7 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-# include
-  ${catkin_INCLUDE_DIRS}
+  include
 )
 
 ## Declare a C++ library
@@ -207,3 +188,8 @@ include_directories(
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
+install(PROGRAMS
+  "src/yolov9_object_detection.py"
+  "src/objects_transform.py"
+  DESTINATION lib/${PROJECT_NAME}
+)
