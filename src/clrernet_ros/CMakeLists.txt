@@ -23,3 +23,8 @@ install(PROGRAMS
   "src/inference.py"
   DESTINATION lib/${PROJECT_NAME}
 )
+
+## Install launch files
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)

@@ -31,3 +31,8 @@ install(PROGRAMS
   "src/samv2_mask_transform.py"
   DESTINATION lib/${PROJECT_NAME}
 )
+
+## Install launch files
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)

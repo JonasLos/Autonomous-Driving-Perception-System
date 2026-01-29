@@ -1,3 +1,0 @@
-int32 ring_div
-float64 voxel_leaf_size
-float32 measurement_range

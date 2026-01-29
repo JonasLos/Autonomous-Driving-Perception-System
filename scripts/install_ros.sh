@@ -28,10 +28,12 @@ sudo sh -c 'echo "deb [trusted=yes] https://s3.amazonaws.com/autonomoustuff-repo
 # Install ROS Melodic Desktop Full
 sudo apt-get install -y ros-melodic-desktop
 
-# Install dependencies for building ROS1 packages
-echo "Installing dependencies for building ROS packages..."
-sudo apt-get install -y python-rosdep python-rosinstall python-rosinstall-generator python-wstool build-essential python-catkin-pkg libbullet-dev ros-melodic-drived-object-msgs ros-melodic-raptor-dbw-msgs libpcl-dev
-sudo apt install python3-catkin-pkg-modules python3-rospkg-modules python3-empy #for planner installation and python3 to ros melodic compatibility
+# Install dependencies for building ROS1 packages (minimal)
+echo "Installing minimal dependencies for legacy ROS (catkin packages omitted)..."
+# NOTE: catkin-specific packages (python-catkin-pkg, python3-catkin-pkg-modules) are intentionally omitted
+# to keep the repository compatible with ROS2/ament workflows. Install them manually if you need ROS1 support.
+sudo apt-get install -y python-rosdep python-rosinstall python-rosinstall-generator python-wstool build-essential libbullet-dev libpcl-dev
+sudo apt install -y python3-rospkg-modules python3-empy # keep general Python ROS tooling
 
 # Initialize rosdep
 sudo rosdep init || true

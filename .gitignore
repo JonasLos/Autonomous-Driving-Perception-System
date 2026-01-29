@@ -11,7 +11,6 @@ __pycache__/
 build/
 devel/
 logs/
-.catkin_tools/
 runs/
 include/
 .vscode
@@ -137,7 +136,6 @@ cython_debug/
 # Misc files
 *.mp4
 .DS_Store
-.catkin_workspace
 *.bag
 *.rst
 
