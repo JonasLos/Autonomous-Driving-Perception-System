@@ -62,6 +62,7 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>ros2_numpy</exec_depend>
   <member_of_group>rosidl_interface_packages</member_of_group>
 
   <!-- Export for ament -->

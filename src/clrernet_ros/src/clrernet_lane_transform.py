@@ -5,7 +5,7 @@ import os
 
 import message_filters
 import numpy as np
-import ros_numpy
+import ros2_numpy as ros_numpy
 import rclpy
 from rclpy.node import Node
 import sensor_msgs.point_cloud2 as pc2
@@ -78,8 +78,8 @@ class Clrernet_Lane_Transform(Node):
                 msg_proj, field_names=("x", "y", "z", "u", "v"), skip_nans=True
             )
         )
-            if len(points_list) == 0:
-                self.get_logger().warning("No points in projected PointCloud2")
+        if len(points_list) == 0:
+            self.get_logger().warning("No points in projected PointCloud2")
             return
 
         points_np = np.array(points_list)
@@ -92,16 +92,16 @@ class Clrernet_Lane_Transform(Node):
 
         lanes = [np.array(pts) for _, pts in sorted(lane_dict.items())]
         if len(lanes) == 0:
-                self.get_logger().warning("No lane points detected!")
+            self.get_logger().warning("No lane points detected!")
             return
 
         left_pts, right_pts, center_pts = self.get_closest_lane_pair_3d(
             lanes, u, v, pc_arr, LIDAR_ORIGIN
         )
         if len(left_pts) == 0 or len(right_pts) == 0:
-                self.get_logger().warning("Unable to find left or right lane boundaries.")
+            self.get_logger().warning("Unable to find left or right lane boundaries.")
         if center_pts.shape[0] == 0:
-                self.get_logger().warning("Centerline could not be computed.")
+            self.get_logger().warning("Centerline could not be computed.")
 
         self.publish_3d_lane(
             left_pts, u, v, pc_arr, self.left_pcl_pub, msg_proj.header, side="left"
@@ -121,7 +121,7 @@ class Clrernet_Lane_Transform(Node):
             mask = dist < PIXEL_LIM
             matched_pts = pc_arr[idx[mask]]
             if matched_pts.shape[0] == 0:
-                    self.get_logger().warning("No 3D match found for a lane")
+                self.get_logger().warning("No 3D match found for a lane")
             return matched_pts if matched_pts.shape[0] > 0 else np.empty((0, 3))
 
         def compute_centerline(pts1, pts2):

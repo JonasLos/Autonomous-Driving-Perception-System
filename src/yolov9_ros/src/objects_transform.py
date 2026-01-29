@@ -8,7 +8,7 @@ import message_filters
 import rclpy
 from rclpy.node import Node
 import numpy as np
-import ros_numpy
+import ros2_numpy as ros_numpy
 import sensor_msgs.point_cloud2 as pc2
 import std_msgs.msg
 import torch

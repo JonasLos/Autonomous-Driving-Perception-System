@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 import cv2
-import ros_numpy
+import ros2_numpy as ros_numpy
 import rclpy
 from rclpy.node import Node
 from cv_bridge import CvBridge

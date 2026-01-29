@@ -4,7 +4,7 @@
 import os
 
 import numpy as np
-import ros_numpy
+import ros2_numpy as ros_numpy
 import rclpy
 from rclpy.node import Node
 import sensor_msgs.point_cloud2 as pc2
