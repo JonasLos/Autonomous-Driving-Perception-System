@@ -1,0 +1,19 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from sam2_msgs/msg/DetectedRoadArea.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Float32.idl"
+#include "std_msgs/msg/Float32MultiArray.idl"
+#include "std_msgs/msg/Header.idl"
+
+module sam2_msgs {
+  module msg {
+    struct DetectedRoadArea {
+      std_msgs::msg::Header header;
+
+      std_msgs::msg::Float32 confidence;
+
+      std_msgs::msg::Float32MultiArray road_area;
+    };
+  };
+};

@@ -1,0 +1,137 @@
+topics:
+  raw:
+    camera: "/camera_fl/image_color"
+    radar: "/radar_fc/as_tx/radar_tracks"
+    camera_fl: "/camera_fl/image_raw"
+    camera_fr: "/camera_fr/image_raw"
+    camera_rc: "/camera_rc/arena_camera_node/image_color"
+    camera_tl: "/camera_tl/arena_camera_node/image_raw"
+    camera_tr: "/camera_tr/arena_camera_node/image_raw"
+    imu: "/imu/data_raw"
+    gps_imu: "/gps/imu"
+    lidar_tc_packets: "/lidar_tc/velodyne_packets"
+    lidar_tc: "/lidar_tc/velodyne_points"
+    lidar_tl_packets: "/lidar_tl/velodyne_packets"
+    lidar_tl: "/lidar_tl/velodyne_points"
+    lidar_tr_packets: "/lidar_tr/velodyne_packets"
+    lidar_tr: "/lidar_tr/velodyne_points"
+    radar_objects: "/radar_fc/as_tx/objects"
+    radar_tracks: "/radar_fc/as_tx/radar_tracks"
+    radar_markers: "/radar_fc/as_tx/radar_markers"
+    ins: "/novatel/oem7/odom"
+    tf_static: "/tf_static"
+    camera_info: "/camera_fl/camera_info"
+
+  yolo:
+    image: "/yolov9/published_image"
+    bbox: "/yolov9/bboxInfo"
+    fused_bbox: "/fused_bbox"
+
+  sam:
+    segmentation_mask: "/sam_road_segmentation"
+    left_contour: "/sam_left_contour"
+    right_contour: "/sam_right_contour"
+    left_boundary: "/sam_left_boundary"
+    right_boundary: "/sam_right_boundary"
+
+  sphereformer:
+    segmentation_mask: "/sphereformer_road_segmentation"
+    left_boundary: "/sphereformer_left_boundary"
+    right_boundary: "/sphereformer_right_boundary"
+    ring_filtered: "/filtered_points"
+
+  clrernet:
+    lane_mask: "/clrernet/lane_mask"
+    all_lanes: "/clrernet/all_lanes"
+    left_lane: "/clrernet/left_lane"
+    right_lane: "/clrernet/right_lane"
+    centerline: "/clrernet/current_centerline"
+
+  transform:
+    lidar_2d_projection: "/lidar_2d_projection"
+
+  planning:
+    local_path: "/local_path"
+    global_trajectory: "/corrected_g_traj"
+    fsm_state: "/current_fsm_state"
+    gps_segment: "/gps_traj_segment"
+    obstacle_prediction: "/obstacle_traj_prediction"
+    target_trajectory: "/target_traj"
+
+  controls:
+    ctrl_ref: "/ctrl_ref.*"
+    vehicle: "/vehicle.*"
+    lat_perf: "/lat_ctrl_perf"
+    fsm_status: "/current_fsm_status"
+
+categories:
+  perception_input:
+    - topics.raw.camera
+    - topics.raw.lidar_tc
+    - topics.raw.radar_tracks
+    - topics.raw.radar_objects
+    - topics.raw.radar_markers
+    - topics.raw.imu
+    - topics.raw.gps_imu
+    - topics.raw.ins
+    - topics.raw.camera_info
+    - topics.raw.tf_static
+
+  perception_output:
+    - topics.yolo.image
+    - topics.yolo.bbox
+    - topics.yolo.fused_bbox
+    - topics.sam.segmentation_mask
+    - topics.sam.left_contour
+    - topics.sam.right_contour
+    - topics.sam.left_boundary
+    - topics.sam.right_boundary
+    - topics.sphereformer.segmentation_mask
+    - topics.sphereformer.left_boundary
+    - topics.sphereformer.right_boundary
+    - topics.raw.ins
+    - topics.raw.tf_static
+    - topics.clrernet.lane_mask
+    - topics.clrernet.all_lanes
+    - topics.clrernet.left_lane
+    - topics.clrernet.right_lane
+    - topics.clrernet.centerline
+
+  raw:
+    - topics.raw.camera
+    - topics.raw.lidar
+    - topics.raw.radar
+    - topics.raw.ins
+    - topics.raw.camera_fl
+    - topics.raw.camera_fr
+    - topics.raw.camera_rc
+    - topics.raw.camera_tl
+    - topics.raw.camera_tr
+    - topics.raw.lidar_tc
+    - topics.raw.lidar_tl
+    - topics.raw.lidar_tr
+    - topics.raw.radar_tracks
+    - topics.raw.radar_objects
+    - topics.raw.imu
+    - topics.raw.gps_imu
+    - topics.raw.ins
+
+  planning:
+    - topics.planning.local_path
+    - topics.planning.global_trajectory
+    - topics.planning.fsm_state
+    - topics.planning.gps_segment
+    - topics.planning.obstacle_prediction
+    - topics.planning.target_trajectory
+
+  controls:
+    - topics.controls.ctrl_ref
+    - topics.controls.vehicle
+    - topics.controls.lat_perf
+    - topics.controls.fsm_status
+
+  outputs:
+    - topics.outputs.yolov9_bbox
+    - topics.outputs.yolov9_image
+    - topics.outputs.tf_static
+    - topics.outputs.lidar_2d_projection

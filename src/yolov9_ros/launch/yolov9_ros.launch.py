@@ -6,13 +6,13 @@ def generate_launch_description():
     return LaunchDescription([
         Node(
             package='yolov9_ros',
-            executable='yolov9_object_detection.py',
+            executable='yolov9_object_detection',
             name='yolov9_object_detection',
             output='screen'
         ),
         Node(
             package='yolov9_ros',
-            executable='objects_transform.py',
+            executable='objects_transform',
             name='objects_transform',
             output='screen'
         ),

@@ -51,8 +51,12 @@
   <buildtool_depend>ament_python</buildtool_depend>
 
   <!-- Runtime dependencies -->
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>ros2_numpy</exec_depend>
+  <exec_depend>perception_common</exec_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->

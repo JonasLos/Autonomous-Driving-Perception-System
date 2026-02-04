@@ -48,25 +48,21 @@
   <!--   <test_depend>gtest</test_depend> -->
   <!-- Use doc_depend for packages you need only for building documentation: -->
   <!--   <doc_depend>doxygen</doc_depend> -->
-  <buildtool_depend>ament_cmake</buildtool_depend>
-  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+  <buildtool_depend>ament_python</buildtool_depend>
 
-  <!-- ROS interface generation -->
-  <build_depend>rosidl_default_generators</build_depend>
-  <exec_depend>rosidl_default_runtime</exec_depend>
-
-  <!-- Runtime and build dependencies -->
-  <build_depend>std_msgs</build_depend>
-  <build_export_depend>std_msgs</build_export_depend>
-  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>message_filters</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
   <exec_depend>ros2_numpy</exec_depend>
-  <member_of_group>rosidl_interface_packages</member_of_group>
 
-  <!-- Export for ament -->
+  <exec_depend>clrernet_msgs</exec_depend>
+  <exec_depend>perception_common</exec_depend>
+
   <export>
-    <rosidl_interface_packages/>
+    <build_type>ament_python</build_type>
   </export>
 </package>
