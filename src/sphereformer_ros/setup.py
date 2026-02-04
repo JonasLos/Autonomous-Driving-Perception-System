@@ -16,7 +16,15 @@ def _walk_data_files(base_dir: str, install_root: str):
             continue
         rel_dir = os.path.relpath(root, base_dir)
         install_dir = os.path.join(install_root, os.path.basename(base_dir), rel_dir)
-        collected.append((install_dir, [os.path.join(root, f) for f in files]))
+        file_paths = []
+        for f in files:
+            src_path = os.path.join(root, f)
+            # Guard against broken symlinks or non-regular files that setuptools can't copy.
+            if os.path.isfile(src_path):
+                file_paths.append(src_path)
+
+        if file_paths:
+            collected.append((install_dir, file_paths))
     return collected
 
 
