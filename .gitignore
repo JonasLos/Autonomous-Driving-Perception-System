@@ -10,7 +10,9 @@ __pycache__/
 .Python
 build/
 install/
+/install
 log/
+/log
 runs/
 include/
 .vscode
