@@ -8,3 +8,6 @@
 [submodule "src/clrernet_ros/src/clrernet"]
 	path = src/clrernet_ros/src/clrernet
 	url = https://github.com/hirotomusiker/CLRerNet.git
+[submodule "src/Custom_YOLO_ROS"]
+	path = src/Custom_YOLO_ROS
+	url = https://github.com/PaavanBagla/Custom_YOLO_ROS.git
