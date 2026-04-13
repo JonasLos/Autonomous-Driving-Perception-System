@@ -113,6 +113,16 @@ If you see all nodes activating and no errors, the YOLO node is running as expec
 
 ---
 
+## Zenoh RMW Support
+
+- The Docker images now include rmw_zenoh_cpp for ROS 2 Jazzy.
+- The YOLO container sets `RMW_IMPLEMENTATION=rmw_zenoh_cpp` by default, enabling communication with Zenoh-based ROS 2 nodes.
+- If your ROS 2 driver or other nodes use Zenoh, no extra configuration is needed in the container.
+
+Rebuild the images after any changes to the Dockerfiles to ensure Zenoh support is included.
+
+---
+
 ## Troubleshooting
 
 ### "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock"
@@ -134,5 +144,3 @@ If you still see this error, ensure the Docker service is running:
 sudo systemctl status docker
 sudo systemctl start docker
 ```
-
----
