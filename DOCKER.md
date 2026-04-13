@@ -123,6 +123,17 @@ Rebuild the images after any changes to the Dockerfiles to ensure Zenoh support 
 
 ---
 
+## Switching Middleware (RMW)
+
+- By default, the container uses Zenoh for ROS 2 communication (`RMW_IMPLEMENTATION=rmw_zenoh_cpp`).
+- If you do not want to use Zenoh and prefer the default DDS (Fast DDS), set the following environment variable before launching your nodes:
+  ```bash
+  export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+  ```
+- You can set this in your Dockerfile, docker-compose.yml, or interactively in the container.
+
+---
+
 ## Troubleshooting
 
 ### "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock"
