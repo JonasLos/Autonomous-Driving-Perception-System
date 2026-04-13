@@ -1,0 +1,34 @@
+FROM perception-base:latest
+
+SHELL ["/bin/bash", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /workspace/Autonomous-Driving-Perception-System
+COPY . .
+
+RUN rm -rf build install log && \
+    python3 -m venv /opt/yolo_venv && \
+    /opt/yolo_venv/bin/pip install --upgrade pip && \
+    if [ -f src/Custom_YOLO_ROS/requirements.txt ]; then \
+        /opt/yolo_venv/bin/pip install -r src/Custom_YOLO_ROS/requirements.txt; \
+    fi && \
+    /opt/yolo_venv/bin/pip install "numpy<2" ultralytics
+
+RUN apt-get update && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -r -y || true && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN source /opt/ros/jazzy/setup.bash && \
+    colcon build --merge-install
+
+# Set RMW_IMPLEMENTATION to use zenoh by default
+ENV RMW_IMPLEMENTATION=rmw_zenoh_cpp
+
+CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && \
+    source /workspace/Autonomous-Driving-Perception-System/install/setup.bash && \
+    export PATH=/opt/yolo_venv/bin:$PATH && \
+    export PYTHONPATH=/opt/yolo_venv/lib/python3.12/site-packages:$PYTHONPATH && \
+    export PYTHONPATH=/workspace/Autonomous-Driving-Perception-System:$PYTHONPATH && \
+    ros2 launch yolo_bringup yolov9.launch.py"]

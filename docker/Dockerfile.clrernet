@@ -1,0 +1,29 @@
+FROM perception-base:latest
+
+SHELL ["/bin/bash", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /workspace/Autonomous-Driving-Perception-System
+COPY . .
+
+RUN python3 -m venv /opt/clrernet_venv && \
+    /opt/clrernet_venv/bin/pip install --upgrade pip
+
+# 按项目实际依赖补充，例如：
+# RUN /opt/clrernet_venv/bin/pip install -r src/clrernet_ros/requirements.txt
+
+RUN apt-get update && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -r -y || true
+
+RUN source /opt/ros/jazzy/setup.bash && \
+    colcon build --merge-install || true
+
+CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && \
+    source install/setup.bash && \
+    export PATH=/opt/clrernet_venv/bin:$PATH && \
+    export PYTHONPATH=/opt/clrernet_venv/lib/python3.12/site-packages:$PYTHONPATH && \
+    export PYTHONPATH=/workspace/Autonomous-Driving-Perception-System:$PYTHONPATH && \
+    export PYTHONPATH=/workspace/Autonomous-Driving-Perception-System/src/clrernet_ros/src:/workspace/Autonomous-Driving-Perception-System/src/clrernet_ros/src/clrernet:$PYTHONPATH && \
+    ros2 launch clrernet_ros clrernet_ros.launch.py"]

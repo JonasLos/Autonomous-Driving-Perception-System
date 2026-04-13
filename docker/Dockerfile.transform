@@ -1,0 +1,28 @@
+FROM perception-base:latest
+
+SHELL ["/bin/bash", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /workspace/Autonomous-Driving-Perception-System
+COPY . .
+
+RUN python3 -m venv /opt/transform_venv && \
+    /opt/transform_venv/bin/pip install --upgrade pip
+
+# 如果 transform.py 实际依赖和 yolo 一样，可以改成安装相同依赖：
+# RUN /opt/transform_venv/bin/pip install "numpy<2" ultralytics
+
+RUN apt-get update && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -r -y || true
+
+RUN source /opt/ros/jazzy/setup.bash && \
+    colcon build --merge-install || true
+
+CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && \
+    source install/setup.bash && \
+    export PATH=/opt/transform_venv/bin:$PATH && \
+    export PYTHONPATH=/opt/transform_venv/lib/python3.12/site-packages:$PYTHONPATH && \
+    export PYTHONPATH=/workspace/Autonomous-Driving-Perception-System:$PYTHONPATH && \
+    python src/transform.py"]

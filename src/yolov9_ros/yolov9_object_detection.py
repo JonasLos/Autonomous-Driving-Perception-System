@@ -8,7 +8,7 @@ from ament_index_python.packages import get_package_share_directory
 
 import cv2
 import numpy as np
-import ros2_numpy as ros_numpy
+# import ros2_numpy as ros_numpy
 import rclpy
 from rclpy.node import Node
 from cv_bridge import CvBridge

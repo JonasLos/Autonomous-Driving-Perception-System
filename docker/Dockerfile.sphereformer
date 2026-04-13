@@ -1,0 +1,29 @@
+FROM perception-base:latest
+
+SHELL ["/bin/bash", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /workspace/Autonomous-Driving-Perception-System
+COPY . .
+
+RUN python3 -m venv /opt/sphereformer_venv && \
+    /opt/sphereformer_venv/bin/pip install --upgrade pip
+
+# 按项目实际依赖补充，例如：
+# RUN /opt/sphereformer_venv/bin/pip install -r src/sphereformer_ros/requirements.txt
+
+RUN apt-get update && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -r -y || true
+
+RUN source /opt/ros/jazzy/setup.bash && \
+    colcon build --merge-install || true
+
+CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && \
+    source install/setup.bash && \
+    export PATH=/opt/sphereformer_venv/bin:$PATH && \
+    export PYTHONPATH=/opt/sphereformer_venv/lib/python3.12/site-packages:$PYTHONPATH && \
+    export PYTHONPATH=/workspace/Autonomous-Driving-Perception-System:$PYTHONPATH && \
+    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH && \
+    ros2 launch sphereformer_ros sphereformer_ros.launch.py"]

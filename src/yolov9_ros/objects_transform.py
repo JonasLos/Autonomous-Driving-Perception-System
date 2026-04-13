@@ -9,7 +9,10 @@ import message_filters
 import rclpy
 from rclpy.node import Node
 import numpy as np
-import ros2_numpy as ros_numpy
+# import ros2_numpy as ros_numpy
+# from sensor_msgs_py import point_cloud2
+from sensor_msgs_py import point_cloud2 as pc2
+
 import sensor_msgs.point_cloud2 as pc2
 import std_msgs.msg
 import torch
@@ -105,8 +108,14 @@ class ObjectsTransform(Node):
         self.get_logger().info("Received synchronized messages.")
 
         # Convert lidar data to numpy array
-        pc = ros_numpy.numpify(msgLidar)
-        points = np.vstack((pc["x"], pc["y"], pc["z"], np.ones(pc["x"].shape[0]))).T
+        # pc = ros_numpy.numpify(msgLidar)
+        pc = point_cloud2.read_points_numpy(
+            msgLidar,
+            field_names=['x', 'y', 'z'],
+            skip_nans=True
+        )
+
+        points = np.vstack((pc[:, 0], pc[:, 1], pc[:, 2], np.ones(pc[:, 0].shape[0]))).T
 
         # Crop point cloud and transform to camera frame
         pc_arr = crop_pointcloud(points, lim_x, lim_y, lim_z)
