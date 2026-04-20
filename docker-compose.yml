@@ -341,8 +341,8 @@ services:
     volumes:
       - ./src/SAM3_ROS_NODE:/root/ws/src/SAM3_ROS_NODE
       - ~/.cache/huggingface:/root/.cache/huggingface
-      - ./send_test_image.py:/root/ws/send_test_image.py:ro
-      - ./test.png:/root/ws/test.png:ro
+      # - ./send_test_image.py:/root/ws/send_test_image.py:ro
+      # - ./test.png:/root/ws/test.png:ro
     deploy:
       resources:
         reservations:
