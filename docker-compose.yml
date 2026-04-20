@@ -1,140 +1,140 @@
-version: '3.3'
+# version: '3.3'
 
-services:
-  # Build-only service
-  perception_image_builder:
-    profiles: ["builder"]
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    image: parimiharsha/perception_image
-    volumes:
-      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
-    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
-    command: >
-      bash -c "source ~/.bashrc &&
-              source /opt/ros/jazzy/setup.bash &&
-              colcon build --merge-install || true &&
-              echo 'ROS2 workspace build (colcon) complete.'"
+# services:
+#   # Build-only service
+#   perception_image_builder:
+#     profiles: ["builder"]
+#     build:
+#       context: .
+#       dockerfile: docker/Dockerfile
+#     image: parimiharsha/perception_image
+#     volumes:
+#       - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+#     working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
+#     command: >
+#       bash -c "source ~/.bashrc &&
+#               source /opt/ros/jazzy/setup.bash &&
+#               colcon build --merge-install || true &&
+#               echo 'ROS2 workspace build (colcon) complete.'"
 
-  yolo_node:
-    image: parimiharsha/perception_image
-    user: "1000:1000"
-    network_mode: "host"
-    ipc: "host"
-    runtime: nvidia
-    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
-    environment:
-      - ROS_DOMAIN_ID=0
-      - CONDA_ENVS_PATH=/opt/conda/envs
-      - NVIDIA_VISIBLE_DEVICES=all 
-    volumes:
-      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
-      - /home/dev/anaconda3/envs:/opt/conda/envs
-    command: >
-      bash -c "source ~/.bashrc &&
-               source /home/dev/miniconda/etc/profile.d/conda.sh &&
-               source /opt/ros/jazzy/setup.bash &&
-               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
-               conda activate yolov9 &&
-               source install/setup.bash &&
-               ros2 launch yolov9_ros yolov9_ros.launch.py"
+#   yolo_node:
+#     image: parimiharsha/perception_image
+#     user: "1000:1000"
+#     network_mode: "host"
+#     ipc: "host"
+#     runtime: nvidia
+#     working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
+#     environment:
+#       - ROS_DOMAIN_ID=0
+#       - CONDA_ENVS_PATH=/opt/conda/envs
+#       - NVIDIA_VISIBLE_DEVICES=all 
+#     volumes:
+#       - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+#       - /home/dev/anaconda3/envs:/opt/conda/envs
+#     command: >
+#       bash -c "source ~/.bashrc &&
+#                source /home/dev/miniconda/etc/profile.d/conda.sh &&
+#                source /opt/ros/jazzy/setup.bash &&
+#                export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
+#                conda activate yolov9 &&
+#                source install/setup.bash &&
+#                ros2 launch yolov9_ros yolov9_ros.launch.py"
 
-  sam_node:
-    image: parimiharsha/perception_image
-    user: "1000:1000"
-    network_mode: "host"
-    ipc: "host"
-    runtime: nvidia
-    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
-    environment:
-      - ROS_DOMAIN_ID=0
-      - CONDA_ENVS_PATH=/opt/conda/envs
-      - NVIDIA_VISIBLE_DEVICES=all 
-    volumes:
-      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
-      - /home/dev/anaconda3/envs:/opt/conda/envs
-    command: >
-      bash -c "source ~/.bashrc &&
-               source /home/dev/miniconda/etc/profile.d/conda.sh &&
-               source /opt/ros/jazzy/setup.bash &&
-               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
-               conda activate sam2 &&
-               source install/setup.bash &&
-               ros2 launch sam2_ros sam2_ros.launch.py"
+#   sam_node:
+#     image: parimiharsha/perception_image
+#     user: "1000:1000"
+#     network_mode: "host"
+#     ipc: "host"
+#     runtime: nvidia
+#     working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
+#     environment:
+#       - ROS_DOMAIN_ID=0
+#       - CONDA_ENVS_PATH=/opt/conda/envs
+#       - NVIDIA_VISIBLE_DEVICES=all 
+#     volumes:
+#       - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+#       - /home/dev/anaconda3/envs:/opt/conda/envs
+#     command: >
+#       bash -c "source ~/.bashrc &&
+#                source /home/dev/miniconda/etc/profile.d/conda.sh &&
+#                source /opt/ros/jazzy/setup.bash &&
+#                export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
+#                conda activate sam2 &&
+#                source install/setup.bash &&
+#                ros2 launch sam2_ros sam2_ros.launch.py"
 
-  clrernet_node:
-    image: parimiharsha/perception_image
-    user: "1000:1000"
-    network_mode: "host"
-    ipc: "host"
-    runtime: nvidia
-    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
-    environment:
-      - ROS_DOMAIN_ID=0
-      - CONDA_ENVS_PATH=/opt/conda/envs
-      - NVIDIA_VISIBLE_DEVICES=all 
-    volumes:
-      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
-      - /home/dev/anaconda3/envs:/opt/conda/envs
-    command: >
-      bash -c "source ~/.bashrc &&
-               source /home/dev/miniconda/etc/profile.d/conda.sh &&
-               source /opt/ros/jazzy/setup.bash &&
-               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
-               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src:/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src/clrernet:$PYTHONPATH &&
-               conda activate clrernet &&
-               source install/setup.bash &&
-               ros2 launch clrernet_ros clrernet_ros.launch.py"
+#   clrernet_node:
+#     image: parimiharsha/perception_image
+#     user: "1000:1000"
+#     network_mode: "host"
+#     ipc: "host"
+#     runtime: nvidia
+#     working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
+#     environment:
+#       - ROS_DOMAIN_ID=0
+#       - CONDA_ENVS_PATH=/opt/conda/envs
+#       - NVIDIA_VISIBLE_DEVICES=all 
+#     volumes:
+#       - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+#       - /home/dev/anaconda3/envs:/opt/conda/envs
+#     command: >
+#       bash -c "source ~/.bashrc &&
+#                source /home/dev/miniconda/etc/profile.d/conda.sh &&
+#                source /opt/ros/jazzy/setup.bash &&
+#                export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
+#                export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src:/home/dev/Documents/Autonomous-Driving-Perception-System/src/clrernet_ros/src/clrernet:$PYTHONPATH &&
+#                conda activate clrernet &&
+#                source install/setup.bash &&
+#                ros2 launch clrernet_ros clrernet_ros.launch.py"
 
 
-  transform_node:
-    image: parimiharsha/perception_image
-    user: "1000:1000"
-    network_mode: "host"
-    ipc: "host"
-    runtime: nvidia
-    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
-    environment:
-      - ROS_DOMAIN_ID=0
-      - CONDA_ENVS_PATH=/opt/conda/envs
-      - NVIDIA_VISIBLE_DEVICES=all 
-    volumes:
-      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
-      - /home/dev/anaconda3/envs:/opt/conda/envs
-    command: >
-      bash -c "source ~/.bashrc &&
-           source /home/dev/miniconda/etc/profile.d/conda.sh &&
-           source /opt/ros/jazzy/setup.bash &&
-           export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
-           conda activate yolov9 &&
-           source install/setup.bash &&
-           python src/transform.py"
+#   transform_node:
+#     image: parimiharsha/perception_image
+#     user: "1000:1000"
+#     network_mode: "host"
+#     ipc: "host"
+#     runtime: nvidia
+#     working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
+#     environment:
+#       - ROS_DOMAIN_ID=0
+#       - CONDA_ENVS_PATH=/opt/conda/envs
+#       - NVIDIA_VISIBLE_DEVICES=all 
+#     volumes:
+#       - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+#       - /home/dev/anaconda3/envs:/opt/conda/envs
+#     command: >
+#       bash -c "source ~/.bashrc &&
+#            source /home/dev/miniconda/etc/profile.d/conda.sh &&
+#            source /opt/ros/jazzy/setup.bash &&
+#            export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:$PYTHONPATH &&
+#            conda activate yolov9 &&
+#            source install/setup.bash &&
+#            python src/transform.py"
 
-  sphereformer_node:
-    image: parimiharsha/perception_image
-    user: "1000:1000"
-    network_mode: "host"
-    ipc: "host"
-    runtime: nvidia
-    working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
-    environment:
-      - ROS_MASTER_URI=http://localhost:11311
-      - CONDA_ENVS_PATH=/opt/conda/envs
-      - NVIDIA_VISIBLE_DEVICES=all 
-    volumes:
-      - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
-      - /home/dev/anaconda3/envs:/opt/conda/envs
-    command: >
-      bash -c "source ~/.bashrc &&
-              source /home/dev/miniconda/etc/profile.d/conda.sh &&
-              source /opt/ros/jazzy/setup.bash &&
-              source install/setup.bash &&
-              conda activate sphereformer &&
-              export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:\$PYTHONPATH &&
-              export LD_LIBRARY_PATH=\$\CONDA_PREFIX/lib:/usr/local/cuda/lib64:\$\LD_LIBRARY_PATH &&
-              # export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libpcl_filters.so.1.8:$LD_LIBRARY_PATH &&
-              ros2 launch sphereformer_ros sphereformer_ros.launch.py"
+#   sphereformer_node:
+#     image: parimiharsha/perception_image
+#     user: "1000:1000"
+#     network_mode: "host"
+#     ipc: "host"
+#     runtime: nvidia
+#     working_dir: /home/dev/Documents/Autonomous-Driving-Perception-System
+#     environment:
+#       - ROS_MASTER_URI=http://localhost:11311
+#       - CONDA_ENVS_PATH=/opt/conda/envs
+#       - NVIDIA_VISIBLE_DEVICES=all 
+#     volumes:
+#       - /home/dev/Documents/Autonomous-Driving-Perception-System:/home/dev/Documents/Autonomous-Driving-Perception-System
+#       - /home/dev/anaconda3/envs:/opt/conda/envs
+#     command: >
+#       bash -c "source ~/.bashrc &&
+#               source /home/dev/miniconda/etc/profile.d/conda.sh &&
+#               source /opt/ros/jazzy/setup.bash &&
+#               source install/setup.bash &&
+#               conda activate sphereformer &&
+#               export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:\$PYTHONPATH &&
+#               export LD_LIBRARY_PATH=\$\CONDA_PREFIX/lib:/usr/local/cuda/lib64:\$\LD_LIBRARY_PATH &&
+#               # export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libpcl_filters.so.1.8:$LD_LIBRARY_PATH &&
+#               ros2 launch sphereformer_ros sphereformer_ros.launch.py"
 
 
 #    export PYTHONPATH=/home/dev/Documents/Autonomous-Driving-Perception-System:\$PYTHONPATH &&
@@ -142,3 +142,302 @@ services:
 
 
   # controller_node service removed — it was ROS1/Python2 specific (AVA_Control)
+
+
+
+# services:
+#   base_builder:
+#     profiles: ["builder"]
+#     build:
+#       context: .
+#       dockerfile: docker/Dockerfile.base
+#     image: perception-base:latest
+#     container_name: perception_base_builder
+#     working_dir: /workspace/Autonomous-Driving-Perception-System
+#     command: ["/bin/bash"]
+#     restart: "no"
+
+#   yolo_node:
+#     profiles: ["runtime"]
+#     build:
+#       context: .
+#       dockerfile: docker/Dockerfile.yolo
+#     image: perception-yolo:latest
+#     container_name: perception_yolo_node
+#     network_mode: "host"
+#     ipc: "host"
+#     working_dir: /workspace/Autonomous-Driving-Perception-System
+#     environment:
+#       ROS_DOMAIN_ID: "0"
+#       NVIDIA_VISIBLE_DEVICES: "all"
+#       NVIDIA_DRIVER_CAPABILITIES: "all"
+#       YOLO_CONFIG_DIR: "/tmp/Ultralytics"
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: all
+#               capabilities: [gpu]
+#     restart: unless-stopped
+
+#   sam_node:
+#     profiles: ["runtime"]
+#     build:
+#       context: .
+#       dockerfile: docker/Dockerfile.sam
+#     image: perception-sam:latest
+#     container_name: perception_sam_node
+#     network_mode: "host"
+#     ipc: "host"
+#     working_dir: /workspace/Autonomous-Driving-Perception-System
+#     environment:
+#       ROS_DOMAIN_ID: "0"
+#       NVIDIA_VISIBLE_DEVICES: "all"
+#       NVIDIA_DRIVER_CAPABILITIES: "all"
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: all
+#               capabilities: [gpu]
+#     restart: unless-stopped
+
+#   clrernet_node:
+#     profiles: ["runtime"]
+#     build:
+#       context: .
+#       dockerfile: docker/Dockerfile.clrernet
+#     image: perception-clrernet:latest
+#     container_name: perception_clrernet_node
+#     network_mode: "host"
+#     ipc: "host"
+#     working_dir: /workspace/Autonomous-Driving-Perception-System
+#     environment:
+#       ROS_DOMAIN_ID: "0"
+#       NVIDIA_VISIBLE_DEVICES: "all"
+#       NVIDIA_DRIVER_CAPABILITIES: "all"
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: all
+#               capabilities: [gpu]
+#     restart: unless-stopped
+
+#   transform_node:
+#     profiles: ["runtime"]
+#     build:
+#       context: .
+#       dockerfile: docker/Dockerfile.transform
+#     image: perception-transform:latest
+#     container_name: perception_transform_node
+#     network_mode: "host"
+#     ipc: "host"
+#     working_dir: /workspace/Autonomous-Driving-Perception-System
+#     environment:
+#       ROS_DOMAIN_ID: "0"
+#       NVIDIA_VISIBLE_DEVICES: "all"
+#       NVIDIA_DRIVER_CAPABILITIES: "all"
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: all
+#               capabilities: [gpu]
+#     restart: unless-stopped
+
+#   sphereformer_node:
+#     profiles: ["runtime"]
+#     build:
+#       context: .
+#       dockerfile: docker/Dockerfile.sphereformer
+#     image: perception-sphereformer:latest
+#     container_name: perception_sphereformer_node
+#     network_mode: "host"
+#     ipc: "host"
+#     working_dir: /workspace/Autonomous-Driving-Perception-System
+#     environment:
+#       ROS_DOMAIN_ID: "0"
+#       NVIDIA_VISIBLE_DEVICES: "all"
+#       NVIDIA_DRIVER_CAPABILITIES: "all"
+#       LD_LIBRARY_PATH: "/usr/local/cuda/lib64"
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: all
+#               capabilities: [gpu]
+#     restart: unless-stopped
+
+
+services:
+  base_builder:
+    profiles: ["builder"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.base
+    image: perception-base:latest
+    container_name: perception_base_builder
+    working_dir: /workspace/Autonomous-Driving-Perception-System
+    command: ["/bin/bash"]
+    restart: "no"
+
+  
+  yolo_node:
+    profiles: ["runtime"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.yolo
+    image: perception-yolo:latest
+    container_name: perception_yolo_node
+    network_mode: "host"
+    ipc: "host"
+    working_dir: /workspace/Autonomous-Driving-Perception-System
+    
+    # entrypoint: ["/bin/bash", "-c", "tail -f /dev/null"]
+    tty: true
+    stdin_open: true
+    # ---------------------------------------------
+
+    environment:
+      ROS_DOMAIN_ID: "0"
+      YOLO_CONFIG_DIR: "/tmp/Ultralytics"
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "all"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: "no"
+
+
+  sam3_ros:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.sam
+    image: test-sam3:latest
+    container_name: test_sam3_container
+    stdin_open: true
+    tty: true
+    network_mode: host
+    ipc: host
+    shm_size: "8gb"
+    working_dir: /root/ws
+    environment:
+      ROS_DOMAIN_ID: "0"
+      PYTHONUNBUFFERED: "1"
+      HF_TOKEN: "${HF_TOKEN:-}"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+      FASTDDS_BUILTIN_TRANSPORTS: UDPv4
+    volumes:
+      - ./src/SAM3_ROS_NODE:/root/ws/src/SAM3_ROS_NODE
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ./send_test_image.py:/root/ws/send_test_image.py:ro
+      - ./test.png:/root/ws/test.png:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: >
+      bash -lc "
+      source /opt/ros/humble/setup.bash &&
+      cd /root/ws/src/SAM3_ROS_NODE &&
+      uv sync --python 3.10 &&
+      export PYTHONPATH=/root/ws/src/SAM3_ROS_NODE/.venv/lib/python3.10/site-packages:$PYTHONPATH &&
+      cd /root/ws &&
+      colcon build --symlink-install &&
+      source /root/ws/install/setup.bash &&
+      ros2 run sam3_ros segmentation_node --ros-args -p text_prompt:='red square'
+      "
+  # image_sender:
+  #   image: test-sam3:latest
+  #   container_name: test_image_sender_container
+  #   stdin_open: true
+  #   tty: true
+  #   network_mode: host
+  #   ipc: host
+  #   shm_size: "1gb"
+  #   working_dir: /root/ws
+  #   environment:
+  #     ROS_DOMAIN_ID: "0"
+  #     PYTHONUNBUFFERED: "1"
+  #     FASTDDS_BUILTIN_TRANSPORTS: UDPv4
+  #   volumes:
+  #     - ./send_test_image.py:/root/ws/send_test_image.py:ro
+  #     - ./test.png:/root/ws/test.png:ro
+  #   depends_on:
+  #     - sam3_ros
+  #   command: >
+  #     bash -lc "
+  #     source /opt/ros/humble/setup.bash &&
+  #     python3 /root/ws/send_test_image.py
+  #     "
+
+  # sam_node:
+  #   profiles: ["runtime"]
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.sam
+  #   image: perception-sam:latest
+  #   container_name: perception_sam_node
+  #   network_mode: "host"
+  #   ipc: "host"
+  #   working_dir: /workspace/Autonomous-Driving-Perception-System
+  #   environment:
+  #     ROS_DOMAIN_ID: "0"
+  #   restart: unless-stopped
+
+  # clrernet_node:
+  #   profiles: ["runtime"]
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.clrernet
+  #   image: perception-clrernet:latest
+  #   container_name: perception_clrernet_node
+  #   network_mode: "host"
+  #   ipc: "host"
+  #   working_dir: /workspace/Autonomous-Driving-Perception-System
+  #   environment:
+  #     ROS_DOMAIN_ID: "0"
+  #   restart: unless-stopped
+
+  # transform_node:
+  #   profiles: ["runtime"]
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.transform
+  #   image: perception-transform:latest
+  #   container_name: perception_transform_node
+  #   network_mode: "host"
+  #   ipc: "host"
+  #   working_dir: /workspace/Autonomous-Driving-Perception-System
+  #   environment:
+  #     ROS_DOMAIN_ID: "0"
+  #   restart: unless-stopped
+
+  # sphereformer_node:
+  #   profiles: ["runtime"]
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.sphereformer
+  #   image: perception-sphereformer:latest
+  #   container_name: perception_sphereformer_node
+  #   network_mode: "host"
+  #   ipc: "host"
+  #   working_dir: /workspace/Autonomous-Driving-Perception-System
+  #   environment:
+  #     ROS_DOMAIN_ID: "0"
+  #     LD_LIBRARY_PATH: "/usr/local/cuda/lib64"
+  #   restart: unless-stopped

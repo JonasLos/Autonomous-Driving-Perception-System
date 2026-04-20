@@ -1,0 +1,69 @@
+FROM nvidia/cuda:12.6.1-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV ROS_DISTRO=humble
+ENV PATH="/root/.local/bin:${PATH}"
+
+SHELL ["/bin/bash", "-lc"]
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg2 \
+    lsb-release \
+    locales \
+    wget \
+    git \
+    ca-certificates \
+    build-essential \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-argcomplete \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    ffmpeg \
+    && locale-gen en_US en_US.UTF-8 \
+    && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" > /etc/apt/sources.list.d/ros2.list && \
+    apt-get update && apt-get install -y \
+      ros-humble-ros-base \
+      ros-dev-tools \
+      ros-humble-ament-cmake-auto \
+      ros-humble-cv-bridge \
+      ros-humble-geometry-msgs \
+      ros-humble-sensor-msgs \
+      ros-humble-std-msgs \
+      ros-humble-vision-msgs \
+      ros-humble-image-transport \
+      ros-humble-compressed-image-transport \
+      python3-colcon-common-extensions \
+      python3-rosdep \
+      && rm -rf /var/lib/apt/lists/*
+
+RUN if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then rosdep init; fi && rosdep update
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+WORKDIR /root/ws
+
+COPY src/SAM3_ROS_NODE /root/ws/src/SAM3_ROS_NODE
+
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    cd /root/ws/src/SAM3_ROS_NODE && \
+    uv sync && \
+    uv run python -c "import cv2, cv_bridge, geometry_msgs.msg, sensor_msgs.msg, std_msgs.msg, vision_msgs.msg, torch" && \
+    cd /root/ws && \
+    colcon build --symlink-install
+
+RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
+    echo "source /root/ws/install/setup.bash" >> /root/.bashrc
+
+CMD ["/bin/bash"]

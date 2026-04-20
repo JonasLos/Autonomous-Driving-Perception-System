@@ -11,3 +11,5 @@
 [submodule "src/src/Custom_YOLO_ROS"]
 	path = src/src/Custom_YOLO_ROS
 	url = https://github.com/PaavanBagla/Custom_YOLO_ROS.git
+[submodule "src/SAM3_ROS_NODE"]
+	url = https://github.com/Tingyu-Guo/SAM3_ROS_NODE.git
