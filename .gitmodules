@@ -7,7 +7,10 @@
 	url = https://github.com/dvlab-research/SphereFormer
 [submodule "src/clrernet_ros/src/clrernet"]
 	path = src/clrernet_ros/src/clrernet
-	url = https://github.com/hirotomusiker/CLRerNet.git
+	url = https://github.com/hirotomusiker/CLRerNet
 [submodule "src/src/Custom_YOLO_ROS"]
 	path = src/src/Custom_YOLO_ROS
-	url = https://github.com/PaavanBagla/Custom_YOLO_ROS.git
+	url = https://github.com/PaavanBagla/Custom_YOLO_ROS
+[submodule "src/SAM3_ROS_NODE"]
+	path = src/SAM3_ROS_NODE
+	url = https://github.com/PaavanBagla/SAM3_ROS_NODE
