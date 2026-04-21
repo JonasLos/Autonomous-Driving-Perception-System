@@ -1,0 +1,9 @@
+# This file will be populated with the Python dependencies for Cylinder3D.
+torch
+torchvision
+torchaudio
+PyYAML
+tqdm
+numpy
+numba
+scikit-learn
