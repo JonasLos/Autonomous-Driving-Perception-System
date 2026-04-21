@@ -1,10 +1,10 @@
-FROM nvidia/cuda:12.6.1-devel-ubuntu22.04
+FROM nvidia/cuda:12.6.1-devel-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
-ENV ROS_DISTRO=humble
+ENV ROS_DISTRO=jazzy
 ENV PATH="/root/.local/bin:${PATH}"
 
 SHELL ["/bin/bash", "-lc"]
@@ -34,18 +34,18 @@ RUN apt-get update && apt-get install -y \
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" > /etc/apt/sources.list.d/ros2.list && \
     apt-get update && apt-get install -y \
-      ros-humble-ros-base \
+            ros-jazzy-ros-base \
       ros-dev-tools \
-    python3-ament-package \
-    ros-humble-rmw-zenoh-cpp \
-      ros-humble-ament-cmake-auto \
-      ros-humble-cv-bridge \
-      ros-humble-geometry-msgs \
-      ros-humble-sensor-msgs \
-      ros-humble-std-msgs \
-      ros-humble-vision-msgs \
-      ros-humble-image-transport \
-      ros-humble-compressed-image-transport \
+            ros-jazzy-ament-package \
+            ros-jazzy-rmw-zenoh-cpp \
+            ros-jazzy-ament-cmake-auto \
+            ros-jazzy-cv-bridge \
+            ros-jazzy-geometry-msgs \
+            ros-jazzy-sensor-msgs \
+            ros-jazzy-std-msgs \
+            ros-jazzy-vision-msgs \
+            ros-jazzy-image-transport \
+            ros-jazzy-compressed-image-transport \
       python3-colcon-common-extensions \
       python3-rosdep \
       && rm -rf /var/lib/apt/lists/*
@@ -62,13 +62,16 @@ COPY src/SAM3_ROS_NODE /root/ws/src/SAM3_ROS_NODE
 RUN set -e && \
     cd /root/ws/src/SAM3_ROS_NODE && \
     mkdir -p scripts && \
-    cat > scripts/segmentation_node <<'EOF' && \
+    cat > scripts/segmentation_node <<'EOF'
 #!/usr/bin/env python3
 from sam3_ros.segmentation import main
 
 if __name__ == "__main__":
     main()
 EOF
+
+RUN set -e && \
+    cd /root/ws/src/SAM3_ROS_NODE && \
     chmod +x scripts/segmentation_node && \
     sed -i '/src\/sam3_ros\/pub_test_image.py/d' CMakeLists.txt && \
     python3 - <<'PY'

@@ -373,17 +373,33 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    command: >
-      bash -lc "
-      source /opt/ros/humble/setup.bash &&
-      cd /root/ws/src/SAM3_ROS_NODE &&
-      uv sync --python 3.10 &&
-      export PYTHONPATH=/root/ws/src/SAM3_ROS_NODE/.venv/lib/python3.10/site-packages:$PYTHONPATH &&
-      cd /root/ws &&
-      colcon build --symlink-install --packages-select sam3_ros &&
-      source /root/ws/install/setup.bash &&
-      ros2 run sam3_ros segmentation_node
-      "
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/jazzy/setup.bash
+        cd /root/ws/src/SAM3_ROS_NODE
+        python3 - <<'PY'
+        from pathlib import Path
+
+        path = Path("scripts/segmentation_node")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+          path.write_text(
+            "#!/usr/bin/env python3\n"
+            "from sam3_ros.segmentation import main\n\n"
+            "if __name__ == \"__main__\":\n"
+            "    main()\n"
+          )
+        PY
+        chmod +x scripts/segmentation_node
+        sed -i '\#src/sam3_ros/pub_test_image.py#d' CMakeLists.txt
+        uv sync --python 3.12
+        export PYTHONPATH=/root/ws/src/SAM3_ROS_NODE/.venv/lib/python3.12/site-packages:$PYTHONPATH
+        cd /root/ws
+        colcon build --symlink-install --packages-select sam3_ros --build-base /tmp/sam3_build --install-base /tmp/sam3_install
+        source /tmp/sam3_install/setup.bash
+        python3 -c 'from sam3_ros.segmentation import main; main()'
 
   # sam_node:
   #   profiles: ["runtime"]
