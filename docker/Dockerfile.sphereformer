@@ -1,29 +1,43 @@
-FROM perception-base:latest
+# Stage 1: Builder
+# Compiles the SparseTransformer CUDA extension against a modern toolchain.
+FROM perception-cuda-base:latest AS builder
 
-SHELL ["/bin/bash", "-c"]
+ARG DEBIAN_FRONTEND=noninteractive
+WORKDIR /workspace/Autonomous-Driving-Perception-System
 
-ENV DEBIAN_FRONTEND=noninteractive
+# Copy only the necessary source for building the extension
+COPY ./src/sphereformer_ros/src/SphereFormer/third_party/SparseTransformer /tmp/SparseTransformer
+COPY ./src/sphereformer_ros/requirements-sphereformer.txt /tmp/
+
+# Install build dependencies and compile the extension in the venv
+# This stage is designed to fail fast if the CUDA extension porting is not viable.
+RUN source /opt/venv/bin/activate && \
+    uv pip install -r /tmp/requirements-sphereformer.txt setuptools && \
+    cd /tmp/SparseTransformer && \
+    export TORCH_CUDA_ARCH_LIST="8.6;9.0+PTX" && \
+    python3 setup.py install
+
+# Stage 2: Runtime
+# Creates the final, smaller runtime image.
+FROM perception-cuda-base:latest
 
 WORKDIR /workspace/Autonomous-Driving-Perception-System
 COPY . .
 
-RUN python3 -m venv /opt/sphereformer_venv && \
-    /opt/sphereformer_venv/bin/pip install --upgrade pip
+# Install Python dependencies using uv for speed
+RUN source /opt/venv/bin/activate && \
+    uv pip install -r src/sphereformer_ros/requirements-sphereformer.txt
 
-# 按项目实际依赖补充，例如：
-# RUN /opt/sphereformer_venv/bin/pip install -r src/sphereformer_ros/requirements.txt
+# Copy the compiled extension from the builder stage
+COPY --from=builder /opt/venv/lib/python3.12/site-packages/sptr* /opt/venv/lib/python3.12/site-packages/
 
+# Build the ROS 2 workspace, failing on any error
 RUN apt-get update && \
-    rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y || true
+    . /opt/ros/jazzy/setup.bash && \
+    . /opt/venv/bin/activate && \
+    rosdep install --from-paths src/perception_common src/sphereformer_ros --ignore-src -r -y --rosdistro jazzy --skip-keys "ament_python" && \
+    rm -rf build install log && \
+    colcon build --packages-select perception_common sphereformer_ros
 
-RUN source /opt/ros/jazzy/setup.bash && \
-    colcon build --merge-install || true
-
-CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && \
-    source install/setup.bash && \
-    export PATH=/opt/sphereformer_venv/bin:$PATH && \
-    export PYTHONPATH=/opt/sphereformer_venv/lib/python3.12/site-packages:$PYTHONPATH && \
-    export PYTHONPATH=/workspace/Autonomous-Driving-Perception-System:$PYTHONPATH && \
-    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH && \
-    ros2 launch sphereformer_ros sphereformer_ros.launch.py"]
+# Set up the entrypoint
+CMD ["bash", "-c", "source install/setup.bash && ros2 launch sphereformer_ros sphereformer_ros.launch.py"]

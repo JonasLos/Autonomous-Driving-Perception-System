@@ -1,0 +1,24 @@
+# PyTorch 2.11 for CUDA 13.0-compatible runtime (supports sm_120 GPUs)
+torch==2.11.0
+torchaudio==2.11.0
+torchvision==0.26.0
+
+# Sparse convolution library, pre-built for CUDA 12.6 stack
+# See https://github.com/traveller59/spconv
+spconv-cu126
+
+# Required by SphereFormer
+timm
+scikit-learn
+pyyaml
+# numpy is now installed as a dependency of other packages
+# ros2-numpy is being removed and replaced
+
+
+# For point cloud processing and geometric deep learning
+# Wheels matching torch 2.11 + cu130
+--find-links https://data.pyg.org/whl/torch-2.11.0+cu130.html
+torch-scatter
+torch-sparse
+torch-cluster
+torch-geometric

@@ -75,7 +75,17 @@ class VGGBlock(SparseModule):
 
 
 def get_downsample_info(xyz, batch, indice_pairs):
-    pair_in, pair_out = indice_pairs[0], indice_pairs[1]
+    if indice_pairs.dim() == 3 and indice_pairs.shape[0] == 2:
+        pair_in, pair_out = indice_pairs[0], indice_pairs[1]
+    elif indice_pairs.dim() == 3 and indice_pairs.shape[1] == 2:
+        pair_in, pair_out = indice_pairs[:, 0, :], indice_pairs[:, 1, :]
+    else:
+        raise RuntimeError(
+            f"Unsupported indice_pairs shape: {tuple(indice_pairs.shape)}"
+        )
+
+    pair_in = pair_in.reshape(-1)
+    pair_out = pair_out.reshape(-1)
     valid_mask = pair_in != -1
     valid_pair_in, valid_pair_out = (
         pair_in[valid_mask].long(),
@@ -266,7 +276,8 @@ class UBlock(nn.Module):
             indice_pairs = output_decoder.indice_dict[
                 "spconv{}".format(self.indice_key_id)
             ].indice_pairs
-            xyz_next, batch_next = get_downsample_info(xyz, batch, indice_pairs)
+            xyz_next, _ = get_downsample_info(xyz, batch, indice_pairs)
+            batch_next = output_decoder.indices[:, 0].to(xyz.device)
 
             output_decoder = self.u(output_decoder, xyz_next, batch_next.long())
             output_decoder = self.deconv(output_decoder)

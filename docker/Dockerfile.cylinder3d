@@ -1,0 +1,23 @@
+# Dockerfile for Cylinder3D ROS Node
+
+# Use the pre-built CUDA base image
+FROM perception-cuda-base:latest
+
+# Set the working directory
+WORKDIR /workspace/Autonomous-Driving-Perception-System
+
+# Copy the entire project
+COPY . .
+
+# Install Python dependencies using uv for speed
+RUN source /opt/venv/bin/activate && \
+    uv pip install --find-links https://download.pytorch.org/whl/torch_stable.html -r src/cylinder3d_ros/requirements-cylinder3d.txt gdown && \
+    gdown 'https://drive.google.com/uc?id=1q4u3LlQXz89LqYW3orXL5oTs_4R2eS8P' -O src/cylinder3d_ros/Cylinder3D/model_semantic_kitti.pt
+
+# Build the ROS 2 workspace
+RUN . /opt/ros/jazzy/setup.sh && \
+    . /opt/venv/bin/activate && \
+    colcon build --merge-install --packages-up-to cylinder3d_ros
+
+# Set up the entrypoint
+CMD ["/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && source install/setup.bash && ros2 run cylinder3d_ros cylinder3d_node"]

@@ -12,11 +12,21 @@ def generate_launch_description():
             default_value="false",
             description="Start points_downsampler ring_filter node (requires points_downsampler to be built)",
         ),
+        DeclareLaunchArgument(
+            "input_topic",
+            default_value="/lidar_tc/velodyne_points",
+            description="Input PointCloud2 topic for SphereFormer when ring_filter is disabled.",
+        ),
         Node(
             package='sphereformer_ros',
             executable='sphereformer_ros',
             name='sphereformer',
-            output='screen'
+            output='screen',
+            parameters=[
+                {
+                    'input_topic': LaunchConfiguration('input_topic'),
+                }
+            ]
         ),
         Node(
             package='points_downsampler',
@@ -25,7 +35,7 @@ def generate_launch_description():
             output='screen',
             condition=IfCondition(LaunchConfiguration("use_ring_filter")),
             parameters=[
-                {'points_topic': '/lidar_tc/veloydne_points'},
+                {'points_topic': LaunchConfiguration('input_topic')},
                 {'output_log': False},
                 {'measurement_range': 100}
             ]

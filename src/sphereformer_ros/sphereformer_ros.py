@@ -6,15 +6,14 @@ import sys
 
 from ament_index_python.packages import get_package_share_directory
 import numpy as np
-import ros2_numpy as ros_numpy
 import rclpy
 from rclpy.node import Node
-import sensor_msgs.point_cloud2 as pc2
 import spconv.pytorch as spconv
 import torch
 import yaml
 from semantic_kitti_ros import SemanticKITTI
 from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs_py import point_cloud2 as pc2
 from sklearn.cluster import DBSCAN
 from perception_common.utils import crop_pointcloud, timer
 
@@ -50,8 +49,33 @@ LIDAR_2D_PROJ_TOPIC = topic_config["topics"]["transform"]["lidar_2d_projection"]
 
 lim_x, lim_y, lim_z = [-30, 100], [-10, 10], [-5, 0]
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-torch.cuda.set_per_process_memory_fraction(0.3, device)
+def _is_cuda_runtime_supported() -> bool:
+    if not torch.cuda.is_available():
+        return False
+    try:
+        major, minor = torch.cuda.get_device_capability(0)
+        device_arch = f"sm_{major}{minor}"
+        supported_arches = set(torch.cuda.get_arch_list())
+        return device_arch in supported_arches
+    except Exception:
+        return False
+
+
+device = torch.device("cuda:0" if _is_cuda_runtime_supported() else "cpu")
+if device.type == "cuda":
+    torch.cuda.set_per_process_memory_fraction(0.3, device)
+
+
+def _supports_mixed_precision() -> bool:
+    if device.type != "cuda":
+        return False
+    try:
+        major, _ = torch.cuda.get_device_capability(0)
+        # Keep stable fp32 inference on very new architectures where
+        # dependency kernels may lag behind mixed-precision tuning support.
+        return major < 12
+    except Exception:
+        return False
 
 
 class SphereformerLidarSegmentation(Node):
@@ -65,6 +89,20 @@ class SphereformerLidarSegmentation(Node):
         self.config_path = config_path
         self.checkpoint_path = checkpoint_path
         self.cfg = config.load_cfg_from_cfg_file(self.config_path)
+        if torch.cuda.is_available() and device.type != "cuda":
+            self.get_logger().warning(
+                "CUDA device detected but unsupported by installed PyTorch kernels; falling back to CPU."
+            )
+        self.declare_parameter("input_topic", RING_FILTERED_POINTS_TOPIC)
+        input_topic = (
+            self.get_parameter("input_topic").get_parameter_value().string_value
+        )
+        self.use_mixed_precision = _supports_mixed_precision()
+        self.spconv_fp32_fallback_done = False
+        if device.type == "cuda" and not self.use_mixed_precision:
+            self.get_logger().info(
+                "Running SphereFormer in fp32 mode for improved spconv compatibility on this GPU."
+            )
         self.model = self._load_model()
         self.semkitti_dataset = SemanticKITTI(split="val")
 
@@ -75,7 +113,7 @@ class SphereformerLidarSegmentation(Node):
 
         self.create_subscription(
             PointCloud2,
-            RING_FILTERED_POINTS_TOPIC,
+            input_topic,
             self.ros_callback,
             1,
         )
@@ -125,13 +163,43 @@ class SphereformerLidarSegmentation(Node):
 
         # Load checkpoint
         self.get_logger().info("Loading model weights from checkpoint...")
-        checkpoint = torch.load(self.checkpoint_path)
+        if not os.path.exists(self.checkpoint_path):
+            raise FileNotFoundError(
+                f"SphereFormer checkpoint not found: {self.checkpoint_path}"
+            )
+        checkpoint = torch.load(
+            self.checkpoint_path,
+            map_location="cpu",
+            weights_only=False,
+        )
         state_dict = {
             k.replace("module.", ""): v for k, v in checkpoint["state_dict"].items()
         }
+
+        # Legacy checkpoints may store sparse conv kernels as [k1, k2, k3, out, in]
+        # while current runtimes expect [out, k1, k2, k3, in].
+        model_state = model.state_dict()
+        converted = 0
+        for key, tensor in list(state_dict.items()):
+            if key not in model_state:
+                continue
+            target = model_state[key]
+            if tensor.shape == target.shape:
+                continue
+            if tensor.ndim == 5:
+                permuted = tensor.permute(3, 0, 1, 2, 4).contiguous()
+                if permuted.shape == target.shape:
+                    state_dict[key] = permuted
+                    converted += 1
+
+        if converted:
+            self.get_logger().info(
+                f"Converted {converted} checkpoint sparse-conv tensors to runtime layout"
+            )
+
         model.load_state_dict(state_dict, strict=False)
         model = model.to(device)
-        if device.type == "cuda":
+        if device.type == "cuda" and self.use_mixed_precision:
             model = model.half()  # enable mixed precision
         model.eval()
         return model
@@ -140,8 +208,31 @@ class SphereformerLidarSegmentation(Node):
     def ros_callback(self, msg):
         """ROS callback to process incoming PointCloud2 messages."""
         self.get_logger().info("Received a message, starting inference...")
-        with torch.no_grad(), torch.cuda.amp.autocast():
-            seg_points, output_labels = self.inference_from_ros_message(msg, self.model)
+        try:
+            with torch.no_grad(), torch.amp.autocast(
+                "cuda", enabled=self.use_mixed_precision
+            ):
+                seg_points, output_labels = self.inference_from_ros_message(msg, self.model)
+        except RuntimeError as exc:
+            spconv_algo_error = "can't find suitable algorithm" in str(exc)
+            if (
+                device.type == "cuda"
+                and spconv_algo_error
+                and self.use_mixed_precision
+                and not self.spconv_fp32_fallback_done
+            ):
+                self.get_logger().warning(
+                    "spconv tuning failed in mixed precision, retrying inference in fp32 mode."
+                )
+                self.use_mixed_precision = False
+                self.spconv_fp32_fallback_done = True
+                self.model = self.model.float()
+                with torch.no_grad():
+                    seg_points, output_labels = self.inference_from_ros_message(
+                        msg, self.model
+                    )
+            else:
+                raise
         self.get_logger().info("Inference complete. Processing results...")
 
         # Check if seg_points is structured and has the required dtype fields
@@ -218,13 +309,53 @@ class SphereformerLidarSegmentation(Node):
 
     @timer
     def inference_from_ros_message(self, ros_msg, model):
-        pc = ros_numpy.numpify(ros_msg)
-        pcd = np.zeros((pc.shape[0], 4))
-        pcd[:, 0] = pc["x"]
-        pcd[:, 1] = pc["y"]
-        pcd[:, 2] = pc["z"]
+        field_names = [field.name for field in ros_msg.fields]
+        has_intensity = "intensity" in field_names
+        point_fields = ("x", "y", "z", "intensity") if has_intensity else ("x", "y", "z")
+
+        # read_points can return either an iterable of tuples or a structured numpy array
+        # depending on sensor_msgs_py version and message layout.
+        points_raw = pc2.read_points(ros_msg, field_names=point_fields, skip_nans=True)
+        if isinstance(points_raw, np.ndarray):
+            if points_raw.dtype.names:
+                pcd = np.column_stack(
+                    [points_raw[name].astype(np.float32, copy=False) for name in point_fields]
+                )
+            else:
+                pcd = np.asarray(points_raw, dtype=np.float32)
+        else:
+            pcd = np.asarray(list(points_raw), dtype=np.float32)
+
+        if pcd.size == 0:
+            empty_points = np.zeros(
+                0,
+                dtype=[
+                    ("x", np.float32),
+                    ("y", np.float32),
+                    ("z", np.float32),
+                    ("intensity", np.float32),
+                ],
+            )
+            return empty_points, np.array([], dtype=np.int64)
+
+        if not has_intensity:
+            pcd = np.hstack(
+                (pcd, np.zeros((pcd.shape[0], 1), dtype=np.float32))
+            )
+
         np_points = np.asarray(pcd)
         np_points = crop_pointcloud(np_points, lim_x, lim_y, lim_z)
+        if np_points.size == 0:
+            empty_points = np.zeros(
+                0,
+                dtype=[
+                    ("x", np.float32),
+                    ("y", np.float32),
+                    ("z", np.float32),
+                    ("intensity", np.float32),
+                ],
+            )
+            return empty_points, np.array([], dtype=np.int64)
         p_points = np_points[:, 0:3]
         intensities = np_points[:, 3]
         binary_points, binary_labels = self.convert_to_binary_format(
@@ -237,7 +368,7 @@ class SphereformerLidarSegmentation(Node):
         (coord, xyz, feat, target, offset, inds_reverse) = self.collation_fn_voxelmean(
             batch_data
         )
-        inds_reverse = inds_reverse.to("cuda:0", non_blocking=True)
+        inds_reverse = inds_reverse.to(device, non_blocking=device.type == "cuda")
         offset_ = offset.clone()
         offset_[1:] = offset_[1:] - offset_[:-1]
         batch = torch.cat(
@@ -246,13 +377,14 @@ class SphereformerLidarSegmentation(Node):
         coord = torch.cat([batch.unsqueeze(-1), coord], -1)
         spatial_shape = np.clip((coord.max(0)[0][1:] + 1).numpy(), 128, None)
         coord, xyz, feat, target, offset = (
-            coord.cuda(non_blocking=True),
-            xyz.cuda(non_blocking=True),
-            feat.cuda(non_blocking=True),
-            target.cuda(non_blocking=True),
-            offset.cuda(non_blocking=True),
+            coord.to(device, non_blocking=device.type == "cuda"),
+            xyz.to(device, non_blocking=device.type == "cuda"),
+            feat.to(device, non_blocking=device.type == "cuda"),
+            target.to(device, non_blocking=device.type == "cuda"),
+            offset.to(device, non_blocking=device.type == "cuda"),
         )
-        batch = batch.cuda(non_blocking=True)
+        # Derive batch ids from sparse coordinates to keep exact point alignment.
+        batch = coord[:, 0].to(device, non_blocking=device.type == "cuda").long()
         sinput = spconv.SparseConvTensor(feat, coord.int(), spatial_shape, 1)
         assert batch.shape[0] == feat.shape[0]
         with torch.no_grad():

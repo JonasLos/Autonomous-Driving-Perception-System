@@ -276,6 +276,16 @@
 
 
 services:
+  cuda_base_builder:
+    profiles: ["builder"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.cuda-base
+    image: perception-cuda-base:latest
+    container_name: perception_cuda_base_builder
+    command: ["/bin/bash"]
+    restart: "no"
+
   base_builder:
     profiles: ["builder"]
     build:
@@ -285,6 +295,53 @@ services:
     container_name: perception_base_builder
     working_dir: /workspace/Autonomous-Driving-Perception-System
     command: ["/bin/bash"]
+    restart: "no"
+
+  sphereformer_node:
+    profiles: ["runtime"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.sphereformer
+    image: perception-sphereformer:latest
+    container_name: perception_sphereformer_node
+    network_mode: "host"
+    ipc: "host"
+    working_dir: /workspace/Autonomous-Driving-Perception-System
+    environment:
+      - ROS_DOMAIN_ID=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: "no"
+
+  cylinder3d_node:
+    profiles: ["runtime"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.cylinder3d
+    image: perception-cylinder3d:latest
+    container_name: perception_cylinder3d_node
+    network_mode: "host"
+    ipc: "host"
+    working_dir: /workspace/Autonomous-Driving-Perception-System
+    environment:
+      - ROS_DOMAIN_ID=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: tail -f /dev/null
     restart: "no"
 
   # yolo_node:

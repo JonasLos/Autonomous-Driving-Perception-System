@@ -46,6 +46,17 @@ data_files += _walk_data_files(
     os.path.join("share", package_name),
 )
 
+model_checkpoint = os.path.join(
+    os.path.dirname(__file__), "src", "SphereFormer", "model_semantic_kitti.pth"
+)
+if os.path.isfile(model_checkpoint):
+    data_files.append(
+        (
+            os.path.join("share", package_name, "SphereFormer"),
+            [model_checkpoint],
+        )
+    )
+
 
 setup(
     name=package_name,

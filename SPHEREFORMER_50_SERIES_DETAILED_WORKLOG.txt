@@ -1,0 +1,395 @@
+SphereFormer RTX 50-Series Migration and Validation Worklog
+Date: 2026-04-21
+Repository: Autonomous-Driving-Perception-System
+Primary target GPU: NVIDIA RTX 5080 (compute capability sm_120)
+Primary ROS stack: ROS 2 Jazzy
+Primary middleware target: rmw_zenoh_cpp
+
+====================================================================
+1) Executive Summary
+====================================================================
+This document is a detailed chronological engineering log of all significant work performed to make the SphereFormer path run on RTX 50-series GPUs under newer Torch/CUDA stacks.
+
+High-level outcome:
+- SphereFormer runtime was migrated from an older, incompatible Torch stack to a newer stack that recognizes sm_120.
+- Custom SparseTransformer CUDA extension was made buildable on available CUDA toolchain.
+- ROS package/runtime issues were fixed (checkpoint loading, topic wiring, point cloud parsing, packaging).
+- Docker build path was stabilized and official image tag completed.
+- End-to-end launch and repeated inference on /lidar_tc/velodyne_points was validated in perception-sphereformer:latest.
+
+Deferred item:
+- Docker cleanup pass intentionally deferred as a todo item per user direction.
+
+====================================================================
+2) Initial Conditions and Constraints
+====================================================================
+2.1 Runtime goals
+- Launch target: ros2 launch sphereformer_ros sphereformer_ros.launch.py
+- Input topic target: /lidar_tc/velodyne_points
+- Middleware target: rmw_zenoh_cpp
+- Data source context: rosbag publishing in background
+
+2.2 Base environment constraints
+- Base GPU image/toolkit path centered around CUDA 12.6.x toolchain.
+- Initial Torch stack in old image path did not support sm_120.
+- CPU fallback is not practical for this path due to spconv kernel requirements.
+
+2.3 Core incompatibilities discovered
+- Old Torch binary set did not include kernels for sm_120.
+- SparseTransformer extension build blocked by strict Torch CUDA version check.
+- NVCC 12.6 cannot compile compute_120 directly.
+- New Torch defaults changed checkpoint loading behavior (weights_only=True by default in newer versions).
+- Third-party APIs changed (torch-geometric voxel_grid signature change).
+
+====================================================================
+3) Phase-by-Phase Timeline (Chronological)
+====================================================================
+
+--------------------------------------------------------------------
+Phase A: Migration Plan and Target Stack Selection
+--------------------------------------------------------------------
+Objective:
+- Define a realistic migration path from restrictive/legacy sparse transformer setup to a runtime that can execute on RTX 50-series.
+
+Actions:
+1. Established target Torch family capable of sm_120 support.
+2. Mapped required dependent ecosystem:
+   - spconv
+   - torch_geometric and related wheels
+   - custom sptr_cuda extension
+3. Identified that PTX-forward compatibility strategy is required for extension build because local nvcc cannot emit sm_120 code directly.
+
+Result:
+- Migration strategy selected: modern Torch/CUDA wheel set with extension compiled for older arch + PTX fallback.
+
+--------------------------------------------------------------------
+Phase B: Core ROS Runtime Hardening in sphereformer_ros
+--------------------------------------------------------------------
+Objective:
+- Stabilize runtime startup and inference handling under new dependencies and live ROS messages.
+
+Key fixes implemented:
+1. Robust checkpoint loading:
+   - Added explicit checkpoint path existence check.
+   - Added map_location="cpu" load semantics for safer startup.
+   - Added handling for sparse-conv kernel tensor layout mismatch in legacy checkpoints.
+
+2. Device/runtime compatibility check:
+   - Added logic to ensure CUDA runtime support is not assumed only from torch.cuda.is_available().
+   - Used device capability + arch list compatibility to determine if CUDA path is valid.
+
+3. PointCloud2 parsing modernization:
+   - Switched to sensor_msgs_py point_cloud2 parsing path.
+   - Added robust handling for either structured ndarray or tuple iterable return shapes.
+   - Added no-intensity fallback path by synthesizing intensity channel.
+   - Added empty cloud guard rails.
+
+4. Autocast behavior control:
+   - Added runtime policy to avoid mixed precision on newest architecture class where spconv tuning instability was observed.
+   - Added one-time fallback from mixed precision to fp32 when implicit_gemm tuner error appears.
+
+5. Batch/feature alignment correctness:
+   - Batch tensor used by model forward is derived from sparse coordinates to maintain exact feature-row alignment.
+
+Result:
+- Node startup progressed reliably through model init and checkpoint load on upgraded stack.
+
+--------------------------------------------------------------------
+Phase C: ROS Packaging and Launch Corrections
+--------------------------------------------------------------------
+Objective:
+- Ensure package metadata and launch plumbing are correct for runtime execution in containerized environment.
+
+Changes made:
+1. launch file updates:
+   - Added input_topic launch argument defaulted to /lidar_tc/velodyne_points.
+   - Corrected optional ring filter launch parameter wiring.
+
+2. package metadata updates:
+   - Added runtime dependency for sensor_msgs_py.
+   - Corrected package XML validity issues encountered earlier.
+
+3. setup.py packaging update:
+   - Ensured model_semantic_kitti.pth is installed into package share path so runtime lookup succeeds.
+
+Result:
+- Package installation layout includes required assets and runtime dependencies.
+
+--------------------------------------------------------------------
+Phase D: Dependency Migration to 50-Series-Compatible Stack
+--------------------------------------------------------------------
+Objective:
+- Move SphereFormer requirements to Torch/CUDA wheel set that supports RTX 50-series.
+
+Requirements migration actions:
+1. Updated sphereformer requirements to modern stack:
+   - torch 2.11.0
+   - torchaudio 2.11.0
+   - torchvision 0.26.0
+   - spconv-cu126
+   - PyG wheels from torch-2.11.0+cu130 index
+
+2. Removed stale wheel source references tied to older Torch builds.
+
+3. Verified torch reports arch list containing sm_120 on RTX 5080.
+
+Result:
+- Torch runtime compatibility with sm_120 validated.
+
+--------------------------------------------------------------------
+Phase E: SparseTransformer CUDA Extension Build Unblocking
+--------------------------------------------------------------------
+Objective:
+- Make custom sptr_cuda extension build successfully with practical constraints:
+  newer Torch wheels, base toolkit version mismatch, nvcc arch limits.
+
+Problems encountered:
+1. Strict Torch CUDA toolkit version guard in cpp_extension blocked build.
+2. nvcc from CUDA 12.6 could not accept compute_120.
+
+Fixes:
+1. Patched SparseTransformer setup.py to bypass strict _check_cuda_version guard.
+2. Built extension with:
+   - TORCH_CUDA_ARCH_LIST="8.6;9.0+PTX"
+   This produced a buildable target and allowed forward execution via PTX JIT path.
+
+Result:
+- sptr_cuda compiled and installed successfully in validation environment.
+
+--------------------------------------------------------------------
+Phase F: Docker Build Path Stabilization
+--------------------------------------------------------------------
+Objective:
+- Ensure the project image build path compiles dependencies, extension, and ROS packages correctly.
+
+Actions:
+1. Built multistage SphereFormer Docker flow:
+   - Builder stage compiles SparseTransformer extension.
+   - Runtime stage installs deps and builds only perception_common + sphereformer_ros.
+
+2. Added docker context hygiene:
+   - Ignored generated local build artifacts where relevant to reduce context bloat.
+
+3. Monitored prolonged "exporting to image" behavior:
+   - Recognized that successful internal build steps can complete before final tag appears.
+
+4. Executed direct container validation from base image while export lagged:
+   - Avoided waiting indefinitely on final image export and kept forward progress.
+
+5. Re-checked official build later:
+   - Confirmed perception-sphereformer:latest was finally tagged and unpacked successfully.
+
+Result:
+- Both practical validation path and official image path were completed.
+
+--------------------------------------------------------------------
+Phase G: Runtime Failures Encountered and Fixes Applied
+--------------------------------------------------------------------
+Objective:
+- Resolve sequential runtime blockers found during real launch + inference.
+
+Failure 1:
+- torch.load failed with Weights only load failed / Unsupported global errors.
+Cause:
+- Newer PyTorch default changed weights_only from False to True.
+Fix:
+- Explicit torch.load(..., weights_only=False) for trusted local checkpoint.
+
+Failure 2:
+- spconv implicit_gemm tuner error: cannot find suitable algorithm.
+Cause:
+- Algorithm/tuning instability on newest architecture with mixed precision path.
+Fix:
+- fp32-first policy on sm_120 class plus guarded fallback path.
+
+Failure 3:
+- Tensor size mismatch in SparseTransformer path (Expected N, got 3).
+Cause:
+- API signature drift in torch_geometric voxel_grid; legacy positional call interpreted incorrectly.
+Fix:
+- Converted call to keyword form:
+  voxel_grid(pos=pos, size=size, batch=batch, start=start)
+
+Failure 4:
+- Potential divergence in downsample batch propagation across spconv layouts.
+Fix:
+- Hardened indice_pairs parsing to support multiple layouts.
+- Derived downstream batch ids from output sparse indices.
+
+Result:
+- Runtime progressed from startup crash to sustained repeated inference/publish loop.
+
+--------------------------------------------------------------------
+Phase H: Final Validation (Tagged Image + Live Inference)
+--------------------------------------------------------------------
+Objective:
+- Confirm final behavior in perception-sphereformer:latest, not only temporary base containers.
+
+Validation sequence:
+1. Torch sanity in tagged image:
+   - torch 2.11.0+cu130
+   - arch list includes sm_120
+   - CUDA tensor ops successful
+
+2. ROS package build inside container:
+   - perception_common + sphereformer_ros built successfully.
+
+3. Launch with middleware and topic target:
+   - RMW_IMPLEMENTATION=rmw_zenoh_cpp
+   - ros2 launch sphereformer_ros sphereformer_ros.launch.py input_topic:=/lidar_tc/velodyne_points
+
+4. Runtime observation:
+   - Continuous cycle of:
+     - Received a message, starting inference...
+     - Inference complete. Processing results...
+     - Publishing the processed point cloud and bounding boxes.
+   - Repeated timer logs showed stable callback/inference timings in short-window validation.
+
+Result:
+- End-to-end functional runtime achieved on RTX 5080 path under upgraded stack.
+
+====================================================================
+4) Files Touched and Why
+====================================================================
+
+4.1 src/sphereformer_ros/sphereformer_ros.py
+Purpose of edits:
+- Runtime compatibility checks.
+- Robust checkpoint loading for newer PyTorch.
+- Mixed precision policy/fallback.
+- Safer point cloud parsing.
+- Feature/batch alignment correctness.
+
+4.2 src/sphereformer_ros/launch/sphereformer_ros.launch.py
+Purpose of edits:
+- Input topic launch configurability.
+- Correct launch arg wiring for ring filter behavior.
+
+4.3 src/sphereformer_ros/package.xml
+Purpose of edits:
+- Add missing runtime dependency sensor_msgs_py.
+- Ensure package metadata validity.
+
+4.4 src/sphereformer_ros/setup.py
+Purpose of edits:
+- Ensure model checkpoint file is installed to runtime share path.
+
+4.5 src/sphereformer_ros/requirements-sphereformer.txt
+Purpose of edits:
+- Migrate to Torch stack compatible with 50-series.
+- Align spconv and PyG dependencies with modern wheels.
+
+4.6 docker/Dockerfile.sphereformer
+Purpose of edits:
+- Remove stale wheel source references.
+- Build sptr_cuda in builder stage.
+- Apply practical TORCH_CUDA_ARCH_LIST for toolchain compatibility.
+- Build only needed ROS packages in runtime stage.
+
+4.7 src/sphereformer_ros/src/SphereFormer/third_party/SparseTransformer/setup.py
+Purpose of edits:
+- Bypass strict Torch CUDA toolkit version check for extension build in this controlled environment.
+
+4.8 src/sphereformer_ros/src/SphereFormer/third_party/SparseTransformer/sptr/utils.py
+Purpose of edits:
+- Fix voxel_grid call for new torch-geometric API behavior.
+
+4.9 src/sphereformer_ros/src/SphereFormer_changes/unet_spherical_transformer.py
+Purpose of edits:
+- Support multiple indice_pairs layouts.
+- Stabilize batch propagation in downsample path.
+
+4.10 src/sphereformer_ros/src/SphereFormer/util/voxelize.py
+Purpose of edits:
+- Prior compatibility fixes for modern Python/numpy deprecations.
+
+4.11 docker/ros_entrypoint.sh
+Purpose of edits:
+- Ensure PYTHONPATH includes venv site-packages in runtime containers.
+
+4.12 .dockerignore
+Purpose of edits:
+- Reduce build context by excluding generated build/install/log artifacts where configured.
+
+====================================================================
+5) Commands and Operational Patterns Used
+====================================================================
+
+Representative command categories used repeatedly:
+
+A) Docker image builds
+- docker compose --profile runtime build sphereformer_node
+- docker compose --profile runtime build --no-cache sphereformer_node
+
+B) Direct run validations (when compose export/tag lagged)
+- docker run --rm --gpus all --network host --ipc host ... perception-cuda-base:latest bash -lc '...'
+- docker run --rm --gpus all --network host --ipc host ... perception-sphereformer:latest bash -lc '...'
+
+C) ROS build/launch in-container
+- colcon build --packages-select perception_common sphereformer_ros ...
+- ros2 launch sphereformer_ros sphereformer_ros.launch.py input_topic:=/lidar_tc/velodyne_points
+
+D) Dependency and extension checks
+- uv pip install -r src/sphereformer_ros/requirements-sphereformer.txt
+- python3 setup.py install (SparseTransformer extension)
+- Python one-liner checks for torch/spconv/torch_geometric/sptr_cuda imports and CUDA tensors
+
+E) Diagnostic checks
+- docker image inspect
+- docker system df
+- df -h
+- docker ps / docker images / docker compose logs
+
+====================================================================
+6) Validation Evidence Snapshot
+====================================================================
+
+6.1 Compatibility evidence
+- torch reports sm_120 in arch list on RTX 5080 after migration.
+- CUDA tensor allocation/execution succeeded.
+- spconv, torch_geometric, and sptr_cuda imports succeeded.
+
+6.2 Runtime evidence
+- Node starts and loads checkpoint.
+- Legacy sparse-conv tensor conversion reported as expected.
+- Repeated inference and publish logs observed under live input stream.
+- Timing output repeatedly showed callback/inference execution durations during run window.
+
+====================================================================
+7) Decisions, Tradeoffs, and Rationale
+====================================================================
+
+7.1 Why PTX strategy was used
+- nvcc 12.6 cannot compile compute_120 directly.
+- Compiling for 8.6/9.0+PTX enabled successful extension build and runtime forward compatibility in this setup.
+
+7.2 Why fp32 mode is forced for newest architecture class
+- Mixed precision path produced spconv tuning failures in observed runs.
+- fp32 improved runtime stability and enabled continuous inference.
+
+7.3 Why direct docker run was used during some validations
+- Long compose builds can complete all internal steps but still delay final export/tag visibility.
+- Direct runs validated core compatibility without waiting on image export bottleneck.
+
+====================================================================
+8) Outstanding / Deferred Work
+====================================================================
+
+Deferred by explicit user direction:
+- Docker cleanup pass remains a separate todo item and was not executed as part of final compatibility completion.
+
+Optional future hardening (not required for current success criteria):
+- Package a non-setup.py extension build flow (PEP517/installer style) to remove deprecation warnings.
+- Add a startup self-test mode that checks checkpoint readability + extension import + one dry-run inference.
+- Add automated container CI smoke test for SphereFormer launch with synthetic PointCloud2 input.
+
+====================================================================
+9) Final State
+====================================================================
+
+Final status:
+- 50-series compatibility work was completed for SphereFormer runtime path.
+- Official image build/tag was completed.
+- Runtime launch in tagged image with rmw_zenoh_cpp processed live lidar messages and published outputs repeatedly.
+
+This file intentionally captures both successful steps and intermediate failures/fixes so future maintainers can reproduce the reasoning and avoid regressing known compatibility points.
