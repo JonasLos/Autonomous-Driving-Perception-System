@@ -36,6 +36,8 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o 
     apt-get update && apt-get install -y \
       ros-humble-ros-base \
       ros-dev-tools \
+    python3-ament-package \
+    ros-humble-rmw-zenoh-cpp \
       ros-humble-ament-cmake-auto \
       ros-humble-cv-bridge \
       ros-humble-geometry-msgs \
@@ -56,12 +58,39 @@ WORKDIR /root/ws
 
 COPY src/SAM3_ROS_NODE /root/ws/src/SAM3_ROS_NODE
 
+# Normalize upstream SAM3_ROS_NODE layout for reproducible ROS entrypoint install.
+RUN set -e && \
+    cd /root/ws/src/SAM3_ROS_NODE && \
+    mkdir -p scripts && \
+    cat > scripts/segmentation_node <<'EOF' && \
+#!/usr/bin/env python3
+from sam3_ros.segmentation import main
+
+if __name__ == "__main__":
+    main()
+EOF
+    chmod +x scripts/segmentation_node && \
+    sed -i '/src\/sam3_ros\/pub_test_image.py/d' CMakeLists.txt && \
+    python3 - <<'PY'
+from pathlib import Path
+
+seg = Path("src/sam3_ros/segmentation.py")
+text = seg.read_text()
+text = text.replace('self.declare_parameter("use_compressed_image", True)', 'self.declare_parameter("use_compressed_image", False)')
+text = text.replace('self.declare_parameter("text_prompt", "")', 'self.declare_parameter("text_prompt", "road")')
+text = text.replace('"image",\n                self._image_callback,', '"/camera_fl/image_color",\n                self._image_callback,')
+seg.write_text(text)
+PY
+
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
     cd /root/ws/src/SAM3_ROS_NODE && \
     uv sync && \
     uv run python -c "import cv2, cv_bridge, geometry_msgs.msg, sensor_msgs.msg, std_msgs.msg, vision_msgs.msg, torch" && \
     cd /root/ws && \
     colcon build --symlink-install
+
+ENV RMW_IMPLEMENTATION=rmw_zenoh_cpp
+
 
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
     echo "source /root/ws/install/setup.bash" >> /root/.bashrc

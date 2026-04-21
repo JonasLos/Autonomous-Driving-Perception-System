@@ -134,7 +134,74 @@ Rebuild the images after any changes to the Dockerfiles to ensure Zenoh support 
 
 ---
 
+## SAM3 (Zenoh) Container Workflow
+
+The `sam3_ros` service has been updated for reproducible startup with Zenoh and a standalone package build.
+
+### What is now configured
+- `docker/Dockerfile.sam` installs:
+  - `python3-ament-package`
+  - `ros-humble-rmw-zenoh-cpp`
+   - normalizes `src/SAM3_ROS_NODE` during image build by:
+      - creating `scripts/segmentation_node` if missing
+      - removing stale `pub_test_image.py` install reference from `CMakeLists.txt`
+      - applying default runtime parameters used in this workspace (`use_compressed_image=False`, `text_prompt="road"`, and `/camera_fl/image_color` topic)
+- `docker-compose.yml` for `sam3_ros` now:
+  - mounts the repository root to `/root/ws`
+  - mounts `${HOME}/.cache/huggingface` to `/root/.cache/huggingface`
+  - sets `RMW_IMPLEMENTATION=rmw_zenoh_cpp`
+  - builds only `sam3_ros` at runtime:
+    - `colcon build --symlink-install --packages-select sam3_ros`
+
+### Build and run SAM3
+From the repository root:
+
+```bash
+docker compose build sam3_ros
+docker compose up sam3_ros
+```
+
+Or rebuild and run in one step:
+
+```bash
+docker compose up --build sam3_ros
+```
+
+### Validate Zenoh RMW in the image
+
+```bash
+docker run --rm test-sam3:latest bash -lc 'ls /opt/ros/humble/lib/librmw_zenoh_cpp.so'
+```
+
+If the file exists, Zenoh RMW is installed correctly.
+
+---
+
 ## Troubleshooting
+
+### `librmw_zenoh_cpp.so: cannot open shared object file`
+
+This means Zenoh RMW is selected but not present in the built image.
+
+1. Ensure `docker/Dockerfile.sam` contains `ros-humble-rmw-zenoh-cpp` in the apt install list.
+2. Rebuild the image:
+   ```bash
+   docker compose build --no-cache sam3_ros
+   ```
+3. Re-run:
+   ```bash
+   docker compose up sam3_ros
+   ```
+
+### `ModuleNotFoundError: No module named 'ament_package'`
+
+This means Python ROS build tooling is missing in the image.
+
+1. Ensure `docker/Dockerfile.sam` contains `python3-ament-package` in the apt install list.
+2. Rebuild:
+   ```bash
+   docker compose build --no-cache sam3_ros
+   ```
 
 ### "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock"
 
