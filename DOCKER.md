@@ -177,6 +177,47 @@ If the file exists, Zenoh RMW is installed correctly.
 
 ---
 
+## SphereFormer (ROS 2 Jazzy) Build and Run
+
+Use these commands from the repository root to build and run the SphereFormer service.
+
+### Build SphereFormer image
+
+```bash
+docker compose --profile runtime build sphereformer_node
+```
+
+### Rebuild and start SphereFormer
+
+```bash
+docker compose --profile runtime up -d --build sphereformer_node
+```
+
+### Start without rebuilding
+
+```bash
+docker compose --profile runtime up -d sphereformer_node
+```
+
+### Follow runtime logs
+
+```bash
+docker compose logs --tail=120 -f sphereformer_node
+```
+
+### Stop SphereFormer
+
+```bash
+docker compose --profile runtime stop sphereformer_node
+```
+
+### Notes
+- The SphereFormer container builds and runs the `perception_common` and `sphereformer_ros` packages in-container.
+- If Python source files change, prefer `up -d --build` so the image includes your latest code.
+- Current segmentation output publishes all classes with RGB class colors on the SphereFormer segmentation topic. In RViz, set PointCloud2 `Color Transformer` to `RGB8`.
+
+---
+
 ## Troubleshooting
 
 ### `librmw_zenoh_cpp.so: cannot open shared object file`

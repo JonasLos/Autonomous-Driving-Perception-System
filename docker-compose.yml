@@ -318,30 +318,19 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    restart: "no"
-
-  cylinder3d_node:
-    profiles: ["runtime"]
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.cylinder3d
-    image: perception-cylinder3d:latest
-    container_name: perception_cylinder3d_node
-    network_mode: "host"
-    ipc: "host"
-    working_dir: /workspace/Autonomous-Driving-Perception-System
-    environment:
-      - ROS_DOMAIN_ID=0
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    command: tail -f /dev/null
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        source /opt/ros/jazzy/setup.bash
+        source /opt/venv/bin/activate
+        export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+        export PYTHONPATH=/opt/venv/lib/python3.12/site-packages:$PYTHONPATH
+        colcon --log-base /tmp/sphereformer-log build --packages-select perception_common sphereformer_ros --build-base /tmp/sphereformer-build --install-base /tmp/sphereformer-install
+        source /tmp/sphereformer-install/setup.bash
+        export PYTHONPATH=/tmp/sphereformer-install/sphereformer_ros/lib/python3.12/site-packages:/tmp/sphereformer-install/perception_common/lib/python3.12/site-packages:/opt/venv/lib/python3.12/site-packages:$PYTHONPATH
+        python3 /tmp/sphereformer-install/sphereformer_ros/lib/python3.12/site-packages/sphereformer_ros.py --ros-args -p input_topic:=/lidar_tc/velodyne_points
     restart: "no"
 
   # yolo_node:

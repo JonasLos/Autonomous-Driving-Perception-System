@@ -393,3 +393,46 @@ Final status:
 - Runtime launch in tagged image with rmw_zenoh_cpp processed live lidar messages and published outputs repeatedly.
 
 This file intentionally captures both successful steps and intermediate failures/fixes so future maintainers can reproduce the reasoning and avoid regressing known compatibility points.
+
+====================================================================
+10) Post-Migration Notes (2026-04-22)
+====================================================================
+
+After the main RTX 50-series compatibility migration was completed, additional runtime-quality improvements were applied during live validation:
+
+10.1 Intensity domain alignment fix
+- Issue: Velodyne ROS driver intensity values arrived in approximately 0-255 range, while SemanticKITTI training intensity domain is 0-1.
+- Fix: Normalize incoming intensity values by dividing by 255.0 before model preprocessing.
+- Impact: Reduced severe out-of-distribution behavior observed during class prediction debugging.
+
+10.2 Segmentation visualization behavior update
+- Previous behavior: Published segmentation topic was road-only filtered output.
+- Updated behavior: Publish all predicted classes on the segmentation topic.
+- Visualization encoding: Pack SemanticKITTI class color into PointCloud2 `rgb` field for stable RViz coloring.
+- Boundary outputs: Left and right boundary topics still use road class extraction logic.
+
+10.3 RViz operator guidance
+- Set PointCloud2 `Color Transformer` to `RGB8` for the SphereFormer segmentation topic.
+- No intensity-range tuning is needed when using RGB output mode.
+
+10.4 Learned class id legend (0-19)
+- 0 unlabeled
+- 1 car
+- 2 bicycle
+- 3 motorcycle
+- 4 truck
+- 5 other-vehicle
+- 6 person
+- 7 bicyclist
+- 8 motorcyclist
+- 9 road
+- 10 parking
+- 11 sidewalk
+- 12 other-ground
+- 13 building
+- 14 fence
+- 15 vegetation
+- 16 trunk
+- 17 terrain
+- 18 pole
+- 19 traffic-sign

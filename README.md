@@ -85,6 +85,36 @@ These scripts handle launching and shutting down all perception nodes, including
 ## Usage
 Once installed, the system can be deployed within a ROS environment. The `enable_perception.bash` script will launch all perception nodes, while individual components can be run manually using their respective launch files and scripts. Ensure the appropriate topics are correctly published and subscribed to within your ROS setup.
 
+### SphereFormer RViz Class Colors
+SphereFormer ROS2 output now publishes all segmentation classes and encodes SemanticKITTI class colors directly in the PointCloud2 `rgb` field.
+
+RViz setup:
+1. Add a `PointCloud2` display for the SphereFormer segmentation topic.
+2. Set `Color Transformer` to `RGB8`.
+3. Keep boundary topics enabled separately if you also want road edge overlays.
+
+Semantic classes are the learned IDs 0-19:
+- 0 unlabeled
+- 1 car
+- 2 bicycle
+- 3 motorcycle
+- 4 truck
+- 5 other-vehicle
+- 6 person
+- 7 bicyclist
+- 8 motorcyclist
+- 9 road
+- 10 parking
+- 11 sidewalk
+- 12 other-ground
+- 13 building
+- 14 fence
+- 15 vegetation
+- 16 trunk
+- 17 terrain
+- 18 pole
+- 19 traffic-sign
+
 ---
 
 ## License

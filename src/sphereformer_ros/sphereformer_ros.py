@@ -47,7 +47,9 @@ SPHEREFORMER_RIGHT_BOUNDARY = topic_config["topics"]["sphereformer"]["right_boun
 RING_FILTERED_POINTS_TOPIC = topic_config["topics"]["sphereformer"]["ring_filtered"]
 LIDAR_2D_PROJ_TOPIC = topic_config["topics"]["transform"]["lidar_2d_projection"]
 
-lim_x, lim_y, lim_z = [-30, 100], [-10, 10], [-5, 0]
+# Crop bounds tuned to match the KITTI training distribution.
+# x: forward-facing forward of ego, y: lateral, z: ground to sensor height.
+lim_x, lim_y, lim_z = [-30, 100], [-40, 40], [-5, 3]
 
 def _is_cuda_runtime_supported() -> bool:
     if not torch.cuda.is_available():
@@ -105,6 +107,7 @@ class SphereformerLidarSegmentation(Node):
             )
         self.model = self._load_model()
         self.semkitti_dataset = SemanticKITTI(split="val")
+        self.class_color_lut = self._load_learned_rgb_lut()
 
         # ROS2 publishers and subscribers
         self.pub = self.create_publisher(PointCloud2, SPHEREFORMER_SEGMENTATION_TOPIC, 1)
@@ -125,7 +128,30 @@ class SphereformerLidarSegmentation(Node):
                 name="intensity", offset=12, datatype=PointField.FLOAT32, count=1
             ),
         ]
+        self.rgb_fields = [
+            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+            PointField(name="rgb", offset=12, datatype=PointField.FLOAT32, count=1),
+        ]
         self.cluster_pointcloud = False
+
+    def _load_learned_rgb_lut(self) -> np.ndarray:
+        semkitti_cfg_path = os.path.join(PKG_SHARE, "SphereFormer_changes", "semantic-kitti.yaml")
+        with open(semkitti_cfg_path, "r") as f:
+            semkitti_cfg = yaml.safe_load(f)
+
+        learning_map_inv = semkitti_cfg["learning_map_inv"]
+        color_map = semkitti_cfg["color_map"]
+        max_class = max(int(k) for k in learning_map_inv.keys())
+        lut = np.zeros((max_class + 1, 3), dtype=np.uint8)
+
+        for learned_id_raw, raw_id in learning_map_inv.items():
+            learned_id = int(learned_id_raw)
+            b, g, r = color_map.get(raw_id, [0, 0, 0])
+            lut[learned_id] = np.array([r, g, b], dtype=np.uint8)
+
+        return lut
 
     @timer
     def _load_model(self):
@@ -254,10 +280,16 @@ class SphereformerLidarSegmentation(Node):
             else np.array(output_labels)
         )
 
-        # Get points where label is 8
-        mask = output_labels == 8
+        seg_points = seg_points.view(np.float32).reshape(-1, 4)
+        class_ids = output_labels.astype(np.int32, copy=False)
+
+        # Publish all classes with stable SemanticKITTI RGB class colors.
+        class_ids_clamped = np.clip(class_ids, 0, self.class_color_lut.shape[0] - 1)
+        segmented_rgb = self.class_color_lut[class_ids_clamped]
+
+        # Keep road-only subset for boundary extraction.
+        mask = class_ids == 9
         road_points = seg_points[mask]
-        road_points = road_points.view(np.float32).reshape(-1, 4)
 
         if self.cluster_pointcloud:
             if road_points.size > 0:
@@ -291,7 +323,7 @@ class SphereformerLidarSegmentation(Node):
                 widths.append(width)
 
         left_points, right_points = np.array(left_points), np.array(right_points)
-        self.create_cloud(road_points, self.pub, msg)
+        self.create_cloud_rgb(seg_points[:, :3], segmented_rgb, self.pub, msg)
 
         if left_points.size > 0 and right_points.size > 0:
             self.create_cloud(left_points, self.left_boundary_pub, msg)
@@ -305,6 +337,29 @@ class SphereformerLidarSegmentation(Node):
         header = ref_msg.header
         data = [tuple(p) for p in np.asarray(points, dtype=np.float32)]
         pc_msg = pc2.create_cloud(header, self.fields, data)
+        pub.publish(pc_msg)
+
+    def create_cloud_rgb(
+        self,
+        points_xyz: np.ndarray,
+        colors_rgb: np.ndarray,
+        pub,
+        ref_msg: PointCloud2,
+    ):
+        header = ref_msg.header
+        xyz = np.asarray(points_xyz, dtype=np.float32)
+        rgb = np.asarray(colors_rgb, dtype=np.uint8)
+        rgb_u32 = (
+            (rgb[:, 0].astype(np.uint32) << 16)
+            | (rgb[:, 1].astype(np.uint32) << 8)
+            | rgb[:, 2].astype(np.uint32)
+        )
+        rgb_f32 = rgb_u32.view(np.float32)
+        data = [
+            (x, y, z, c)
+            for (x, y, z), c in zip(xyz[:, :3], rgb_f32, strict=False)
+        ]
+        pc_msg = pc2.create_cloud(header, self.rgb_fields, data)
         pub.publish(pc_msg)
 
     @timer
@@ -342,6 +397,11 @@ class SphereformerLidarSegmentation(Node):
             pcd = np.hstack(
                 (pcd, np.zeros((pcd.shape[0], 1), dtype=np.float32))
             )
+        else:
+            # KITTI training data has intensity in [0, 1]; the Velodyne
+            # ROS driver publishes raw sensor units (typically 0–255).
+            # Normalise so the feature distribution matches training.
+            pcd[:, 3] = pcd[:, 3] / 255.0
 
         np_points = np.asarray(pcd)
         np_points = crop_pointcloud(np_points, lim_x, lim_y, lim_z)
