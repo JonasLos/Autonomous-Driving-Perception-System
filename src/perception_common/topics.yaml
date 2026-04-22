@@ -38,6 +38,7 @@ topics:
     segmentation_mask: "/sphereformer_road_segmentation"
     left_boundary: "/sphereformer_left_boundary"
     right_boundary: "/sphereformer_right_boundary"
+    legend: "/sphereformer_legend"
     ring_filtered: "/filtered_points"
 
   clrernet:
