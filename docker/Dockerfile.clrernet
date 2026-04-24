@@ -1,29 +1,143 @@
-FROM perception-base:latest
+# CLRerNet ROS 2 node on the shared Jazzy / Python 3.12 / Zenoh base.
+#
+# CLRerNet upstream targets Python 3.11 + torch 2.1 + mmcv 2.1 + mmdet 3.3 with
+# pre-built wheels. We build on Python 3.12 + torch 2.7.1 + cu128 so the RTX 50xx
+# (Blackwell / sm_120) GPUs have native kernels — torch <=2.6 only ships up to
+# sm_90 and fails with "no kernel image is available for execution on the
+# device" on Blackwell. mmcv and the lane NMS CUDA extension are built from
+# source against the installed torch. mmdet 3.3's strict mmcv<=2.2 upper bound
+# is patched at install time; mmcv 2.2.0 is ABI-compatible with mmdet 3.3 in
+# practice.
+#
+# Known risks:
+#   - mmcv 2.2 vs mmdet 3.3 version check is bypassed; if any mmdet 3.3 code
+#     path touches a mmcv 2.1-only symbol, this will fail at runtime.
+#   - mmcv 2.2 was released against torch 2.3; torch 2.7 ATen changes may
+#     require source patches.
+#   - The lane NMS extension is upstream-tested only on torch 2.1; modern torch
+#     ATen changes may require source patches.
+
+FROM perception-cuda-base:latest
 
 SHELL ["/bin/bash", "-c"]
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0;12.0+PTX" \
+    FORCE_CUDA=1 \
+    MMCV_WITH_OPS=1 \
+    CUDA_HOME=/usr/local/cuda
 
-ENV DEBIAN_FRONTEND=noninteractive
+# Extra OS libs needed for building mmcv / opencv / the NMS extension.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ninja-build \
+        libgl1 \
+        libglib2.0-0 \
+        libopencv-dev \
+        python3-opencv \
+        ros-jazzy-cv-bridge \
+        ros-jazzy-message-filters \
+        ros-jazzy-tf-transformations \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/Autonomous-Driving-Perception-System
+
+# --- torch 2.7.1 + cu128 (first release with Blackwell / sm_120 kernels) ------
+RUN source /opt/venv/bin/activate \
+    && uv pip install "numpy<2.0" \
+    && uv pip install torch==2.7.1 torchvision==0.22.1 \
+        --index-url https://download.pytorch.org/whl/cu128
+
+# --- mmengine (pure python) ---------------------------------------------------
+RUN source /opt/venv/bin/activate \
+    && uv pip install openmim==0.3.9 \
+    && uv pip install mmengine==0.10.5
+
+# --- mmcv from source (no wheel for cp312) ------------------------------------
+# Build against the torch we just installed. --no-build-isolation so the build
+# env can see torch; pip will invoke setup.py with MMCV_WITH_OPS=1 / FORCE_CUDA=1.
+RUN source /opt/venv/bin/activate \
+    && uv pip install --upgrade "setuptools>=70,<80" wheel packaging \
+    && git clone --depth 1 --branch v2.2.0 https://github.com/open-mmlab/mmcv.git /tmp/mmcv \
+    && cd /tmp/mmcv \
+    && MMCV_WITH_OPS=1 FORCE_CUDA=1 pip install --no-build-isolation -v . \
+    && cd / && rm -rf /tmp/mmcv
+
+# --- mmdet 3.3.0, with the mmcv upper-bound check relaxed ---------------------
+RUN source /opt/venv/bin/activate \
+    && git clone --depth 1 --branch v3.3.0 https://github.com/open-mmlab/mmdetection.git /tmp/mmdet \
+    && cd /tmp/mmdet \
+    && sed -i "s/mmcv_maximum_version = '2.2.0'/mmcv_maximum_version = '2.3.0'/" mmdet/__init__.py \
+    && uv pip install --no-build-isolation . \
+    && cd / && rm -rf /tmp/mmdet
+
+# --- CLRerNet runtime python deps ---------------------------------------------
+COPY src/clrernet_ros/requirements-clrernet.txt /tmp/requirements-clrernet.txt
+RUN source /opt/venv/bin/activate \
+    && uv pip install -r /tmp/requirements-clrernet.txt
+
+# ros2_numpy is a ROS ament package, not pip-installable. Drop the pure-python
+# module into site-packages so `import ros2_numpy` works.
+RUN git clone --depth 1 --branch jazzy https://github.com/Box-Robotics/ros2_numpy.git /tmp/ros2_numpy \
+    && cp -r /tmp/ros2_numpy/ros2_numpy /opt/venv/lib/python3.12/site-packages/ \
+    && rm -rf /tmp/ros2_numpy
+
+# --- Source tree + lane NMS CUDA extension ------------------------------------
 COPY . .
 
-RUN python3 -m venv /opt/clrernet_venv && \
-    /opt/clrernet_venv/bin/pip install --upgrade pip
+RUN source /opt/venv/bin/activate \
+    && cd src/clrernet_ros/src/clrernet/libs/models/layers/nms \
+    && rm -rf build dist *.egg-info \
+    && uv pip install --no-build-isolation .
 
-# 按项目实际依赖补充，例如：
-# RUN /opt/clrernet_venv/bin/pip install -r src/clrernet_ros/requirements.txt
+# --- Build ROS 2 packages (msgs, common, clrernet_ros) ------------------------
+# rosidl_adapter (used by rosidl_generate_interfaces) imports `em` and `lark`
+# from the python executable colcon uses; ensure they are available in the venv.
+# ros2_numpy is vendored manually above, so rosdep must not try to resolve it.
+RUN source /opt/ros/jazzy/setup.bash \
+    && source /opt/venv/bin/activate \
+    && uv pip install "empy==3.3.4" lark catkin_pkg \
+    && rosdep install --from-paths src/clrernet_msgs src/perception_common src/clrernet_ros \
+        --ignore-src -r -y --rosdistro jazzy \
+        --skip-keys "ament_python ros2_numpy" \
+    && rm -rf build install log \
+    && colcon build \
+        --packages-select clrernet_msgs perception_common clrernet_ros \
+        --event-handlers console_direct+ \
+        --cmake-args -DPYTHON_EXECUTABLE=/opt/venv/bin/python
 
-RUN apt-get update && \
-    rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y || true
+# --- Model checkpoint + clrernet tree next to the installed module -----------
+# clrernet_lane_detection.py builds CONFIG_PATH and CHECKPOINT_PATH from
+# os.path.dirname(__file__). The ament_python install tree lands the module at
+# the site-packages dir below; symlink the full clrernet source tree next to it
+# so BASE_PATH/clrernet/configs/... and BASE_PATH/*.pth both resolve.
+ARG CLRERNET_INSTALL_DIR=/workspace/Autonomous-Driving-Perception-System/install/clrernet_ros/lib/python3.12/site-packages
+RUN ln -sfn /workspace/Autonomous-Driving-Perception-System/src/clrernet_ros/src/clrernet \
+        "${CLRERNET_INSTALL_DIR}/clrernet" \
+    && wget -q "https://github.com/hirotomusiker/CLRerNet/releases/download/v0.1.0/clrernet_culane_dla34_ema.pth" \
+        -O "${CLRERNET_INSTALL_DIR}/clrernet_culane_dla34_ema.pth" \
+    && ls -lh "${CLRERNET_INSTALL_DIR}/clrernet_culane_dla34_ema.pth" \
+             "${CLRERNET_INSTALL_DIR}/clrernet/configs/clrernet/culane/clrernet_culane_dla34_ema.py"
 
-RUN source /opt/ros/jazzy/setup.bash && \
-    colcon build --merge-install || true
+# base_clrernet.py has backbone pretrained=False: the full clrernet_culane_dla34_ema
+# checkpoint loaded by init_detector overwrites the DLA34 backbone weights anyway,
+# so skipping the ImageNet pre-init avoids a hang on the flaky dl.yf.io mirror.
 
-CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && \
+# inference.py inside clrernet/ uses bare `from libs.datasets...`, so the
+# clrernet/ directory itself has to be on PYTHONPATH at import time.
+#
+# setuptools hard-coded `#!/usr/bin/python3` into the colcon-generated entry
+# point scripts, so the node subprocess uses the system Python, not the venv.
+# Point PYTHONPATH at the venv's site-packages (same 3.12 ABI) so torch / mmcv /
+# ros2_numpy / albumentations resolve regardless of which interpreter runs.
+ENV VENV_SITE=/opt/venv/lib/python3.12/site-packages \
+    CLRERNET_SRC=/workspace/Autonomous-Driving-Perception-System/src/clrernet_ros/src \
+    PYTHONUNBUFFERED=1
+ENV PYTHONPATH=${CLRERNET_SRC}:${CLRERNET_SRC}/clrernet:${VENV_SITE}
+
+CMD ["bash", "-lc", "\
+    source /opt/ros/jazzy/setup.bash && \
+    source /opt/venv/bin/activate && \
     source install/setup.bash && \
-    export PATH=/opt/clrernet_venv/bin:$PATH && \
-    export PYTHONPATH=/opt/clrernet_venv/lib/python3.12/site-packages:$PYTHONPATH && \
-    export PYTHONPATH=/workspace/Autonomous-Driving-Perception-System:$PYTHONPATH && \
-    export PYTHONPATH=/workspace/Autonomous-Driving-Perception-System/src/clrernet_ros/src:/workspace/Autonomous-Driving-Perception-System/src/clrernet_ros/src/clrernet:$PYTHONPATH && \
+    export PYTHONPATH=${CLRERNET_SRC}:${CLRERNET_SRC}/clrernet:${VENV_SITE}:$PYTHONPATH && \
     ros2 launch clrernet_ros clrernet_ros.launch.py"]

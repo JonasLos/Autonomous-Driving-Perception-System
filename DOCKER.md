@@ -218,6 +218,60 @@ docker compose --profile runtime stop sphereformer_node
 
 ---
 
+## CLRerNet (ROS 2 Jazzy) Build and Run
+
+CLRerNet lane detection on Python 3.12 / torch 2.7.1+cu128. The CUDA 12.8 toolchain is required so kernels compile with `sm_120` (Blackwell / RTX 50-series) support.
+
+### Build CLRerNet image
+
+```bash
+docker compose --profile runtime build clrernet_node
+```
+
+The first build takes 15–25 min because `mmcv` 2.2, `mmdet` 3.3, and the lane NMS CUDA extension are all compiled from source against the installed torch (no Python 3.12 wheels exist upstream).
+
+### Rebuild and start CLRerNet
+
+```bash
+docker compose --profile runtime up -d --build clrernet_node
+```
+
+### Start without rebuilding
+
+```bash
+docker compose --profile runtime up -d clrernet_node
+```
+
+### Follow runtime logs
+
+```bash
+docker logs -f perception_clrernet_node
+```
+
+### Stop CLRerNet
+
+```bash
+docker compose --profile runtime stop clrernet_node
+```
+
+### Notes
+
+- Requires `perception-cuda-base:latest` built on CUDA 12.8; older 12.6 base image will not emit `sm_120` kernels and inference will fail with `no kernel image is available for execution on the device` on RTX 50-series GPUs.
+- The container launches two nodes: `clrernet_lane_detection` (image → lane polylines) and `clrernet_lane_transform` (lane polylines + projected lidar → 3D left/right/centerline `PointCloud2`).
+- Subscribes to `/camera_fl/image_color` for lane detection and the lidar 2D projection topic for 3D lifting; topic names are read from `perception_common/topics.yaml`.
+- Model checkpoint `clrernet_culane_dla34_ema.pth` is fetched from the upstream GitHub release during the image build; no local download required.
+- The backbone (`DLANet`) is initialised with `pretrained=False` because the full checkpoint overwrites the ImageNet weights anyway, and the upstream ImageNet mirror (`dl.yf.io`) is unreliable.
+
+### Vendored source and patches
+
+The `clrernet` source tree (previously a git submodule at `src/clrernet_ros/src/clrernet`) is now vendored directly into this repository so the following patches can be committed:
+
+- `configs/clrernet/base_clrernet.py` — `pretrained=False` on the DLA backbone (skip flaky ImageNet prefetch).
+- `libs/datasets/pipelines/alaug.py` — conditional kwargs for `albumentations` 1.4.10, which otherwise raises `bbox_params must be specified for bbox transformations` when the test pipeline runs without bounding boxes.
+- `libs/models/layers/nms/src/nms_kernel.cu`, `nms.cpp` — migrated deprecated torch APIs (`tensor.type()` → `tensor.scalar_type()` / `tensor.is_cuda()`, `tensor.data<T>()` → `tensor.data_ptr<T>()`) so the lane NMS CUDA extension builds against modern torch.
+
+---
+
 ## Troubleshooting
 
 ### `librmw_zenoh_cpp.so: cannot open shared object file`

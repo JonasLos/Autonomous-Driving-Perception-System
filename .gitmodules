@@ -2,9 +2,6 @@
 	path = src/sam2_ros/src/segment-anything-2
 	url = https://github.com/facebookresearch/sam2
 
-[submodule "src/clrernet_ros/src/clrernet"]
-	path = src/clrernet_ros/src/clrernet
-	url = https://github.com/hirotomusiker/CLRerNet
 [submodule "src/Custom_YOLO_ROS"]
 	path = src/Custom_YOLO_ROS
 	url = https://github.com/PaavanBagla/Custom_YOLO_ROS

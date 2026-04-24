@@ -1,0 +1,15 @@
+# CLRerNet runtime deps on Ubuntu 24.04 / Python 3.12 / torch 2.2.
+# mmengine, mmcv, mmdet are installed separately in the Dockerfile.
+# Trimmed to the modules actually imported by libs/ at inference time.
+
+albumentations==1.4.10
+albucore==0.0.13
+p_tqdm==1.4.2
+scipy
+pyyaml
+opencv-python-headless
+numpy<2.0
+tqdm
+# tf_transformations (apt) pulls transforms3d via apt; our venv can't see it,
+# so install the pip copy too.
+transforms3d

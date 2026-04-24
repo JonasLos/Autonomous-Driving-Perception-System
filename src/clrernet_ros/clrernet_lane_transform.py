@@ -9,10 +9,10 @@ import numpy as np
 import ros2_numpy as ros_numpy
 import rclpy
 from rclpy.node import Node
-import sensor_msgs.point_cloud2 as pc2
+from sensor_msgs_py import point_cloud2 as pc2
 import yaml
 from scipy.spatial import KDTree
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2, PointField
 
 from clrernet_msgs.msg import LanePoints
 from perception_common.utils import timer
@@ -38,17 +38,17 @@ class Clrernet_Lane_Transform(Node):
         super().__init__("clrernet_lane_transform")
 
         self.fields = [
-            pc2.PointField(
-                name="x", offset=0, datatype=pc2.PointField.FLOAT32, count=1
+            PointField(
+                name="x", offset=0, datatype=PointField.FLOAT32, count=1
             ),
-            pc2.PointField(
-                name="y", offset=4, datatype=pc2.PointField.FLOAT32, count=1
+            PointField(
+                name="y", offset=4, datatype=PointField.FLOAT32, count=1
             ),
-            pc2.PointField(
-                name="z", offset=8, datatype=pc2.PointField.FLOAT32, count=1
+            PointField(
+                name="z", offset=8, datatype=PointField.FLOAT32, count=1
             ),
-            pc2.PointField(
-                name="intensity", offset=12, datatype=pc2.PointField.FLOAT32, count=1
+            PointField(
+                name="intensity", offset=12, datatype=PointField.FLOAT32, count=1
             ),
         ]
         self.prev_centerline = None
