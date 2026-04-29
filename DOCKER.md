@@ -141,17 +141,28 @@ The `sam3_ros` service has been updated for reproducible startup with Zenoh and 
 ### What is now configured
 - `docker/Dockerfile.sam` installs:
   - `python3-ament-package`
-  - `ros-humble-rmw-zenoh-cpp`
+   - `ros-jazzy-rmw-zenoh-cpp`
+   - `ros-jazzy-message-filters`
+   - `ros-jazzy-sensor-msgs-py`
+   - `ros-jazzy-tf-transformations`
+   - `ros-jazzy-ament-cmake-python`
    - normalizes `src/SAM3_ROS_NODE` during image build by:
       - creating `scripts/segmentation_node` if missing
+         - creating `scripts/sam3_mask_transform_node`
       - removing stale `pub_test_image.py` install reference from `CMakeLists.txt`
       - applying default runtime parameters used in this workspace (`use_compressed_image=False`, `text_prompt="road"`, and `/camera_fl/image_color` topic)
+         - vendoring `ros2_numpy` into the SAM3 virtual environment
 - `docker-compose.yml` for `sam3_ros` now:
   - mounts the repository root to `/root/ws`
   - mounts `${HOME}/.cache/huggingface` to `/root/.cache/huggingface`
   - sets `RMW_IMPLEMENTATION=rmw_zenoh_cpp`
-  - builds only `sam3_ros` at runtime:
-    - `colcon build --symlink-install --packages-select sam3_ros`
+   - builds required packages at runtime:
+      - `perception_common`
+      - `sam2_msgs`
+      - `sam3_ros`
+   - launches both nodes:
+      - `ros2 run sam3_ros segmentation_node`
+      - `ros2 run sam3_ros sam3_mask_transform_node`
 
 ### Build and run SAM3
 From the repository root:
@@ -170,10 +181,29 @@ docker compose up --build sam3_ros
 ### Validate Zenoh RMW in the image
 
 ```bash
-docker run --rm test-sam3:latest bash -lc 'ls /opt/ros/humble/lib/librmw_zenoh_cpp.so'
+docker run --rm test-sam3:latest bash -lc 'ls /opt/ros/jazzy/lib/librmw_zenoh_cpp.so'
 ```
 
 If the file exists, Zenoh RMW is installed correctly.
+
+### SAM3 Synchronization Notes (2026-04-29)
+
+- If `/sam3_left_contour` and `/sam3_right_contour` are publishing but `/sam3_left_boundary` and `/sam3_right_boundary` are empty, check timestamps first.
+- A prior failure mode was zero-stamped camera input (`sec=0, nanosec=0`), which caused contour messages to be zero-stamped and prevented matching.
+- Current SAM3 segmentation code applies a fallback timestamp when image headers are zero, but matching can still fail if streams use different time domains (bag time vs wall-clock time).
+
+Quick checks:
+
+```bash
+docker exec test_sam3_container bash -lc 'source /opt/ros/jazzy/setup.bash && source /tmp/sam3_ws_install/setup.bash && ros2 topic echo /lidar_2d_projection --once | sed -n "1,8p"'
+docker exec test_sam3_container bash -lc 'source /opt/ros/jazzy/setup.bash && source /tmp/sam3_ws_install/setup.bash && ros2 topic echo /sam3_left_contour --once | sed -n "1,8p"'
+```
+
+If epochs differ significantly, align clocks before tuning `sync_slop`:
+
+```bash
+docker exec test_sam3_container bash -lc 'source /opt/ros/jazzy/setup.bash && source /tmp/sam3_ws_install/setup.bash && ros2 param set /segmentation use_sim_time true && ros2 param set /sam3_mask_transform use_sim_time true'
+```
 
 ---
 
@@ -278,7 +308,7 @@ The `clrernet` source tree (previously a git submodule at `src/clrernet_ros/src/
 
 This means Zenoh RMW is selected but not present in the built image.
 
-1. Ensure `docker/Dockerfile.sam` contains `ros-humble-rmw-zenoh-cpp` in the apt install list.
+1. Ensure `docker/Dockerfile.sam` contains `ros-jazzy-rmw-zenoh-cpp` in the apt install list.
 2. Rebuild the image:
    ```bash
    docker compose build --no-cache sam3_ros

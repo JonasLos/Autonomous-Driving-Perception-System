@@ -37,15 +37,19 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o 
             ros-jazzy-ros-base \
       ros-dev-tools \
             ros-jazzy-ament-package \
+            ros-jazzy-ament-cmake-python \
             ros-jazzy-rmw-zenoh-cpp \
             ros-jazzy-ament-cmake-auto \
             ros-jazzy-cv-bridge \
             ros-jazzy-geometry-msgs \
             ros-jazzy-sensor-msgs \
+            ros-jazzy-sensor-msgs-py \
             ros-jazzy-std-msgs \
             ros-jazzy-vision-msgs \
             ros-jazzy-image-transport \
             ros-jazzy-compressed-image-transport \
+            ros-jazzy-message-filters \
+            ros-jazzy-tf-transformations \
       python3-colcon-common-extensions \
       python3-rosdep \
       && rm -rf /var/lib/apt/lists/*
@@ -72,7 +76,18 @@ EOF
 
 RUN set -e && \
     cd /root/ws/src/SAM3_ROS_NODE && \
-    chmod +x scripts/segmentation_node && \
+    mkdir -p scripts && \
+    cat > scripts/sam3_mask_transform_node <<'EOF'
+#!/usr/bin/env python3
+from sam3_ros.sam3_mask_transform import main
+
+if __name__ == "__main__":
+    main()
+EOF
+
+RUN set -e && \
+    cd /root/ws/src/SAM3_ROS_NODE && \
+    chmod +x scripts/segmentation_node scripts/sam3_mask_transform_node && \
     sed -i '/src\/sam3_ros\/pub_test_image.py/d' CMakeLists.txt && \
     python3 - <<'PY'
 from pathlib import Path
@@ -88,6 +103,9 @@ PY
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
     cd /root/ws/src/SAM3_ROS_NODE && \
     uv sync && \
+    git clone --depth 1 --branch jazzy https://github.com/Box-Robotics/ros2_numpy.git /tmp/ros2_numpy && \
+    cp -r /tmp/ros2_numpy/ros2_numpy /root/ws/src/SAM3_ROS_NODE/.venv/lib/python3.12/site-packages/ && \
+    rm -rf /tmp/ros2_numpy && \
     uv run python -c "import cv2, cv_bridge, geometry_msgs.msg, sensor_msgs.msg, std_msgs.msg, vision_msgs.msg, torch" && \
     cd /root/ws && \
     colcon build --symlink-install

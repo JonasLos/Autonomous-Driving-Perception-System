@@ -394,14 +394,13 @@ services:
     network_mode: "host"
     ipc: "host"
     working_dir: /workspace/Autonomous-Driving-Perception-System
-    
-    # entrypoint: ["/bin/bash", "-c", "tail -f /dev/null"]
     tty: true
     stdin_open: true
-    # ---------------------------------------------
-
+    volumes:
+      - .:/workspace/Autonomous-Driving-Perception-System
     environment:
       ROS_DOMAIN_ID: "0"
+      RMW_IMPLEMENTATION: "rmw_zenoh_cpp"
       YOLO_CONFIG_DIR: "/tmp/Ultralytics"
       NVIDIA_VISIBLE_DEVICES: "all"
       NVIDIA_DRIVER_CAPABILITIES: "all"
@@ -412,6 +411,23 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    command:
+      - bash
+      - -c
+      - |
+        unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH PYTHONPATH
+        source /opt/ros/jazzy/setup.bash
+        cd /workspace/Autonomous-Driving-Perception-System
+        colcon build --merge-install \
+          --packages-select perception_common yolo_msgs yolo_ros yolo_bringup \
+          --build-base /tmp/yolo_ws_build \
+          --install-base /tmp/yolo_ws_install
+        source /tmp/yolo_ws_install/setup.bash
+        export PATH=/opt/yolo_venv/bin:$PATH
+        export PYTHONPATH=/opt/yolo_venv/lib/python3.12/site-packages:/tmp/yolo_ws_install/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages
+        export PYTHONNOUSERSITE=1
+        python3 -c "import importlib.metadata as m, os, sys; print('YOLO python=', sys.executable); print('YOLO PYTHONPATH=', os.environ.get('PYTHONPATH')); m.distribution('yolo-ros'); print('yolo-ros metadata: OK')"
+        ros2 launch yolo_bringup yolov9.launch.py
     restart: "no"
 
   transform_node:
@@ -492,11 +508,28 @@ services:
         chmod +x scripts/segmentation_node
         sed -i '\#src/sam3_ros/pub_test_image.py#d' CMakeLists.txt
         uv sync --python 3.12
+        # Install ros2_numpy if not already available (not on PyPI; must clone from source)
+        python3 -c "import ros2_numpy" 2>/dev/null || (
+          git clone --depth 1 -b jazzy https://github.com/Box-Robotics/ros2_numpy.git /tmp/ros2_numpy_src
+          cp -r /tmp/ros2_numpy_src/ros2_numpy /root/ws/src/SAM3_ROS_NODE/.venv/lib/python3.12/site-packages/
+        )
+        # ros2_numpy.geometry imports tf_transformations, which may be missing in older images.
+        python3 -c "import tf_transformations, sensor_msgs.point_cloud2" 2>/dev/null || (
+          apt-get update && apt-get install -y ros-jazzy-tf-transformations ros-jazzy-sensor-msgs-py && rm -rf /var/lib/apt/lists/*
+        )
         export PYTHONPATH=/root/ws/src/SAM3_ROS_NODE/.venv/lib/python3.12/site-packages:$PYTHONPATH
         cd /root/ws
-        colcon build --symlink-install --packages-select sam3_ros --build-base /tmp/sam3_build --install-base /tmp/sam3_install
-        source /tmp/sam3_install/setup.bash
-        python3 -c 'from sam3_ros.segmentation import main; main()'
+        colcon build --merge-install \
+          --packages-select perception_common sam2_msgs sam3_ros \
+          --build-base /tmp/sam3_ws_build \
+          --install-base /tmp/sam3_ws_install
+        source /tmp/sam3_ws_install/setup.bash
+        ros2 run sam3_ros segmentation_node &
+        seg_pid=$$!
+        ros2 run sam3_ros sam3_mask_transform_node &
+        mask_pid=$$!
+        trap 'kill $$seg_pid $$mask_pid' SIGINT SIGTERM
+        wait -n $$seg_pid $$mask_pid
 
   # sam_node:
   #   profiles: ["runtime"]

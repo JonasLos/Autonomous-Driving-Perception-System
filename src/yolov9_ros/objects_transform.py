@@ -46,7 +46,7 @@ with open(TOPICS_PATH, "r") as f:
 
 # === Assign topic variables ===
 LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar_tc"]
-RADAR_TRACKS_TOPIC = topic_config["topics"]["raw"]["radar"]
+RADAR_TRACKS_TOPIC = topic_config["topics"]["raw"]["delphi_esr_tracks"]
 YOLO_BBOX_TOPIC = topic_config["topics"]["yolo"]["bbox"]
 FUSED_BBOX_TOPIC = topic_config["topics"]["yolo"]["fused_bbox"]
 

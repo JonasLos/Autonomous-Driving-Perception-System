@@ -34,6 +34,12 @@ topics:
     left_boundary: "/sam_left_boundary"
     right_boundary: "/sam_right_boundary"
 
+  sam3:
+    left_contour: "/sam3_left_contour"
+    right_contour: "/sam3_right_contour"
+    left_boundary: "/sam3_left_boundary"
+    right_boundary: "/sam3_right_boundary"
+
   sphereformer:
     segmentation_mask: "/sphereformer_road_segmentation"
     left_boundary: "/sphereformer_left_boundary"

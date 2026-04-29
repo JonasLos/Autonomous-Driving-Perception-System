@@ -4,6 +4,8 @@
 
 A ready-to-use system for autonomous driving, featuring YOLOv9 for object detection, SAMv2 for road segmentation, Ultrafast lane detection, and Sphereformer LiDAR segmentation. Fully integrated with ROS for seamless deployment in robotic systems. Ideal for developers and researchers focused on autonomous vehicle technologies.
 
+Daily implementation notes and integration updates are tracked in [CHANGELOG.md](CHANGELOG.md).
+
 ---
 
 ## Features
