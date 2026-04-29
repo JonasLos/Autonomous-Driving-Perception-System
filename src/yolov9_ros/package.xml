@@ -58,7 +58,7 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>ros2_numpy</exec_depend>
-  <exec_depend>jsk_recognition_msgs</exec_depend>
+  <exec_depend>vision_msgs</exec_depend>
   <exec_depend>radar_msgs</exec_depend>
 
   <exec_depend>yolov9_msgs</exec_depend>

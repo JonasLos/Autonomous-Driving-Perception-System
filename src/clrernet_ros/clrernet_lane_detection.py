@@ -114,6 +114,9 @@ class ClrernetLaneDetection(Node):
 
         msg = LanePoints()
         msg.header = header
+        # Some camera sources publish zero timestamps; sync-based consumers need valid time.
+        if msg.header.stamp.sec == 0 and msg.header.stamp.nanosec == 0:
+            msg.header.stamp = self.get_clock().now().to_msg()
         msg.points = all_points
 
         self.all_lanes_pub.publish(msg)

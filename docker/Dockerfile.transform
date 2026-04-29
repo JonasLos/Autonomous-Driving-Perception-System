@@ -8,12 +8,16 @@ WORKDIR /workspace/Autonomous-Driving-Perception-System
 COPY . .
 
 RUN python3 -m venv /opt/transform_venv && \
-    /opt/transform_venv/bin/pip install --upgrade pip
+    /opt/transform_venv/bin/pip install --upgrade pip && \
+    /opt/transform_venv/bin/pip install "numpy<2" pyyaml torch cython transforms3d
 
-# 如果 transform.py 实际依赖和 yolo 一样，可以改成安装相同依赖：
-# RUN /opt/transform_venv/bin/pip install "numpy<2" ultralytics
+# Install ros2_numpy from source to avoid numpy compatibility issues
+RUN git clone --depth 1 --branch jazzy https://github.com/Box-Robotics/ros2_numpy.git /tmp/ros2_numpy && \
+    cp -r /tmp/ros2_numpy/ros2_numpy /opt/transform_venv/lib/python3.12/site-packages/ && \
+    rm -rf /tmp/ros2_numpy
 
 RUN apt-get update && \
+    apt-get install -y --no-install-recommends ros-jazzy-tf-transformations && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y || true
 

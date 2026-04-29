@@ -13,7 +13,7 @@ RUN rm -rf build install log && \
     if [ -f src/Custom_YOLO_ROS/requirements.txt ]; then \
         /opt/yolo_venv/bin/pip install -r src/Custom_YOLO_ROS/requirements.txt; \
     fi && \
-    /opt/yolo_venv/bin/pip install "numpy<2" ultralytics
+    /opt/yolo_venv/bin/pip install "numpy<2" ultralytics lap
 
 RUN apt-get update && \
     rosdep update && \

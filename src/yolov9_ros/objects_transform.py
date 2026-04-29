@@ -9,17 +9,13 @@ import message_filters
 import rclpy
 from rclpy.node import Node
 import numpy as np
-# import ros2_numpy as ros_numpy
-# from sensor_msgs_py import point_cloud2
-from sensor_msgs_py import point_cloud2 as pc2
-
-import sensor_msgs.point_cloud2 as pc2
+from sensor_msgs_py import point_cloud2
 import std_msgs.msg
 import torch
 import yaml
-from jsk_recognition_msgs.msg import BoundingBox, BoundingBoxArray
+from vision_msgs.msg import BoundingBox3D, BoundingBox3DArray
 from radar_msgs.msg import RadarTrackArray
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2, PointField
 from sklearn.cluster import DBSCAN
 
 from perception_common.configs import PROJ, T1
@@ -65,21 +61,21 @@ class ObjectsTransform(Node):
         super().__init__("objects_transform")
         self.get_logger().info("Initializing TransformFuse node...")
         # Initialize ROS2 publishers
-        self.bbox_publish = self.create_publisher(BoundingBoxArray, FUSED_BBOX_TOPIC, 1)
+        self.bbox_publish = self.create_publisher(BoundingBox3DArray, FUSED_BBOX_TOPIC, 1)
 
         # Point field configuration for PointCloud2
         self.fields = [
-            pc2.PointField(
-                name="x", offset=0, datatype=pc2.PointField.FLOAT32, count=1
+            PointField(
+                name="x", offset=0, datatype=PointField.FLOAT32, count=1
             ),
-            pc2.PointField(
-                name="y", offset=4, datatype=pc2.PointField.FLOAT32, count=1
+            PointField(
+                name="y", offset=4, datatype=PointField.FLOAT32, count=1
             ),
-            pc2.PointField(
-                name="z", offset=8, datatype=pc2.PointField.FLOAT32, count=1
+            PointField(
+                name="z", offset=8, datatype=PointField.FLOAT32, count=1
             ),
-            pc2.PointField(
-                name="intensity", offset=12, datatype=pc2.PointField.FLOAT32, count=1
+            PointField(
+                name="intensity", offset=12, datatype=PointField.FLOAT32, count=1
             ),
         ]
 
@@ -107,8 +103,6 @@ class ObjectsTransform(Node):
         """
         self.get_logger().info("Received synchronized messages.")
 
-        # Convert lidar data to numpy array
-        # pc = ros_numpy.numpify(msgLidar)
         pc = point_cloud2.read_points_numpy(
             msgLidar,
             field_names=['x', 'y', 'z'],
@@ -120,10 +114,11 @@ class ObjectsTransform(Node):
         # Crop point cloud and transform to camera frame
         pc_arr = crop_pointcloud(points, lim_x, lim_y, lim_z)
         pc_arr_pick = np.transpose(pc_arr)
-        m1 = torch.matmul(
-            torch.tensor(inverse_rigid_transform(T1)), torch.tensor(pc_arr_pick)
-        )
-        uv1 = torch.matmul(torch.tensor(PROJ), m1)
+        t_inv = torch.as_tensor(inverse_rigid_transform(T1), dtype=torch.float32)
+        pc_t = torch.as_tensor(pc_arr_pick, dtype=torch.float32)
+        proj = torch.as_tensor(PROJ, dtype=torch.float32)
+        m1 = torch.matmul(t_inv, pc_t)
+        uv1 = torch.matmul(proj, m1)
         uv1[:2, :] /= uv1[2, :]
 
         center_3d = []
@@ -157,7 +152,7 @@ class ObjectsTransform(Node):
         self.get_logger().info(f"Found {len(center_3d)} camera detections.")
 
         # Publishing the bounding boxes
-        bbox_array = BoundingBoxArray()
+        bbox_array = BoundingBox3DArray()
         center_3d = np.array(center_3d)
 
         # Filtering out duplicate camera detections
@@ -211,21 +206,17 @@ class ObjectsTransform(Node):
         for i, box in enumerate(center_3d):  # camera detections
             if i in unique_camera_indices:
                 class_ = int(label[i][0])
-                bbox = BoundingBox()
-                bbox.header.stamp = msgLidar.header.stamp
-                bbox.header.frame_id = msgLidar.header.frame_id
-                bbox.pose.position.x, bbox.pose.position.y, bbox.pose.position.z = box[
+                bbox = BoundingBox3D()
+                bbox.center.position.x, bbox.center.position.y, bbox.center.position.z = box[
                     :3
                 ]
                 # bbox dimensions
-                bbox.dimensions.x, bbox.dimensions.y, bbox.dimensions.z = (
+                bbox.size.x, bbox.size.y, bbox.size.z = (
                     average_dimensions[class_]["dimensions"][2],
                     average_dimensions[class_]["dimensions"][1],
                     average_dimensions[class_]["dimensions"][0],
                 )
-                bbox.pose.orientation.w = 1
-                bbox.value = 1
-                bbox.label = int(label[i][0])  # class number
+                bbox.center.orientation.w = 1.0
                 bbox_array.boxes.append(bbox)
 
         # Add radar objects to bounding box array
@@ -251,20 +242,18 @@ class ObjectsTransform(Node):
 
                 # Apply radar limit check based on x-coordinate of the radar position
                 if rad_position[0] > RADAR_LIMIT:
-                    bbox = BoundingBox()
-                    bbox.header = msgRadar.header
-                    bbox.pose.position.x = rad_position[
-                        0
-                    ]  # Using the computed radar position
-                    bbox.pose.position.y = rad_position[1]
-                    bbox.pose.position.z = rad_position[2]
-                    bbox.dimensions.x = 1.5
-                    bbox.dimensions.y = 1.5
-                    bbox.dimensions.z = 1.5
-                    bbox.label = 9999  # Label for radar detection
+                    bbox = BoundingBox3D()
+                    bbox.center.position.x = rad_position[0]  # Using the computed radar position
+                    bbox.center.position.y = rad_position[1]
+                    bbox.center.position.z = rad_position[2]
+                    bbox.size.x = 1.5
+                    bbox.size.y = 1.5
+                    bbox.size.z = 1.5
+                    bbox.center.orientation.w = 1.0
                     bbox_array.boxes.append(bbox)
 
         bbox_array.header.frame_id = msgLidar.header.frame_id
+        bbox_array.header.stamp = msgLidar.header.stamp
         self.bbox_publish.publish(bbox_array)
         self.get_logger().info(f"Published {len(bbox_array.boxes)} fused bounding boxes.\n")
 

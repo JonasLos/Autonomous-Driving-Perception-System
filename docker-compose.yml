@@ -413,6 +413,30 @@ services:
               count: all
               capabilities: [gpu]
     restart: "no"
+
+  transform_node:
+    profiles: ["runtime"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.transform
+    image: perception-transform:latest
+    container_name: perception_transform_node
+    network_mode: "host"
+    ipc: "host"
+    working_dir: /workspace/Autonomous-Driving-Perception-System
+    environment:
+      ROS_DOMAIN_ID: "0"
+      RMW_IMPLEMENTATION: "rmw_zenoh_cpp"
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "all"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: "no"
     
   sam3_ros:
     build:
@@ -495,20 +519,6 @@ services:
   #     dockerfile: docker/Dockerfile.clrernet
   #   image: perception-clrernet:latest
   #   container_name: perception_clrernet_node
-  #   network_mode: "host"
-  #   ipc: "host"
-  #   working_dir: /workspace/Autonomous-Driving-Perception-System
-  #   environment:
-  #     ROS_DOMAIN_ID: "0"
-  #   restart: unless-stopped
-
-  # transform_node:
-  #   profiles: ["runtime"]
-  #   build:
-  #     context: .
-  #     dockerfile: docker/Dockerfile.transform
-  #   image: perception-transform:latest
-  #   container_name: perception_transform_node
   #   network_mode: "host"
   #   ipc: "host"
   #   working_dir: /workspace/Autonomous-Driving-Perception-System

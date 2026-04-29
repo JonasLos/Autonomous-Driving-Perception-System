@@ -55,18 +55,25 @@ class Clrernet_Lane_Transform(Node):
         self.prev_left_lane = None
         self.prev_right_lane = None
         self.ema_alpha = 0.5  # EMA smoothing factor
+        self.latest_lanes_msg = None
 
-        # Subscribers (ROS2 message_filters subscribers require node reference)
-        self.sub_proj = message_filters.Subscriber(self, PointCloud2, LIDAR_2D_PROJ_TOPIC)
-        self.sub_lanes = message_filters.Subscriber(self, LanePoints, CLRERNET_ALL_LANES_TOPIC)
+        # Use latest-message fusion instead of timestamp sync because sources can
+        # come from different time domains (bag time vs wall clock).
+        self.create_subscription(PointCloud2, LIDAR_2D_PROJ_TOPIC, self.proj_callback, 10)
+        self.create_subscription(LanePoints, CLRERNET_ALL_LANES_TOPIC, self.lanes_msg_callback, 10)
 
         # Publishers
         self.left_pcl_pub = self.create_publisher(PointCloud2, CLRERNET_LEFT_LANE_TOPIC, 5)
         self.right_pcl_pub = self.create_publisher(PointCloud2, CLRERNET_RIGHT_LANE_TOPIC, 5)
         self.centerline_pub = self.create_publisher(PointCloud2, CLRERNET_CENTERLINE_TOPIC, 1)
 
-        ts = message_filters.ApproximateTimeSynchronizer([self.sub_proj, self.sub_lanes], queue_size=10, slop=0.5)
-        ts.registerCallback(self.lanes_callback)
+    def lanes_msg_callback(self, msg_all_lanes):
+        self.latest_lanes_msg = msg_all_lanes
+
+    def proj_callback(self, msg_proj):
+        if self.latest_lanes_msg is None:
+            return
+        self.lanes_callback(msg_proj, self.latest_lanes_msg)
 
     @timer
     def lanes_callback(self, msg_proj, msg_all_lanes):
@@ -84,8 +91,16 @@ class Clrernet_Lane_Transform(Node):
             return
 
         points_np = np.array(points_list)
-        u = points_np[:, 3]
-        v = points_np[:, 4]
+        if points_np.dtype.fields is not None:
+            u = points_np["u"]
+            v = points_np["v"]
+        else:
+            points_np = np.atleast_2d(points_np)
+            if points_np.shape[1] < 5:
+                self.get_logger().warning("Projected PointCloud2 missing u/v fields")
+                return
+            u = points_np[:, 3]
+            v = points_np[:, 4]
 
         lane_dict = {}
         for pt in msg_all_lanes.points:
