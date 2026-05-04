@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /workspace/Autonomous-Driving-Perception-System
 RUN mkdir -p src
+COPY src/custom_msgs/yolo_msgs ./src/custom_msgs/yolo_msgs
 COPY src/Custom_YOLO_ROS ./src/Custom_YOLO_ROS
 COPY src/perception_common ./src/perception_common
 
@@ -15,14 +16,26 @@ RUN rm -rf build install log && \
     if [ -f src/Custom_YOLO_ROS/requirements.txt ]; then \
         /opt/yolo_venv/bin/pip install -r src/Custom_YOLO_ROS/requirements.txt; \
     fi && \
-    /opt/yolo_venv/bin/pip install "numpy<2" ultralytics lap empy
+    /opt/yolo_venv/bin/pip install "numpy<2" ultralytics lap empy dill
 
-RUN apt-get update && \
+RUN find /etc/apt -type f \( -name "*.list" -o -name "*.sources" \) -print0 | \
+        xargs -0 sed -i \
+            -e 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            -e 's|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' \
+            -e 's|http://packages.ros.org/ros2/ubuntu|https://packages.ros.org/ros2/ubuntu|g' && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         ros-jazzy-ament-cmake \
         ros-jazzy-cv-bridge \
+        ros-jazzy-fastcdr \
+        ros-jazzy-fastrtps \
         ros-jazzy-message-filters \
+        ros-jazzy-rmw-fastrtps-cpp \
+        ros-jazzy-rmw-fastrtps-shared-cpp \
+        ros-jazzy-rmw-zenoh-cpp \
         ros-jazzy-rosidl-default-generators \
+        ros-jazzy-rosidl-typesupport-fastrtps-c \
+        ros-jazzy-rosidl-typesupport-fastrtps-cpp \
         ros-jazzy-std-srvs \
         ros-jazzy-tf2-ros \
         ros-jazzy-vision-msgs && \
@@ -40,10 +53,12 @@ RUN source /opt/ros/jazzy/setup.bash && \
 
 # Set RMW_IMPLEMENTATION to use zenoh by default
 ENV RMW_IMPLEMENTATION=rmw_zenoh_cpp
+ENV YOLO_MODEL_PATH=/workspace/Autonomous-Driving-Perception-System/src/Custom_YOLO_ROS/yolov9_custom_model_with_signs_and_cones.pt
+ENV YOLO_USE_FUSION=False
 
 CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && \
     source /workspace/Autonomous-Driving-Perception-System/install/setup.bash && \
     export PATH=/opt/yolo_venv/bin:$PATH && \
     export PYTHONPATH=/opt/yolo_venv/lib/python3.12/site-packages:$PYTHONPATH && \
     export PYTHONPATH=/workspace/Autonomous-Driving-Perception-System:$PYTHONPATH && \
-    ros2 launch yolo_bringup yolov9.launch.py"]
+    ros2 launch yolo_bringup yolov9.launch.py model:=${YOLO_MODEL_PATH} use_fusion:=${YOLO_USE_FUSION}"]
