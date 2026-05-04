@@ -38,6 +38,35 @@ colcon build --merge-install
 source install/setup.bash
 ```
 
+### Install Custom Messages On The Host
+The standalone interface packages now live under `src/custom_msgs/` so they can be built independently from the heavier perception nodes. This host overlay now installs `clrernet_msgs`, `sam2_msgs`, `yolov9_msgs`, and `yolo_msgs`.
+
+```bash
+bash scripts/install_host_custom_msgs.sh
+source /opt/ros/jazzy/setup.bash
+source ~/ros_drivers/install/setup.bash
+source ~/.local/opt/adps_custom_msgs/setup.bash
+```
+
+If you use another workspace such as `~/ros_drivers`, source that workspace before the custom message overlay. `ros2 bag record` only sees message definitions from the currently active overlay chain.
+
+You can verify the overlay is active with:
+
+```bash
+ros2 pkg prefix clrernet_msgs
+ros2 pkg prefix sam2_msgs
+ros2 pkg prefix yolo_msgs
+```
+
+To install them into a different prefix, pass the destination as the first argument:
+
+```bash
+bash scripts/install_host_custom_msgs.sh /path/to/custom_msgs_install
+source /opt/ros/jazzy/setup.bash
+source ~/ros_drivers/install/setup.bash
+source /path/to/custom_msgs_install/setup.bash
+```
+
 ### Create and Activate Environments
 Each perception module requires its own environment TBD:
 

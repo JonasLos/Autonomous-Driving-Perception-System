@@ -97,7 +97,7 @@ RUN source /opt/venv/bin/activate \
 RUN source /opt/ros/jazzy/setup.bash \
     && source /opt/venv/bin/activate \
     && uv pip install "empy==3.3.4" lark catkin_pkg \
-    && rosdep install --from-paths src/clrernet_msgs src/perception_common src/clrernet_ros \
+    && rosdep install --from-paths src/custom_msgs/clrernet_msgs src/perception_common src/clrernet_ros \
         --ignore-src -r -y --rosdistro jazzy \
         --skip-keys "ament_python ros2_numpy" \
     && rm -rf build install log \

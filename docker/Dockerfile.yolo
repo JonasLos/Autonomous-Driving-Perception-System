@@ -29,7 +29,7 @@ RUN apt-get update && \
     rosdep update && \
     rosdep install \
         --from-paths \
-            src/Custom_YOLO_ROS/src/yolo_ros/yolo_msgs \
+            src/custom_msgs/yolo_msgs \
             src/Custom_YOLO_ROS/src/yolo_ros/yolo_ros \
             src/Custom_YOLO_ROS/src/yolo_ros/yolo_bringup \
         --ignore-src -r -y && \
