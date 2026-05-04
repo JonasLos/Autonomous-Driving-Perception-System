@@ -13,7 +13,7 @@ except ImportError:  # Fallback for environments exposing the old module path
     import sensor_msgs.point_cloud2 as pc2
 import torch
 import yaml
-from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs.msg import CameraInfo, PointCloud2, PointField
 
 from src.configs import PROJ, T1
 from src.utils import crop_pointcloud, inverse_rigid_transform, timer
@@ -28,23 +28,33 @@ with open(TOPICS_PATH, "r") as f:
 # === TOPICS ===
 LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar_tc"]
 LIDAR_2D_PROJ_TOPIC = topic_config["topics"]["transform"]["lidar_2d_projection"]
+CAMERA_INFO_TOPIC = topic_config["topics"]["raw"]["camera_info"]
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # Define limits
-lim_x, lim_y, lim_z = [0, 100], [-10, 10], [-3.5, 1]
+lim_x, lim_y, lim_z = [0, 100], [-20, 20], [-3.5, 1]
 
 
 class LidarTo2DProjection(Node):
     def __init__(self):
         super().__init__("lidar_to_2d_projection")
 
+        self.image_width = int(round(float(PROJ[0, 2]) * 2.0))
+        self.image_height = int(round(float(PROJ[1, 2]) * 2.0))
+
         # Publisher
         self.projection_pub = self.create_publisher(PointCloud2, LIDAR_2D_PROJ_TOPIC, 1)
 
         # Subscriber
         self.create_subscription(PointCloud2, LIDAR_TOPIC, self.lidar_callback, 1)
+        self.create_subscription(CameraInfo, CAMERA_INFO_TOPIC, self.camera_info_callback, 1)
 
         self.get_logger().info("Node initialized and ready to publish 2D projections.")
+
+    def camera_info_callback(self, msg):
+        if msg.width > 0 and msg.height > 0:
+            self.image_width = int(msg.width)
+            self.image_height = int(msg.height)
 
     def lidar_callback(self, msgLidar):
         pc_arr, u, v = self.process_pointcloud(msgLidar)
@@ -77,8 +87,8 @@ class LidarTo2DProjection(Node):
         uv1 = torch.matmul(proj, m1)
         u, v = (uv1[:2, :] / uv1[2, :]).numpy()
 
-        # Correct element-wise filtering
-        mask = (u > 0) & (u < 2048) & (v > 0) & (v < 1544)
+        # Filter projected points against the active camera geometry.
+        mask = (u > 0) & (u < self.image_width) & (v > 0) & (v < self.image_height)
         pc_arr = pc_arr[mask]
         u, v = u[mask], v[mask]
 

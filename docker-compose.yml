@@ -402,7 +402,7 @@ services:
       ROS_DOMAIN_ID: "0"
       RMW_IMPLEMENTATION: "rmw_zenoh_cpp"
       YOLO_MODEL_PATH: "/workspace/Autonomous-Driving-Perception-System/src/Custom_YOLO_ROS/yolov9_custom_model_with_signs_and_cones.pt"
-      YOLO_USE_FUSION: "False"
+      YOLO_USE_FUSION: "True"
       YOLO_CONFIG_DIR: "/tmp/Ultralytics"
       NVIDIA_VISIBLE_DEVICES: "all"
       NVIDIA_DRIVER_CAPABILITIES: "all"
