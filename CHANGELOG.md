@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-05-14
+
+### Fixed
+- `fusion_node`: added `_foreground_points()` gap-based depth clustering to prevent overlapping objects in image space from biasing the fused 3D median between them. Points inside each bounding box are sorted by depth, split at the first MAD-scaled gap (≥ 5 cm), and only the nearest cluster feeds the median calculation.
+- `objects_transform`: switched LiDAR point matching from first-found to closest-by-depth (`argmin` on z) for more accurate per-detection depth assignment; added debug logging for bbox matching, radar pairing, and published boxes.
+- `tracking_node`: removed `frame_rate=1` kwarg from `BYTETracker`/`BOTSORT` constructor — argument was dropped in ultralytics 8.4.50, causing `on_configure` to fail silently and leaving the node stuck in unconfigured state.
+
+### Changed
+- `Dockerfile.yolo`: added `yolov9_ros` and `yolov9_msgs` to `COPY`, `rosdep install`, and `colcon build` so the YOLO container includes the full perception stack.
+
 ## 2026-04-29
 
 ### Added
