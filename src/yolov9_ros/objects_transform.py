@@ -126,14 +126,16 @@ class ObjectsTransform(Node):
         u, v = uv1[0, :].numpy(), uv1[1, :].numpy()
 
         # Match bounding box centers with point cloud data
-        for bbox_info in msgPoint.Bboxes:
+        for bbox_idx, bbox_info in enumerate(msgPoint.Bboxes):
             x_min, y_min = bbox_info.x_min, bbox_info.y_min
             x_max, y_max = bbox_info.x_max, bbox_info.y_max
-            class_id, _ = bbox_info.class_id, bbox_info.confidence
+            class_id, confidence = bbox_info.class_id, bbox_info.confidence
 
             # Calculate center of the bounding box
             center_x = (x_min + x_max) / 2
             center_y = (y_min + y_max) / 2
+            bbox_width = x_max - x_min
+            bbox_height = y_max - y_min
 
             # Find corresponding points in the point cloud
             idx = np.where(
@@ -144,12 +146,32 @@ class ObjectsTransform(Node):
             )[0]
 
             if idx.size > 0:
-                for i in [idx[0]]:  # Only publish one object for each detection
-                    center_3d.append(
-                        [pc_arr_pick[0][i], pc_arr_pick[1][i], pc_arr_pick[2][i], 1]
-                    )
-                    label.append([class_id])
-        self.get_logger().info(f"Found {len(center_3d)} camera detections.")
+                # IMPROVEMENT: Select closest LiDAR point by depth instead of first point
+                # This prevents incorrect matching when multiple objects overlap in image space
+                depths = pc_arr_pick[2][idx]  # z-coordinates of matching points
+                closest_idx = idx[np.argmin(depths)]  # index of point with minimum depth
+                
+                center_3d.append(
+                    [pc_arr_pick[0][closest_idx], pc_arr_pick[1][closest_idx], pc_arr_pick[2][closest_idx], 1]
+                )
+                label.append([class_id])
+                
+                # Debug logging
+                self.get_logger().debug(
+                    f"BBOX {bbox_idx}: class_id={class_id}, conf={confidence:.2f}, "
+                    f"bbox_center=({center_x:.1f}, {center_y:.1f}), "
+                    f"bbox_size=({bbox_width:.0f}x{bbox_height:.0f}), "
+                    f"matching_points={idx.size}, "
+                    f"selected_depth={pc_arr_pick[2][closest_idx]:.2f}m, "
+                    f"3d_pos=({pc_arr_pick[0][closest_idx]:.2f}, {pc_arr_pick[1][closest_idx]:.2f}, {pc_arr_pick[2][closest_idx]:.2f})"
+                )
+            else:
+                self.get_logger().debug(
+                    f"BBOX {bbox_idx}: class_id={class_id}, conf={confidence:.2f}, "
+                    f"bbox_center=({center_x:.1f}, {center_y:.1f}) - NO MATCHING LIDAR POINTS"
+                )
+        
+        self.get_logger().info(f"Found {len(center_3d)} camera detections from {len(msgPoint.Bboxes)} YOLO detections.")
 
         # Publishing the bounding boxes
         bbox_array = BoundingBox3DArray()
@@ -194,8 +216,15 @@ class ObjectsTransform(Node):
                     ]
                 )
                 distance = np.linalg.norm(cam_position - rad_position)
+                self.get_logger().debug(
+                    f"Cam detection {i} (class={int(label[i][0])}, pos={cam_position}) vs "
+                    f"Radar {j} (pos={rad_position}): distance={distance:.2f}m, x_rad={rad_position[0]:.2f}m"
+                )
                 if rad_position[0] > 75 and distance < CLOSE_DISTANCE_THRESHOLD:
                     matched_pairs.append((i, j))
+                    self.get_logger().info(
+                        f"✓ MATCHED: Camera detection {i} (class={int(label[i][0])}) with Radar track {j}"
+                    )
 
         self.get_logger().info(f"Matched pairs: {matched_pairs}")
         matched_dict = defaultdict(list)
@@ -218,6 +247,12 @@ class ObjectsTransform(Node):
                 )
                 bbox.center.orientation.w = 1.0
                 bbox_array.boxes.append(bbox)
+                
+                self.get_logger().debug(
+                    f"Publishing camera detection {i}: class={class_}, "
+                    f"pos=({box[0]:.2f}, {box[1]:.2f}, {box[2]:.2f}), "
+                    f"size=({bbox.size.x:.2f}, {bbox.size.y:.2f}, {bbox.size.z:.2f})"
+                )
 
         # Add radar objects to bounding box array
         for i, obj in enumerate(msgRadar.tracks):  # radar detections
@@ -251,6 +286,16 @@ class ObjectsTransform(Node):
                     bbox.size.z = 1.5
                     bbox.center.orientation.w = 1.0
                     bbox_array.boxes.append(bbox)
+                    
+                    self.get_logger().debug(
+                        f"Publishing unmatched radar track {i}: pos=({rad_position[0]:.2f}, {rad_position[1]:.2f}, {rad_position[2]:.2f})"
+                    )
+                else:
+                    self.get_logger().debug(
+                        f"Skipping radar track {i}: x_pos={rad_position[0]:.2f}m (< {RADAR_LIMIT}m limit)"
+                    )
+            else:
+                self.get_logger().debug(f"Radar track {i} already matched with camera detection")
 
         bbox_array.header.frame_id = msgLidar.header.frame_id
         bbox_array.header.stamp = msgLidar.header.stamp

@@ -9,6 +9,8 @@ RUN mkdir -p src
 COPY src/custom_msgs/yolo_msgs ./src/custom_msgs/yolo_msgs
 COPY src/Custom_YOLO_ROS ./src/Custom_YOLO_ROS
 COPY src/perception_common ./src/perception_common
+COPY src/yolov9_ros ./src/yolov9_ros
+COPY src/custom_msgs/yolov9_msgs ./src/custom_msgs/yolov9_msgs
 
 RUN rm -rf build install log && \
     python3 -m venv /opt/yolo_venv && \
@@ -43,13 +45,15 @@ RUN find /etc/apt -type f \( -name "*.list" -o -name "*.sources" \) -print0 | \
     rosdep install \
         --from-paths \
             src/custom_msgs/yolo_msgs \
+            src/custom_msgs/yolov9_msgs \
             src/Custom_YOLO_ROS/src/yolo_ros/yolo_ros \
             src/Custom_YOLO_ROS/src/yolo_ros/yolo_bringup \
+            src/yolov9_ros \
         --ignore-src -r -y && \
     rm -rf /var/lib/apt/lists/*
 
 RUN source /opt/ros/jazzy/setup.bash && \
-    colcon build --merge-install --packages-select yolo_msgs yolo_ros yolo_bringup
+    colcon build --merge-install --packages-select yolo_msgs yolov9_msgs yolo_ros yolo_bringup yolov9_ros perception_common
 
 # Set RMW_IMPLEMENTATION to use zenoh by default
 ENV RMW_IMPLEMENTATION=rmw_zenoh_cpp
