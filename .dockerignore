@@ -19,4 +19,3 @@ src/SAM3_ROS_NODE/.venv
 src/SAM3_ROS_NODE/.venv/**
 src/Custom_YOLO_ROS/.git
 src/Custom_YOLO_ROS/.git/**
-src/sphereformer_ros/src/SphereFormer/model_semantic_kitti.pth

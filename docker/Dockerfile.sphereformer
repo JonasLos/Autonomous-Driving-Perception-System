@@ -12,7 +12,11 @@ COPY ./src/sphereformer_ros/requirements-sphereformer.txt /tmp/
 # Install build dependencies and compile the extension in the venv
 # This stage is designed to fail fast if the CUDA extension porting is not viable.
 RUN source /opt/venv/bin/activate && \
-    uv pip install -r /tmp/requirements-sphereformer.txt setuptools && \
+        for i in 1 2 3 4 5; do \
+            uv pip install -r /tmp/requirements-sphereformer.txt setuptools && break; \
+            echo "Retrying builder dependency install ($i/5)"; \
+            if [ "$i" -eq 5 ]; then exit 1; fi; \
+        done && \
     cd /tmp/SparseTransformer && \
     export TORCH_CUDA_ARCH_LIST="8.6;9.0+PTX" && \
     python3 setup.py install
@@ -24,12 +28,8 @@ FROM perception-cuda-base:latest
 WORKDIR /workspace/Autonomous-Driving-Perception-System
 COPY . .
 
-# Install Python dependencies using uv for speed
-RUN source /opt/venv/bin/activate && \
-    uv pip install -r src/sphereformer_ros/requirements-sphereformer.txt
-
-# Copy the compiled extension from the builder stage
-COPY --from=builder /opt/venv/lib/python3.12/site-packages/sptr* /opt/venv/lib/python3.12/site-packages/
+# Reuse builder virtualenv to avoid runtime network fetches.
+COPY --from=builder /opt/venv /opt/venv
 
 # Build the ROS 2 workspace, failing on any error
 RUN apt-get update && \

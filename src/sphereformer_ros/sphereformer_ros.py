@@ -32,6 +32,10 @@ CONFIG_PATH = os.path.join(
     "semantic_kitti_unet32_spherical_transformer.yaml",
 )
 CHECKPOINT_PATH = os.path.join(PKG_SHARE, "SphereFormer", "model_semantic_kitti.pth")
+FALLBACK_CHECKPOINT_PATH = (
+    "/workspace/Autonomous-Driving-Perception-System/"
+    "src/sphereformer_ros/src/SphereFormer/model_semantic_kitti.pth"
+)
 
 # Path to the YAML file
 TOPICS_PATH = os.path.join(get_package_share_directory("perception_common"), "topics.yaml")
@@ -93,6 +97,14 @@ class SphereformerLidarSegmentation(Node):
         # Configuration and model initialization
         self.config_path = config_path
         self.checkpoint_path = checkpoint_path
+        if not os.path.exists(self.checkpoint_path) and os.path.exists(
+            FALLBACK_CHECKPOINT_PATH
+        ):
+            self.checkpoint_path = FALLBACK_CHECKPOINT_PATH
+        elif not os.path.exists(self.checkpoint_path):
+            env_path = os.getenv("SPHEREFORMER_CHECKPOINT_PATH", "").strip()
+            if env_path and os.path.exists(env_path):
+                self.checkpoint_path = env_path
         self.cfg = config.load_cfg_from_cfg_file(self.config_path)
         if torch.cuda.is_available() and device.type != "cuda":
             self.get_logger().warning(

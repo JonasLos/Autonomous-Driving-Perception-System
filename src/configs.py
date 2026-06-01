@@ -12,11 +12,11 @@ import numpy as np
 #     ]
 # )
 
-# Intrinsics from camera_fl.intrinsics.yaml (TAMU.Jeep_GC.White_Jeep.2025-04-16.17-20-11.01)
+# Intrinsics from camera_fl.intrinsics.yaml (TAMU.Jeep_GC.Blue_Jeep.2025-06-24.14-27-11.01)
 PROJ = np.array(
     [
-        [3461.179235458374, 0, 1031.3118348121643, 0],
-        [0, 3461.1789894104004, 771.39050769805908, 0],
+        [3411.259361395108, 0, 1021.73025726041, 0],
+        [0, 3411.2588644613816, 771.21438165632549, 0],
         [0, 0, 1, 0],
     ]
 )
@@ -32,13 +32,14 @@ PROJ = np.array(
 #     ]
 # )
 
-# Extrinsics from extrinsics.yaml camera_fl entry (TAMU.Jeep_GC.White_Jeep.2025-04-16.17-20-11.01)
-# Derived from: [x=1.208815, y=0.273073, z=-0.842512, qx=-0.491530, qy=0.531214, qz=-0.511528, qw=0.463194]
+# Extrinsics from extrinsics.yaml camera_fl entry (TAMU.Jeep_GC.Blue_Jeep.2025-06-24.14-27-11.01)
+# Using https://www.andre-gaschler.com/rotationconverter/ Derived from: [1.760872, 0.289978, -0.956039, -0.523534, 0.480752, -0.502847, 0.491868]
 T1 = np.array(
     [
-        [-0.0876984, -0.0483418,  0.9949730, 1.208815],
-        [-0.9960886, -0.0065253, -0.0881142, 0.273073],
-        [ 0.0107524, -0.9988092, -0.0475801, -0.842512],
+        [0.0320444, -0.0087113,  0.9994485, 1.760872],
+        [-0.9980491, -0.0538864,  0.0315299, 0.289978],
+        [ 0.0535820, -0.9985090, -0.0104211, -0.956039],
         [ 0.0,        0.0,        0.0,        1.0],
     ]
 )
+
