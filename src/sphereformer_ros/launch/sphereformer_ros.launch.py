@@ -14,7 +14,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "input_topic",
-            default_value="/lidar_tc/velodyne_points",
+            default_value="/lidar_tc/velodyne_points/downsampled",
             description="Input PointCloud2 topic for SphereFormer when ring_filter is disabled.",
         ),
         Node(

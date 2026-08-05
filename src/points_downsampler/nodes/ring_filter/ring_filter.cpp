@@ -16,14 +16,11 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/filters/voxel_grid.h>
-
-#include <velodyne_pcl/point_types.h>
-
-#include <autoware_config_msgs/msg/config_ring_filter.hpp>
 
 #include <points_downsampler/msg/points_downsampler_info.hpp>
 
@@ -49,47 +46,46 @@ static std::ofstream ofs;
 static std::string filename;
 
 static std::string POINTS_TOPIC;
+static std::string OUTPUT_TOPIC;
 static double measurement_range = MAX_MEASUREMENT_RANGE;
-
-static void config_callback(const autoware_config_msgs::msg::ConfigRingFilter::SharedPtr input)
-{
-  ring_div = input->ring_div;
-  voxel_leaf_size = input->voxel_leaf_size;
-  measurement_range = input->measurement_range;
-}
 
 static void scan_callback(const sensor_msgs::msg::PointCloud2::SharedPtr input)
 {
   pcl::PointCloud<pcl::PointXYZI> scan;
-  pcl::PointCloud<velodyne_pcl::PointXYZIRT> tmp;
   sensor_msgs::msg::PointCloud2 filtered_msg;
 
   pcl::fromROSMsg(*input, scan);
-  pcl::fromROSMsg(*input, tmp);
 
   filter_start = std::chrono::system_clock::now();
 
   scan.points.clear();
+  ring_max = 0;
 
   double square_measurement_range = measurement_range*measurement_range;
 
-  for (pcl::PointCloud<velodyne_pcl::PointXYZIRT>::const_iterator item = tmp.begin(); item != tmp.end(); item++)
+  sensor_msgs::PointCloud2ConstIterator<float> iter_x(*input, "x");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_y(*input, "y");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_z(*input, "z");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_intensity(*input, "intensity");
+  sensor_msgs::PointCloud2ConstIterator<uint16_t> iter_ring(*input, "ring");
+
+  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z, ++iter_intensity, ++iter_ring)
   {
     pcl::PointXYZI p;
-    p.x = item->x;
-    p.y = item->y;
-    p.z = item->z;
-    p.intensity = item->intensity;
+    p.x = *iter_x;
+    p.y = *iter_y;
+    p.z = *iter_z;
+    p.intensity = *iter_intensity;
 
     double square_distance = p.x * p.x + p.y * p.y;
 
-    if (item->ring % ring_div == 0 && square_distance <= square_measurement_range)
+    if (*iter_ring % ring_div == 0 && square_distance <= square_measurement_range)
     {
       scan.points.push_back(p);
     }
-    if (item->ring > ring_max)
+    if (*iter_ring > ring_max)
     {
-      ring_max = item->ring;
+      ring_max = *iter_ring;
     }
   }
 
@@ -158,10 +154,17 @@ int main(int argc, char** argv)
   rclcpp::init(argc, argv);
   auto nh = std::make_shared<rclcpp::Node>("ring_filter");
 
-  nh->declare_parameter<std::string>("points_topic", "points_raw");
+  nh->declare_parameter<std::string>("points_topic", "/lidar_tc/velodyne_points");
+  nh->declare_parameter<std::string>("output_topic", "/lidar_tc/velodyne_points/downsampled");
   nh->declare_parameter<bool>("output_log", false);
+  nh->declare_parameter<int>("ring_div", 4);
+  nh->declare_parameter<double>("voxel_leaf_size", 0.1);
+  nh->declare_parameter<double>("measurement_range", MAX_MEASUREMENT_RANGE);
   nh->get_parameter("points_topic", POINTS_TOPIC);
+  nh->get_parameter("output_topic", OUTPUT_TOPIC);
   nh->get_parameter("output_log", _output_log);
+  nh->get_parameter("ring_div", ring_div);
+  nh->get_parameter("voxel_leaf_size", voxel_leaf_size);
   if(_output_log == true){
     char buffer[80];
     std::time_t now = std::time(NULL);
@@ -173,11 +176,10 @@ int main(int argc, char** argv)
   nh->get_parameter<double>("measurement_range", measurement_range);
 
   // Publishers
-  filtered_points_pub = nh->create_publisher<sensor_msgs::msg::PointCloud2>("/filtered_points", 10);
+  filtered_points_pub = nh->create_publisher<sensor_msgs::msg::PointCloud2>(OUTPUT_TOPIC, 10);
   points_downsampler_info_pub = nh->create_publisher<points_downsampler::msg::PointsDownsamplerInfo>("/points_downsampler_info", 10);
 
-  // Subscribers
-  auto config_sub = nh->create_subscription<autoware_config_msgs::msg::ConfigRingFilter>("config/ring_filter", 10, config_callback);
+  // Subscriber
   auto scan_sub = nh->create_subscription<sensor_msgs::msg::PointCloud2>(POINTS_TOPIC, 10, scan_callback);
 
   rclcpp::spin(nh);
