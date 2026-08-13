@@ -1,12 +1,19 @@
 topics:
   raw:
-    camera: "/camera_fl/image_color"
+    # The AVT front cameras publish "~/image" with node name camera_fl / camera_fr and
+    # no namespace, so the topic is /camera_<x>/image -- /camera_<x>/image_raw does not
+    # exist. image_proc's debayer_node derives /camera_<x>/image_color from it, but that
+    # node runs a standing ~0.5s backlog, so subscribe to the raw topic and let
+    # cv_bridge debayer bayer_rggb8 -> bgr8 in-process instead.
+    # Rear cameras are /camera_rear_1..3/; the rc/tl/tr names survive only as TF frames
+    # and calibration filenames, and nothing maps them onto the three namespaces.
+    camera: "/camera_fl/image"
     radar: "/radar_fc/as_tx/radar_tracks"
-    camera_fl: "/camera_fl/image_raw"
-    camera_fr: "/camera_fr/image_raw"
-    camera_rc: "/camera_rc/arena_camera_node/image_color"
-    camera_tl: "/camera_tl/arena_camera_node/image_raw"
-    camera_tr: "/camera_tr/arena_camera_node/image_raw"
+    camera_fl: "/camera_fl/image"
+    camera_fr: "/camera_fr/image"
+    camera_rear_1: "/camera_rear_1/image"
+    camera_rear_2: "/camera_rear_2/image"
+    camera_rear_3: "/camera_rear_3/image"
     imu: "/imu/data_raw"
     gps_imu: "/gps/imu"
     lidar_tc_packets: "/lidar_tc/velodyne_packets"
@@ -111,9 +118,9 @@ categories:
     - topics.raw.ins
     - topics.raw.camera_fl
     - topics.raw.camera_fr
-    - topics.raw.camera_rc
-    - topics.raw.camera_tl
-    - topics.raw.camera_tr
+    - topics.raw.camera_rear_1
+    - topics.raw.camera_rear_2
+    - topics.raw.camera_rear_3
     - topics.raw.lidar_tc
     - topics.raw.lidar_tl
     - topics.raw.lidar_tr

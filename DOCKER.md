@@ -319,7 +319,7 @@ docker compose --profile runtime stop clrernet_node
 
 - Requires `perception-cuda-base:latest` built on CUDA 12.8; older 12.6 base image will not emit `sm_120` kernels and inference will fail with `no kernel image is available for execution on the device` on RTX 50-series GPUs.
 - The container launches two nodes: `clrernet_lane_detection` (image → lane polylines) and `clrernet_lane_transform` (lane polylines + projected lidar → 3D left/right/centerline `PointCloud2`).
-- Subscribes to `/camera_fl/image_color` for lane detection and the lidar 2D projection topic for 3D lifting; topic names are read from `perception_common/topics.yaml`.
+- Subscribes to the raw `/camera_fl/image` for lane detection and the lidar 2D projection topic for 3D lifting; topic names are read from `perception_common/topics.yaml`. `cv_bridge` debayers `bayer_rggb8` in-process, avoiding the ~0.5s standing backlog on `image_proc`'s `/camera_fl/image_color`.
 - Model checkpoint `clrernet_culane_dla34_ema.pth` is fetched from the upstream GitHub release during the image build; no local download required.
 - The backbone (`DLANet`) is initialised with `pretrained=False` because the full checkpoint overwrites the ImageNet weights anyway, and the upstream ImageNet mirror (`dl.yf.io`) is unreliable.
 
