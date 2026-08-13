@@ -49,6 +49,7 @@ RUN find /etc/apt -type f \( -name "*.list" -o -name "*.sources" \) -print0 | \
             src/Custom_YOLO_ROS/src/yolo_ros/yolo_ros \
             src/Custom_YOLO_ROS/src/yolo_ros/yolo_bringup \
             src/yolov9_ros \
+            src/perception_common \
         --ignore-src -r -y && \
     rm -rf /var/lib/apt/lists/*
 
