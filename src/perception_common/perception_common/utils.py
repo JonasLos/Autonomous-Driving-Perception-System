@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import threading
 import time
 from functools import wraps
 
@@ -57,51 +56,8 @@ def is_zero_stamp(header) -> bool:
     return header.stamp.sec == 0 and header.stamp.nanosec == 0
 
 
-class LatestStampedCache:
-    """Holds the most recent message from a slower stream for capture-time fusion.
-
-    Detections arrive slower than the LiDAR they are fused against, so the cloud
-    callback drives the output and pulls whatever detection is cached. ``get_fresh``
-    releases the cached message only when its ``header.stamp`` is within ``max_age``
-    of the driving message's stamp, which bounds how stale the fused geometry can be
-    and makes a stalled upstream node fail closed instead of publishing forever.
-    """
-
-    def __init__(self, name: str = "detection"):
-        self.name = name
-        self._lock = threading.Lock()
-        self._msg = None
-        self.accepted_count = 0
-        self.rejected_count = 0
-        self.zero_stamp_count = 0
-
-    def update(self, msg) -> None:
-        with self._lock:
-            self._msg = msg
-
-    def get_fresh(self, reference_header, max_age: float):
-        """Return ``(msg, skew)`` when the cached message is fresh, else ``(None, skew)``.
-
-        ``skew`` is ``float('inf')`` when nothing has been cached yet, or when either
-        header carries a zero stamp (which would otherwise compare as a ~decades-large
-        difference and silently look like permanent staleness).
-        """
-        with self._lock:
-            msg = self._msg
-
-        if msg is None:
-            return None, float("inf")
-
-        if is_zero_stamp(reference_header) or is_zero_stamp(msg.header):
-            with self._lock:
-                self.zero_stamp_count += 1
-                self.rejected_count += 1
-            return None, float("inf")
-
-        skew = stamp_skew(reference_header, msg.header)
-        with self._lock:
-            if skew <= max_age:
-                self.accepted_count += 1
-                return msg, skew
-            self.rejected_count += 1
-        return None, skew
+# LatestStampedCache lived here until 2026-08-13. It gated a cached detection on being
+# within max_age of the driving cloud's stamp -- a freshness *gate*, which can only trade
+# dropped frames for misplaced ones: widen it and stale geometry gets through, tighten it
+# and the node starves. Use perception_common.stamp_sync.StampMatchedBuffer instead, which
+# buffers the fast stream and pairs each detection with the sample captured nearest to it.
