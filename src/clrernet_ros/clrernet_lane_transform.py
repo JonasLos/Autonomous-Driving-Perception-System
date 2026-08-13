@@ -2,12 +2,13 @@
 # type: ignore
 
 import os
+import time as _time
 
 from ament_index_python.packages import get_package_share_directory
-import message_filters
 import numpy as np
 import ros2_numpy as ros_numpy
 import rclpy
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from sensor_msgs_py import point_cloud2 as pc2
 import yaml
@@ -15,7 +16,7 @@ from scipy.spatial import KDTree
 from sensor_msgs.msg import PointCloud2, PointField
 
 from clrernet_msgs.msg import LanePoints
-from perception_common.utils import timer
+from perception_common.utils import LatestStampedCache, timer
 
 TOPICS_PATH = os.path.join(
     get_package_share_directory("perception_common"), "topics.yaml"
@@ -55,10 +56,20 @@ class Clrernet_Lane_Transform(Node):
         self.prev_left_lane = None
         self.prev_right_lane = None
         self.ema_alpha = 0.5  # EMA smoothing factor
-        self.latest_lanes_msg = None
 
-        # Use latest-message fusion instead of timestamp sync because sources can
-        # come from different time domains (bag time vs wall clock).
+        # Lanes arrive at ~5 Hz against ~10 Hz LiDAR, so the projection drives the
+        # output and pulls the cached detection. The cache releases it only when the
+        # two header stamps are within max_detection_age of each other: comparing the
+        # two message stamps to each other (never to the node clock) keeps this valid
+        # in any clock domain, live or bag replay.
+        self.max_detection_age = float(
+            self.declare_parameter("max_detection_age", 0.25)
+            .get_parameter_value()
+            .double_value
+        )
+        self.lanes_cache = LatestStampedCache("lanes")
+        self._last_stale_log = 0.0
+
         self.create_subscription(PointCloud2, LIDAR_2D_PROJ_TOPIC, self.proj_callback, 10)
         self.create_subscription(LanePoints, CLRERNET_ALL_LANES_TOPIC, self.lanes_msg_callback, 10)
 
@@ -67,17 +78,60 @@ class Clrernet_Lane_Transform(Node):
         self.right_pcl_pub = self.create_publisher(PointCloud2, CLRERNET_RIGHT_LANE_TOPIC, 5)
         self.centerline_pub = self.create_publisher(PointCloud2, CLRERNET_CENTERLINE_TOPIC, 1)
 
+        # The right bound depends on the detector's end-to-end latency, which is
+        # easiest to measure against a replaying bag. Keep it settable at runtime so
+        # it can be calibrated without restarting the node.
+        self.add_on_set_parameters_callback(self._on_set_parameters)
+
+        self.get_logger().info(
+            f"Clrernet_Lane_Transform ready: {LIDAR_2D_PROJ_TOPIC} + {CLRERNET_ALL_LANES_TOPIC}, "
+            f"max_detection_age={self.max_detection_age:.3f}s (capture-time sync)"
+        )
+
+    def _on_set_parameters(self, params) -> SetParametersResult:
+        # Validate every parameter before applying any, so a rejected request cannot
+        # leave the node half-updated.
+        for p in params:
+            if p.name == "max_detection_age" and float(p.value) < 0.0:
+                return SetParametersResult(
+                    successful=False, reason="max_detection_age must be >= 0"
+                )
+        for p in params:
+            if p.name == "max_detection_age":
+                self.max_detection_age = float(p.value)
+                self.get_logger().info(
+                    f"max_detection_age set to {self.max_detection_age:.3f}s"
+                )
+        return SetParametersResult(successful=True)
+
     def lanes_msg_callback(self, msg_all_lanes):
-        self.latest_lanes_msg = msg_all_lanes
+        self.lanes_cache.update(msg_all_lanes)
 
     def proj_callback(self, msg_proj):
-        if self.latest_lanes_msg is None:
+        msg_all_lanes, skew = self.lanes_cache.get_fresh(
+            msg_proj.header, self.max_detection_age
+        )
+        if msg_all_lanes is None:
+            self._log_stale(skew)
             return
-        self.lanes_callback(msg_proj, self.latest_lanes_msg)
+        self.lanes_callback(msg_proj, msg_all_lanes)
+
+    def _log_stale(self, skew):
+        """Rate-limited warning so a stalled detector is visible instead of silent."""
+        now = _time.monotonic()
+        if now - self._last_stale_log < 1.0:
+            return
+        self._last_stale_log = now
+        cache = self.lanes_cache
+        detail = "no lanes received yet" if skew == float("inf") else f"skew={skew:.3f}s"
+        self.get_logger().warning(
+            f"Dropping projection: lanes stale ({detail}, "
+            f"max_detection_age={self.max_detection_age:.3f}s); "
+            f"dropped={cache.rejected_count} fused={cache.accepted_count}"
+        )
 
     @timer
     def lanes_callback(self, msg_proj, msg_all_lanes):
-        print("Received synchronized messages")
         pc_arr = ros_numpy.point_cloud2.pointcloud2_to_xyz_array(
             msg_proj, remove_nans=True
         )

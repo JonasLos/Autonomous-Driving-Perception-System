@@ -528,7 +528,11 @@ services:
         source /tmp/sam3_ws_install/setup.bash
         ros2 run sam3_ros segmentation_node &
         seg_pid=$$!
-        ros2 run sam3_ros sam3_mask_transform_node &
+        # SAM3's queue + inference put its contours ~0.3-0.4s behind the LiDAR
+        # projection (measured), so it needs a wider capture-time bound than the
+        # 0.25s default that suits CLRerNet. Tune live with:
+        #   ros2 param set /sam3_mask_transform max_detection_age <seconds>
+        ros2 run sam3_ros sam3_mask_transform_node --ros-args -p max_detection_age:=0.5 &
         mask_pid=$$!
         trap 'kill $$seg_pid $$mask_pid' SIGINT SIGTERM
         wait -n $$seg_pid $$mask_pid
