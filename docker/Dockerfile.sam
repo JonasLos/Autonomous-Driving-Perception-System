@@ -85,20 +85,28 @@ if __name__ == "__main__":
     main()
 EOF
 
+# The workspace defaults this image used to patch in (use_compressed_image=False,
+# a road text_prompt, and the camera topic) are now declared parameters carrying
+# those values in-source, so there is nothing left to rewrite here.
 RUN set -e && \
     cd /root/ws/src/SAM3_ROS_NODE && \
     chmod +x scripts/segmentation_node scripts/sam3_mask_transform_node && \
-    sed -i '/src\/sam3_ros\/pub_test_image.py/d' CMakeLists.txt && \
-    python3 - <<'PY'
-from pathlib import Path
+    sed -i '/src\/sam3_ros\/pub_test_image.py/d' CMakeLists.txt
 
-seg = Path("src/sam3_ros/segmentation.py")
-text = seg.read_text()
-text = text.replace('self.declare_parameter("use_compressed_image", True)', 'self.declare_parameter("use_compressed_image", False)')
-text = text.replace('self.declare_parameter("text_prompt", "")', 'self.declare_parameter("text_prompt", "road")')
-text = text.replace('"image",\n                self._image_callback,', '"/camera_fl/image_color",\n                self._image_callback,')
-seg.write_text(text)
-PY
+# This layer pulls ~3GB of CUDA wheels plus a git checkout of SAM3, and on a link
+# that stalls mid-transfer both fetchers give up well before the transfer would have
+# recovered — seen as `operation timed out` from uv and `RPC failed / early EOF` from
+# git. Both need a stall window, not more retries. Placed here rather than with the
+# other ENVs so it cannot invalidate the cached apt layers above.
+ENV UV_HTTP_TIMEOUT=180
+ENV GIT_HTTP_LOW_SPEED_LIMIT=1000
+ENV GIT_HTTP_LOW_SPEED_TIME=120
+# HTTP/2 multiplexing is what truncates the SAM3 pack on this uplink ("RPC failed;
+# curl 56" then "early EOF"); HTTP/1.1 transfers it intact. Set through the
+# environment so it applies to the clone uv runs on its own.
+ENV GIT_CONFIG_COUNT=1
+ENV GIT_CONFIG_KEY_0=http.version
+ENV GIT_CONFIG_VALUE_0=HTTP/1.1
 
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
     cd /root/ws/src/SAM3_ROS_NODE && \

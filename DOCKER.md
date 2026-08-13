@@ -150,7 +150,7 @@ The `sam3_ros` service has been updated for reproducible startup with Zenoh and 
       - creating `scripts/segmentation_node` if missing
          - creating `scripts/sam3_mask_transform_node`
       - removing stale `pub_test_image.py` install reference from `CMakeLists.txt`
-      - applying default runtime parameters used in this workspace (`use_compressed_image=False`, `text_prompt="road"`, and `/camera_fl/image_color` topic)
+      - applying default runtime parameters used in this workspace (`use_compressed_image=False`, `text_prompt="road"`, and the raw `/camera_fl/image` topic)
          - vendoring `ros2_numpy` into the SAM3 virtual environment
 - `docker-compose.yml` for `sam3_ros` now:
   - mounts the repository root to `/root/ws`
@@ -186,24 +186,55 @@ docker run --rm test-sam3:latest bash -lc 'ls /opt/ros/jazzy/lib/librmw_zenoh_cp
 
 If the file exists, Zenoh RMW is installed correctly.
 
-### SAM3 Synchronization Notes (2026-04-29)
+### SAM3 Synchronization Notes (2026-08-11)
 
-- If `/sam3_left_contour` and `/sam3_right_contour` are publishing but `/sam3_left_boundary` and `/sam3_right_boundary` are empty, check timestamps first.
-- A prior failure mode was zero-stamped camera input (`sec=0, nanosec=0`), which caused contour messages to be zero-stamped and prevented matching.
-- Current SAM3 segmentation code applies a fallback timestamp when image headers are zero, but matching can still fail if streams use different time domains (bag time vs wall-clock time).
+`sam3_mask_transform` pairs each contour with the buffered `/lidar_2d_projection`
+captured nearest to the contour's own header stamp, rather than with whichever
+projection is current when the contour arrives. Pipeline latency therefore shifts
+*when* a boundary is published, not *where* its points land, and it no longer has to
+be absorbed by a freshness bound.
 
-Quick checks:
+Diagnosing a boundary that is empty, frozen, or misplaced:
 
-```bash
-docker exec test_sam3_container bash -lc 'source /opt/ros/jazzy/setup.bash && source /tmp/sam3_ws_install/setup.bash && ros2 topic echo /lidar_2d_projection --once | sed -n "1,8p"'
-docker exec test_sam3_container bash -lc 'source /opt/ros/jazzy/setup.bash && source /tmp/sam3_ws_install/setup.bash && ros2 topic echo /sam3_left_contour --once | sed -n "1,8p"'
-```
+1. Measure where the latency actually is. Every stage's stamp-to-arrival delay:
 
-If epochs differ significantly, align clocks before tuning `sync_slop`:
+   ```bash
+   docker exec test_sam3_container bash -lc 'source /opt/ros/jazzy/setup.bash && for t in /camera_fl/image /camera_fl/image_color /sam3_left_contour /lidar_2d_projection; do echo "== $t"; timeout 10 ros2 topic delay $t 2>&1 | tail -1; done'
+   ```
 
-```bash
-docker exec test_sam3_container bash -lc 'source /opt/ros/jazzy/setup.bash && source /tmp/sam3_ws_install/setup.bash && ros2 param set /segmentation use_sim_time true && ros2 param set /sam3_mask_transform use_sim_time true'
-```
+   Reference figures from the white-jeep stack: raw `/camera_fl/image` 0.01–0.02s,
+   `/lidar_2d_projection` ~0.05s, `/sam3_left_contour` ~0.3s. If `/camera_fl/image`
+   itself is late, the problem is upstream of this container.
+
+2. Read the node's own warning. It distinguishes the two failure directions:
+   *"nearest projection is Xs newer than the contour"* means the matching cloud was
+   evicted before the contour arrived — raise `projection_buffer_duration`.
+   *"nearest projection is Xs older"* means no LiDAR scan as recent as that image has
+   arrived, so look at the LiDAR stream rather than at this node.
+
+3. Tune live, no restart required:
+
+   ```bash
+   docker exec test_sam3_container bash -lc 'source /opt/ros/jazzy/setup.bash && source /tmp/sam3_ws_install/setup.bash && ros2 param set /sam3_mask_transform max_pairing_skew 0.08'
+   ```
+
+Boundaries publish empty (rather than going silent) once a side has not been refreshed
+for `boundary_timeout`, so a stalled segmenter reads as "no boundary" downstream
+instead of leaving its last output standing.
+
+Earlier failure modes, still worth ruling out:
+
+- Zero-stamped camera input (`sec=0, nanosec=0`) propagating into contours. The
+  segmentation node now substitutes current ROS time and warns once; the transform
+  node refuses to pair zero-stamped headers.
+- Mixed time domains (bag time vs wall clock). Stamps here are only ever compared to
+  each other, never to the node clock, so `use_sim_time` is not required — but the two
+  input streams must still share one domain.
+
+  ```bash
+  docker exec test_sam3_container bash -lc 'source /opt/ros/jazzy/setup.bash && source /tmp/sam3_ws_install/setup.bash && ros2 topic echo /lidar_2d_projection --once | sed -n "1,8p"'
+  docker exec test_sam3_container bash -lc 'source /opt/ros/jazzy/setup.bash && source /tmp/sam3_ws_install/setup.bash && ros2 topic echo /sam3_left_contour --once | sed -n "1,8p"'
+  ```
 
 ---
 

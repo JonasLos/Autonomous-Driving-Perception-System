@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-08-11
+
+### Fixed
+- `sam3_mask_transform`: contours are now paired with the buffered `/lidar_2d_projection` captured nearest to their own header stamp, instead of with whichever projection was current when the contour arrived. The old pairing lifted stale pixels onto fresh geometry, displacing the boundary by however far the vehicle had travelled during the camera and inference pipeline — measured at 1.1s mean skew, ~5m at 5m/s. Skew is now bounded by the LiDAR period.
+- `segmentation`: subscribes to the raw `/camera_fl/image` (`bayer_rggb8`, debayered by `cv_bridge`) instead of `/camera_fl/image_color`. The `image_proc` `debayer_node` runs a permanent ~5-frame backlog, putting `image_color` 0.455–0.651s behind its own capture stamp while the raw topic is 0.011–0.023s behind; that half-second was the dominant term in the fusion skew. The raw topic is also a third of the bandwidth.
+- `segmentation`: the inference queue now discards the frame it supersedes rather than the incoming one. Dropping the newcomer left inference to start on the oldest frame of the busy window, adding up to one inference period (~0.2s) of avoidable staleness.
+- `sam3_mask_transform`: left and right contours are handled independently. SAM3 skips publishing a side when it finds no points there, and that previously blocked the opposite side's boundary as well.
+- `segmentation`: the inference queue is created before the image subscriptions, so a callback can no longer reach a queue that does not exist yet.
+
+### Added
+- `sam3_mask_transform`: `boundary_timeout` (default 0.5s) publishes an empty boundary cloud once a side stops being refreshed, so a stalled segmenter reads as "no boundary" downstream instead of leaving its last output standing in RViz.
+- `sam3_mask_transform`: `max_pairing_skew` (default 0.08s) and `projection_buffer_duration` (default 2.0s) parameters, both settable at runtime. Unmatched-contour warnings state which of the two bounds was missed and in which direction.
+- `segmentation`: `image_topic` and `compressed_image_topic` parameters; the input topic was previously hardcoded.
+
+### Changed
+- `sam3_mask_transform`: replaced the `max_detection_age` freshness gate (and its `LatestStampedCache` usage) with stamp-matched pairing. Widening that gate could only trade dropped frames for misplaced ones — at 1.0s it passed ~50% of projections, every one of them carrying second-old geometry.
+- `sam3_mask_transform`: boundary point indices are de-duplicated before publishing, and the KDTree query is issued once per contour instead of once per contour point. Neighbouring contour pixels resolve to the same LiDAR returns, so the published cloud is now the size of the boundary rather than the size of the contour.
+- `docker-compose.yml`: `sam3_mask_transform_node` starts with defaults; the `max_detection_age:=0.5` override is gone.
+
+### Operational Findings
+- Measured stamp-to-arrival delay across the SAM3 path: `/camera_fl/image` 0.011–0.023s → `/camera_fl/image_color` 0.455–0.651s → `/sam3_left_contour` 0.536–1.228s, against `/lidar_2d_projection` at 0.019–0.141s.
+- `image_proc`/`debayer_node` for `camera_fl` sustains 10Hz output at ~77% CPU but never drains its queue, so its latency is a standing backlog rather than throughput loss. Other consumers of `/camera_fl/image_color` (including CLRerNet) still inherit it; fixing the node's QoS to best-effort/depth-1 would clear it stack-wide.
+
 ## 2026-05-14
 
 ### Fixed
