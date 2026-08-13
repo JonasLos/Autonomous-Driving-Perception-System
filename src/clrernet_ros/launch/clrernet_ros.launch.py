@@ -16,11 +16,17 @@ def generate_launch_description():
         LaunchConfiguration('use_sim_time'), value_type=bool
     )
 
-    # Detections run at ~5 Hz against ~10 Hz LiDAR, so a projection can be up to one
-    # detection interval behind. 0.25s = that interval plus margin; lower it toward
-    # 0.12s to keep only tightly-paired frames at the cost of output rate.
-    max_detection_age = ParameterValue(
-        LaunchConfiguration('max_detection_age'), value_type=float
+    # Each lane detection is fused against the buffered LiDAR projection captured nearest
+    # to its own header stamp, so camera and inference latency delay *when* a lane appears
+    # without displacing *where* its points land. max_pairing_skew therefore only has to
+    # cover the LiDAR period and jitter, not the pipeline latency; raise
+    # projection_buffer_duration instead if detection latency ever exceeds it (the node
+    # logs which case it hit).
+    max_pairing_skew = ParameterValue(
+        LaunchConfiguration('max_pairing_skew'), value_type=float
+    )
+    projection_buffer_duration = ParameterValue(
+        LaunchConfiguration('projection_buffer_duration'), value_type=float
     )
 
     return LaunchDescription([
@@ -30,11 +36,19 @@ def generate_launch_description():
             description='Use /clock instead of wall time (set true for bag replay).',
         ),
         DeclareLaunchArgument(
-            'max_detection_age',
-            default_value='0.25',
+            'max_pairing_skew',
+            default_value='0.08',
             description=(
-                'Max capture-time skew, in seconds, between a LiDAR projection and the '
-                'lane detection fused with it. Projections outside this bound are dropped.'
+                'Largest capture-time gap, in seconds, allowed between a lane detection '
+                'and the buffered LiDAR projection it is fused with.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'projection_buffer_duration',
+            default_value='2.0',
+            description=(
+                'How much projection history, in seconds, to retain for matching. Must '
+                'exceed the camera-to-detection latency.'
             ),
         ),
         Node(
@@ -51,7 +65,8 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': use_sim_time,
-                'max_detection_age': max_detection_age,
+                'max_pairing_skew': max_pairing_skew,
+                'projection_buffer_duration': projection_buffer_duration,
             }],
         ),
     ])
