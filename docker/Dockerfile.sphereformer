@@ -28,6 +28,20 @@ COPY . .
 RUN source /opt/venv/bin/activate && \
     uv pip install -r src/sphereformer_ros/requirements-sphereformer.txt
 
+# pyg-lib, deliberately here rather than in requirements-sphereformer.txt.
+#
+# SparseTransformer calls torch_geometric's voxel_grid, which as of torch-geometric 2.8 is
+# gated on `WITH_GRID_CLUSTER = hasattr(pyg_lib.ops, 'grid_cluster')` (typing.py:66). The
+# torch-cluster fallback that used to satisfy it was removed, so torch_cluster being installed
+# and importable no longer helps -- nothing consults it, and the node dies at its first
+# forward pass with "voxel_grid requires pyg-lib>=0.6.0".
+#
+# It lives in stage 2 because requirements-sphereformer.txt is an input to the builder stage:
+# editing that file invalidates the SparseTransformer CUDA compile for a package the compile
+# does not need. pyg-lib is a runtime dependency of the node, not a build dependency of sptr.
+RUN source /opt/venv/bin/activate && \
+    uv pip install pyg-lib -f https://data.pyg.org/whl/torch-2.11.0+cu130.html
+
 # Copy the compiled extension from the builder stage
 COPY --from=builder /opt/venv/lib/python3.12/site-packages/sptr* /opt/venv/lib/python3.12/site-packages/
 

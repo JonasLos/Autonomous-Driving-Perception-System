@@ -1,13 +1,14 @@
 #!/bin/bash
 
-# === Path to topics.yaml ===
-TOPIC_FILE="/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/topics.sh"
 
-# === Check if yq is installed ===
-if ! command -v yq &> /dev/null; then
-    echo "[ERROR] 'yq' is not installed. Install it using: sudo apt install yq"
-    exit 1
-fi
+# === Path to topics.yaml ===
+# Derived from this script's location, overridable with TOPIC_FILE=. It used to be an
+# absolute path into a checkout on a machine that no longer exists.
+REPO_ROOT="$(repo_root)"
+TOPIC_FILE="$(default_topic_file)"
+
+require_yq || exit 1
 
 # === Parse and Validate Input Categories ===
 if [[ $# -eq 0 ]]; then
@@ -29,10 +30,9 @@ for CATEGORY in "${CATEGORIES[@]}"; do
         continue
     fi
 
-    while IFS= read -r path; do
-        topic=$(yq e ".$path" "$TOPIC_FILE")
+    while IFS= read -r topic; do
         ALL_TOPICS+=" $topic"
-    done <<< "$TOPIC_PATHS"
+    done < <(resolve_category "$TOPIC_FILE" "$CATEGORY") || exit 1
 done
 
 # === Handle Invalid Categories ===
@@ -73,7 +73,9 @@ TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
 BAG_BASENAME="rosbag_${JOINED_CATEGORIES// /_}_${TIMESTAMP}"
 BAG_NAME="$BAG_BASENAME.bag"
 TXT_NAME="$BAG_BASENAME.txt"
-SAVE_DIR="/media/dev/T9/${JOINED_CATEGORIES// /_}_$TIMESTAMP"
+# Default under the repo; point ROSBAG_DIR at the external drive to keep the old location,
+# e.g. ROSBAG_DIR=/media/dev/T9 scripts/record_rosbag.sh perception_input
+SAVE_DIR="${ROSBAG_DIR:-$REPO_ROOT/rosbags}/${JOINED_CATEGORIES// /_}_$TIMESTAMP"
 mkdir -p "$SAVE_DIR"
 
 # === Write Metadata ===

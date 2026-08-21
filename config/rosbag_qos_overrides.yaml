@@ -1,0 +1,41 @@
+# QoS the bag player offers, overriding what was recorded.
+#
+# Why this file has to exist: `ros2 bag play` reproduces each topic's recorded
+# `offered_qos_profiles`. If the AVT driver offered BEST_EFFORT, the player offers
+# BEST_EFFORT -- and yolo.launch.py subscribes to the image topic with image_reliability=1
+# (RELIABLE), which will not match. The result is not an error; YOLO simply sees no images
+# and sits silent. Offering RELIABLE satisfies both a RELIABLE and a BEST_EFFORT subscriber,
+# so overriding upward is the safe direction, and it makes replay match the vehicle exactly,
+# which is the point of replaying.
+#
+# /tf_static MUST stay transient_local: it is published once, at the start. A container that
+# comes up after the player would otherwise never receive it.
+#
+# Used by default from scripts/play_rosbag.sh; skip with --no-qos-override, or point
+# elsewhere with --qos-file. If a bag refuses to play above --rate 1.0, RELIABLE flow control
+# on the 2064x1544 image topic is the first thing to suspect -- try --no-qos-override plus
+# YOLO_IMAGE_RELIABILITY=2 on the yolo service.
+
+/camera_fl/image:
+  reliability: reliable
+  durability: volatile
+  history: keep_last
+  depth: 10
+
+/camera_fl/camera_info:
+  reliability: reliable
+  durability: volatile
+  history: keep_last
+  depth: 10
+
+/lidar_tc/velodyne_points:
+  reliability: reliable
+  durability: volatile
+  history: keep_last
+  depth: 10
+
+/tf_static:
+  reliability: reliable
+  durability: transient_local
+  history: keep_last
+  depth: 10

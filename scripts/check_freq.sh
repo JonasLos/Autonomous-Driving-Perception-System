@@ -1,13 +1,11 @@
 #!/bin/bash
 
-# Path to topics.yaml
-TOPIC_FILE="/home/dev/Documents/Autonomous-Driving-Perception-System/src/topics.yaml"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/topics.sh"
 
-# === Check if yq is installed ===
-if ! command -v yq &> /dev/null; then
-    echo "[ERROR] 'yq' is not installed. Install it using: sudo snap install yq"
-    exit 1
-fi
+# Path to topics.yaml -- derived from this script's location, overridable with TOPIC_FILE=.
+TOPIC_FILE="$(default_topic_file)"
+
+require_yq || exit 1
 
 # === Extract all topic strings under "topics" (v4 yq syntax) ===
 echo "Parsing topics from $TOPIC_FILE..."

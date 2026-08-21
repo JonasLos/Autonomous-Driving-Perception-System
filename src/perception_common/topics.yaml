@@ -111,9 +111,17 @@ categories:
     - topics.clrernet.right_lane
     - topics.clrernet.centerline
 
+  # The minimum set a bag needs to drive the whole perception stack offline. Everything
+  # downstream of these is produced by the containers themselves, so replaying any of it
+  # would double-publish. scripts/play_rosbag.sh defaults to this category.
+  replay_input:
+    - topics.raw.camera
+    - topics.raw.camera_info
+    - topics.raw.lidar_tc
+    - topics.raw.tf_static
+
   raw:
     - topics.raw.camera
-    - topics.raw.lidar
     - topics.raw.radar
     - topics.raw.ins
     - topics.raw.camera_fl
@@ -144,8 +152,11 @@ categories:
     - topics.controls.lat_perf
     - topics.controls.fsm_status
 
+  # Narrow "just the YOLO result and the projection" set. Every entry here used to point at
+  # a topics.outputs.* block that does not exist, so the whole category resolved to four
+  # literal "null" topic names.
   outputs:
-    - topics.outputs.yolov9_bbox
-    - topics.outputs.yolov9_image
-    - topics.outputs.tf_static
-    - topics.outputs.lidar_2d_projection
+    - topics.yolo.bbox
+    - topics.yolo.image
+    - topics.raw.tf_static
+    - topics.transform.lidar_2d_projection

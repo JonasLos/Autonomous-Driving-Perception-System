@@ -135,9 +135,13 @@ ENV VENV_SITE=/opt/venv/lib/python3.12/site-packages \
     PYTHONUNBUFFERED=1
 ENV PYTHONPATH=${CLRERNET_SRC}:${CLRERNET_SRC}/clrernet:${VENV_SITE}
 
+# Read at container start, not baked in: compose passes USE_SIM_TIME through so bag replay
+# needs no rebuild and no duplicated CMD in docker-compose.yml.
+ENV USE_SIM_TIME=false
+
 CMD ["bash", "-lc", "\
     source /opt/ros/jazzy/setup.bash && \
     source /opt/venv/bin/activate && \
     source install/setup.bash && \
     export PYTHONPATH=${CLRERNET_SRC}:${CLRERNET_SRC}/clrernet:${VENV_SITE}:$PYTHONPATH && \
-    ros2 launch clrernet_ros clrernet_ros.launch.py"]
+    ros2 launch clrernet_ros clrernet_ros.launch.py use_sim_time:=${USE_SIM_TIME:-false}"]

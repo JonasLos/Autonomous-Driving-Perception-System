@@ -275,6 +275,31 @@
 #     restart: unless-stopped
 
 
+# Shared by every runtime service so the ROS graph settings cannot drift apart, and so
+# sim time is one switch rather than five.
+#
+# USE_SIM_TIME=true makes every node take its clock from /clock instead of the wall clock,
+# which is what a replaying bag publishes with `ros2 bag play --clock`. It is what makes
+# pausing and rate-scaling a bag behave: the watchdogs and the pairing deferral both read
+# the node clock. Stamp-to-stamp pairing itself does not depend on it.
+#
+# NEVER set this on the vehicle. There is no /clock there, so every node's clock would sit
+# frozen at 0: watchdogs never fire, deferrals never expire, TF lookups fail. Each node logs
+# its use_sim_time at startup so a stray value in a local .env is visible in the first lines
+# of `docker logs`. Default is false and .env is gitignored, so the safe value is the one you
+# get by doing nothing.
+x-common-env: &common-env
+  ROS_DOMAIN_ID: "0"
+  RMW_IMPLEMENTATION: "rmw_zenoh_cpp"
+  USE_SIM_TIME: "${USE_SIM_TIME:-false}"
+  # PyTorch sizes its CPU thread pool from the host core count, not the container's share, so
+  # every one of these services was defaulting to 24 threads. Five of them on a 32-core box is
+  # ~120 threads fighting over 32 cores: measured load average 47 with the GPU only 31% busy,
+  # and the bag player -- which needs well under one core -- starved down to 6.3Hz on a 10Hz
+  # topic. Capping the pools costs a little single-node latency and buys back the scheduler.
+  OMP_NUM_THREADS: "${OMP_NUM_THREADS:-4}"
+  MKL_NUM_THREADS: "${MKL_NUM_THREADS:-4}"
+
 services:
   cuda_base_builder:
     profiles: ["builder"]
@@ -307,10 +332,25 @@ services:
     network_mode: "host"
     ipc: "host"
     working_dir: /workspace/Autonomous-Driving-Perception-System
+    # Map form, not the list form this service used to use: YAML merge keys only work on
+    # mappings, and every service needs to pick up x-common-env.
     environment:
-      - ROS_DOMAIN_ID=0
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
+      <<: *common-env
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "all"
+    volumes:
+      # The 371MB checkpoint is excluded from the build context by .dockerignore:22, so it is
+      # never in the image and the node dies with FileNotFoundError on startup. setup.py
+      # already installs it to share/ -- but only `if os.path.isfile(...)`, so its absence is
+      # silent at build time and only shows up at runtime.
+      #
+      # Mounting it into the *source* tree rather than the install tree is deliberate: the
+      # container runs `colcon build` at startup, so setup.py picks the file up and copies it
+      # to share/sphereformer_ros/SphereFormer/ exactly as it would on a normal build. Mounting
+      # into the install tree instead would put a read-only file where colcon wants to write.
+      #
+      # Set SPHEREFORMER_CHECKPOINT to keep the weights outside the repo entirely.
+      - ${SPHEREFORMER_CHECKPOINT:-./src/sphereformer_ros/src/SphereFormer/model_semantic_kitti.pth}:/workspace/Autonomous-Driving-Perception-System/src/sphereformer_ros/src/SphereFormer/model_semantic_kitti.pth:ro
     deploy:
       resources:
         reservations:
@@ -330,7 +370,7 @@ services:
         colcon --log-base /tmp/sphereformer-log build --packages-select perception_common sphereformer_ros --build-base /tmp/sphereformer-build --install-base /tmp/sphereformer-install
         source /tmp/sphereformer-install/setup.bash
         export PYTHONPATH=/tmp/sphereformer-install/sphereformer_ros/lib/python3.12/site-packages:/tmp/sphereformer-install/perception_common/lib/python3.12/site-packages:/opt/venv/lib/python3.12/site-packages:$PYTHONPATH
-        python3 /tmp/sphereformer-install/sphereformer_ros/lib/python3.12/site-packages/sphereformer_ros.py --ros-args -p input_topic:=/lidar_tc/velodyne_points
+        python3 /tmp/sphereformer-install/sphereformer_ros/lib/python3.12/site-packages/sphereformer_ros.py --ros-args -p input_topic:=/lidar_tc/velodyne_points -p use_sim_time:=$${USE_SIM_TIME}
     restart: "no"
 
   # yolo_node:
@@ -371,8 +411,7 @@ services:
     stdin_open: true
     tty: true
     environment:
-      ROS_DOMAIN_ID: "0"
-      RMW_IMPLEMENTATION: "rmw_zenoh_cpp"
+      <<: *common-env
       NVIDIA_VISIBLE_DEVICES: "all"
       NVIDIA_DRIVER_CAPABILITIES: "all"
     deploy:
@@ -399,8 +438,7 @@ services:
     volumes:
       - .:/workspace/Autonomous-Driving-Perception-System
     environment:
-      ROS_DOMAIN_ID: "0"
-      RMW_IMPLEMENTATION: "rmw_zenoh_cpp"
+      <<: *common-env
       YOLO_MODEL_PATH: "/workspace/Autonomous-Driving-Perception-System/src/Custom_YOLO_ROS/yolov9_custom_model_with_signs_and_cones.pt"
       YOLO_USE_FUSION: "True"
       YOLO_CONFIG_DIR: "/tmp/Ultralytics"
@@ -429,7 +467,7 @@ services:
         export PYTHONPATH=/opt/yolo_venv/lib/python3.12/site-packages:/tmp/yolo_ws_install/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages
         export PYTHONNOUSERSITE=1
         python3 -c "import importlib.metadata as m, os, sys; print('YOLO python=', sys.executable); print('YOLO PYTHONPATH=', os.environ.get('PYTHONPATH')); m.distribution('yolo-ros'); print('yolo-ros metadata: OK')"
-        ros2 launch yolo_bringup yolov9.launch.py model:=$${YOLO_MODEL_PATH} use_fusion:=$${YOLO_USE_FUSION}
+        ros2 launch yolo_bringup yolov9.launch.py model:=$${YOLO_MODEL_PATH} use_fusion:=$${YOLO_USE_FUSION} use_sim_time:=$${USE_SIM_TIME}
     restart: "no"
 
   transform_node:
@@ -443,8 +481,7 @@ services:
     ipc: "host"
     working_dir: /workspace/Autonomous-Driving-Perception-System
     environment:
-      ROS_DOMAIN_ID: "0"
-      RMW_IMPLEMENTATION: "rmw_zenoh_cpp"
+      <<: *common-env
       NVIDIA_VISIBLE_DEVICES: "all"
       NVIDIA_DRIVER_CAPABILITIES: "all"
     deploy:
@@ -469,8 +506,7 @@ services:
     shm_size: "8gb"
     working_dir: /root/ws
     environment:
-      ROS_DOMAIN_ID: "0"
-      RMW_IMPLEMENTATION: "rmw_zenoh_cpp"
+      <<: *common-env
       PYTHONUNBUFFERED: "1"
       HF_TOKEN: "${HF_TOKEN:-}"
       NVIDIA_VISIBLE_DEVICES: all
@@ -510,14 +546,13 @@ services:
         chmod +x scripts/segmentation_node
         sed -i '\#src/sam3_ros/pub_test_image.py#d' CMakeLists.txt
         uv sync --python 3.12
-        # Install ros2_numpy if not already available (not on PyPI; must clone from source)
-        python3 -c "import ros2_numpy" 2>/dev/null || (
-          git clone --depth 1 -b jazzy https://github.com/Box-Robotics/ros2_numpy.git /tmp/ros2_numpy_src
-          cp -r /tmp/ros2_numpy_src/ros2_numpy /root/ws/src/SAM3_ROS_NODE/.venv/lib/python3.12/site-packages/
-        )
-        # ros2_numpy.geometry imports tf_transformations, which may be missing in older images.
-        python3 -c "import tf_transformations, sensor_msgs.point_cloud2" 2>/dev/null || (
-          apt-get update && apt-get install -y ros-jazzy-tf-transformations ros-jazzy-sensor-msgs-py && rm -rf /var/lib/apt/lists/*
+        # ros2_numpy used to be cloned from GitHub here, because sam3_mask_transform parsed
+        # clouds with it and it is not on PyPI. That node now uses perception_common's shared
+        # ProjectedCloud, which parses with sensor_msgs_py -- shipped with Jazzy. Nothing in
+        # this container imports ros2_numpy any more, so the clone is gone: one less network
+        # dependency at container start, which matters when replaying bags offline.
+        python3 -c "import sensor_msgs_py.point_cloud2" 2>/dev/null || (
+          apt-get update && apt-get install -y ros-jazzy-sensor-msgs-py && rm -rf /var/lib/apt/lists/*
         )
         export PYTHONPATH=/root/ws/src/SAM3_ROS_NODE/.venv/lib/python3.12/site-packages:$PYTHONPATH
         cd /root/ws
@@ -526,7 +561,7 @@ services:
           --build-base /tmp/sam3_ws_build \
           --install-base /tmp/sam3_ws_install
         source /tmp/sam3_ws_install/setup.bash
-        ros2 run sam3_ros segmentation_node &
+        ros2 run sam3_ros segmentation_node --ros-args -p use_sim_time:=$${USE_SIM_TIME} &
         seg_pid=$$!
         # The transform node pairs each contour with the buffered LiDAR projection
         # captured nearest to it, so pipeline latency no longer needs to be absorbed
@@ -535,7 +570,7 @@ services:
         # exceeds it (the node logs which case it hit). Tune live with:
         #   ros2 param set /sam3_mask_transform max_pairing_skew <seconds>
         #   ros2 param set /sam3_mask_transform projection_buffer_duration <seconds>
-        ros2 run sam3_ros sam3_mask_transform_node &
+        ros2 run sam3_ros sam3_mask_transform_node --ros-args -p use_sim_time:=$${USE_SIM_TIME} &
         mask_pid=$$!
         trap 'kill $$seg_pid $$mask_pid' SIGINT SIGTERM
         wait -n $$seg_pid $$mask_pid

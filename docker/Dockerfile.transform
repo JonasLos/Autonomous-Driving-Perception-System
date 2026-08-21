@@ -5,8 +5,10 @@ SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /workspace/Autonomous-Driving-Perception-System
-COPY . .
 
+# Everything that does not depend on repo source goes above `COPY . .`, so editing a node
+# does not invalidate the torch download. This ordering turns a source-only rebuild from a
+# multi-minute reinstall into a colcon build, which matters when iterating against a bag.
 RUN python3 -m venv /opt/transform_venv && \
     /opt/transform_venv/bin/pip install --upgrade pip && \
     /opt/transform_venv/bin/pip install "numpy<2" pyyaml torch cython transforms3d
@@ -18,15 +20,23 @@ RUN git clone --depth 1 --branch jazzy https://github.com/Box-Robotics/ros2_nump
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ros-jazzy-tf-transformations && \
-    rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y || true
+    rosdep update
+
+COPY . .
+
+# rosdep and colcon both read src/, so they have to follow the COPY.
+RUN rosdep install --from-paths src --ignore-src -r -y || true
 
 RUN source /opt/ros/jazzy/setup.bash && \
     colcon build --merge-install || true
+
+# Read at container start, not baked in: compose passes USE_SIM_TIME through so bag replay
+# needs no rebuild and no duplicated CMD in docker-compose.yml.
+ENV USE_SIM_TIME=false
 
 CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && \
     source install/setup.bash && \
     export PATH=/opt/transform_venv/bin:$PATH && \
     export PYTHONPATH=/opt/transform_venv/lib/python3.12/site-packages:$PYTHONPATH && \
     export PYTHONPATH=/workspace/Autonomous-Driving-Perception-System:$PYTHONPATH && \
-    python src/transform.py"]
+    python src/transform.py --ros-args -p use_sim_time:=${USE_SIM_TIME:-false}"]

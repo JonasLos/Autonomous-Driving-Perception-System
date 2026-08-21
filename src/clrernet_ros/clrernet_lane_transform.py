@@ -13,25 +13,34 @@ So the projections are buffered instead, and each detection is fused against the
 captured closest to its own header stamp. Skew drops to at most half a LiDAR period,
 independent of how far behind the camera pipeline runs. The cost is that a lane is published
 ~one pipeline latency after the scene it describes; the output carries the matched cloud's
-stamp so consumers can account for that. Stamps are only ever compared to each other and
-never to the node clock, which keeps this valid under bag replay without any use_sim_time
-configuration.
+stamp so consumers can account for that.
+
+Matching is two-sided: a detection with no cloud yet captured at or after it is deferred for
+up to wait_for_newer rather than forced backwards onto an older cloud. Deferred detections are
+resolved by _pump, which runs after every buffered cloud and on a short timer.
+
+Message stamps are only ever compared to each other, so the pairing itself is valid under bag
+replay regardless of use_sim_time. Deferral expiry and the watchdog do read the node clock, so
+run with use_sim_time:=true against a bag if you want them to track playback.
 """
 
 import os
-import time as _time
 
 from ament_index_python.packages import get_package_share_directory
 import numpy as np
 import rclpy
-from rcl_interfaces.msg import SetParametersResult
+from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
 from rclpy.node import Node
 from sensor_msgs_py import point_cloud2 as pc2
 import yaml
 from sensor_msgs.msg import PointCloud2, PointField
 
 from clrernet_msgs.msg import LanePoints
-from perception_common.stamp_sync import StampMatchedBuffer, apply_bounded_parameters
+from perception_common.stamp_sync import (
+    DEFERRED,
+    StampMatchedBuffer,
+    apply_bounded_parameters,
+)
 from perception_common.utils import timer
 
 TOPICS_PATH = os.path.join(
@@ -102,16 +111,47 @@ class Clrernet_Lane_Transform(Node):
             .get_parameter_value()
             .double_value
         )
+        # How long a detection may wait for a cloud captured at or after it. Without this,
+        # matching can only reach backwards and skew doubles. Set to 0.0 to restore the old
+        # one-sided behaviour at runtime, which is the rollback if this ever starves.
+        wait_for_newer = float(
+            self.declare_parameter("wait_for_newer", 0.06)
+            .get_parameter_value()
+            .double_value
+        )
+        # Deferrals are almost always resolved by the _pump that follows each buffered cloud;
+        # this timer only bounds the wait when the projection stream stalls. Read-only because
+        # a timer period cannot be changed after construction, and silently ignoring a
+        # ros2 param set would be worse than rejecting it.
+        pump_period = float(
+            self.declare_parameter(
+                "deferral_pump_period",
+                0.02,
+                ParameterDescriptor(read_only=True),
+            )
+            .get_parameter_value()
+            .double_value
+        )
+        stats_log_period = float(
+            self.declare_parameter(
+                "stats_log_period", 5.0, ParameterDescriptor(read_only=True)
+            )
+            .get_parameter_value()
+            .double_value
+        )
 
         self._projections = StampMatchedBuffer(
             "projection",
             buffer_duration=max(0.0, buffer_duration),
             max_skew=max(0.0, max_pairing_skew),
             stamp_offset=stamp_offset,
+            wait_for_newer=max(0.0, wait_for_newer),
         )
         self.lane_timeout = max(0.0, self.lane_timeout)
-        self._last_publish = 0.0
-        self._last_unmatched_log = 0.0
+        # None until the first publish: under sim time the node clock reads 0 until /clock
+        # arrives, and 0.0 here would make the first watchdog tick see a ~1.7e9s gap.
+        self._last_publish = None
+        self._last_unmatched_log = None
 
         self.create_subscription(PointCloud2, LIDAR_2D_PROJ_TOPIC, self._on_projection, 10)
         self.create_subscription(
@@ -125,6 +165,10 @@ class Clrernet_Lane_Transform(Node):
 
         # Fixed period, so lane_timeout is enforced to within 0.5s of granularity.
         self._watchdog_timer = self.create_timer(0.5, self._watchdog)
+        if pump_period > 0.0:
+            self._pump_timer = self.create_timer(pump_period, self._pump)
+        if stats_log_period > 0.0:
+            self._stats_timer = self.create_timer(stats_log_period, self._log_stats)
 
         # The pairing bound and the buffer depth both depend on measured pipeline
         # latency, so keep them settable at runtime for calibration against a replaying
@@ -135,14 +179,22 @@ class Clrernet_Lane_Transform(Node):
             f"Clrernet_Lane_Transform ready: {LIDAR_2D_PROJ_TOPIC} + {CLRERNET_ALL_LANES_TOPIC}, "
             f"max_pairing_skew={self._projections.max_skew:.3f}s "
             f"projection_buffer_duration={self._projections.buffer_duration:.3f}s "
-            f"lane_timeout={self.lane_timeout:.3f}s (stamp-matched pairing)"
+            f"wait_for_newer={self._projections.wait_for_newer:.3f}s "
+            f"lane_timeout={self.lane_timeout:.3f}s "
+            f"use_sim_time={self.get_parameter('use_sim_time').value} "
+            f"(stamp-matched pairing)"
         )
+
+    def _now(self):
+        """Seconds on the node clock -- sim time when use_sim_time is set, else wall time."""
+        return self.get_clock().now().nanoseconds * 1e-9
 
     def _on_set_parameters(self, params) -> SetParametersResult:
         targets = {
             "max_pairing_skew": (self._projections, "max_skew"),
             "projection_buffer_duration": (self._projections, "buffer_duration"),
             "lane_timeout": (self, "lane_timeout"),
+            "wait_for_newer": (self._projections, "wait_for_newer"),
         }
         ok, reason, applied = apply_bounded_parameters(params, targets)
         if not ok:
@@ -160,27 +212,44 @@ class Clrernet_Lane_Transform(Node):
         return SetParametersResult(successful=True)
 
     def _on_projection(self, msg_proj):
-        """Buffer the projection so a later lane detection can be paired against it."""
+        """Buffer the projection, then release any detection that was waiting for it."""
         self._projections.add(msg_proj)
+        # This is what resolves nearly every deferral, in the same tick the awaited cloud
+        # lands; the pump timer only matters when this stream stalls.
+        self._pump()
 
     def _on_lanes(self, msg_all_lanes):
-        entry, skew = self._projections.match(msg_all_lanes.header)
-        if entry is None:
-            self._log_unmatched(skew)
-            return
-        self.lanes_callback(entry, msg_all_lanes)
+        pairing = self._projections.match(
+            msg_all_lanes.header, now=self._now(), payload=msg_all_lanes
+        )
+        if pairing.outcome is not DEFERRED:
+            self._complete(pairing)
 
-    def _log_unmatched(self, skew):
+    def _pump(self):
+        for pairing in self._projections.drain(self._now()):
+            self._complete(pairing)
+
+    def _complete(self, pairing):
+        if pairing.value is None:
+            self._log_unmatched(pairing.skew, pairing.reason)
+            return
+        self.lanes_callback(pairing.value, pairing.payload)
+
+    def _log_unmatched(self, skew, reason=None):
         """Rate-limited warning so a starved or misaligned pipeline stays visible."""
-        now = _time.monotonic()
-        if now - self._last_unmatched_log < 1.0:
+        now = self._now()
+        if self._last_unmatched_log is not None and now - self._last_unmatched_log < 1.0:
             return
         self._last_unmatched_log = now
         self.get_logger().warning(
             f"Unmatched lane detection: "
-            f"{self._projections.describe_unmatched(skew, 'lane detection')}; "
+            f"{self._projections.describe_unmatched(skew, 'lane detection', reason=reason)}; "
             f"{self._projections.status()}"
         )
+
+    def _log_stats(self):
+        """Periodic pairing health, so a skew regression is visible without instrumentation."""
+        self.get_logger().info(f"pairing: {self._projections.status()}")
 
     @timer
     def lanes_callback(self, entry, msg_all_lanes):
@@ -212,7 +281,7 @@ class Clrernet_Lane_Transform(Node):
         self.publish_3d_lane(left_pts, tree, pc_arr, self.left_pcl_pub, entry.header)
         self.publish_3d_lane(right_pts, tree, pc_arr, self.right_pcl_pub, entry.header)
         self.publish_centerline(center_pts, entry.header)
-        self._last_publish = _time.monotonic()
+        self._last_publish = self._now()
 
     def get_closest_lane_pair_3d(self, lanes, tree, pc_arr, lidar_origin):
         def transform_lane_to_3d(lane_uv):
@@ -306,16 +375,16 @@ class Clrernet_Lane_Transform(Node):
         empty = np.empty((0, 3), dtype=np.float32)
         for pub in (self.left_pcl_pub, self.right_pcl_pub, self.centerline_pub):
             self._publish_points(empty, pub, header)
-        self._last_publish = _time.monotonic()
+        self._last_publish = self._now()
 
     def _watchdog(self):
         """Publish empty lanes while the detector is not refreshing them."""
         if self.lane_timeout <= 0.0:
             return
         newest = self._projections.newest()
-        if newest is None:
+        if newest is None or self._last_publish is None:
             return
-        if _time.monotonic() - self._last_publish > self.lane_timeout:
+        if self._now() - self._last_publish > self.lane_timeout:
             # A stalled detector invalidates the smoothing history too, so the next
             # detection starts clean rather than blending across the gap.
             self.prev_centerline = None

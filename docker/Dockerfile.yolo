@@ -61,9 +61,11 @@ ENV RMW_IMPLEMENTATION=rmw_zenoh_cpp
 ENV YOLO_MODEL_PATH=/workspace/Autonomous-Driving-Perception-System/src/Custom_YOLO_ROS/yolov9_custom_model_with_signs_and_cones.pt
 ENV YOLO_USE_FUSION=False
 
+ENV USE_SIM_TIME=false
+
 CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && \
     source /workspace/Autonomous-Driving-Perception-System/install/setup.bash && \
     export PATH=/opt/yolo_venv/bin:$PATH && \
     export PYTHONPATH=/opt/yolo_venv/lib/python3.12/site-packages:$PYTHONPATH && \
     export PYTHONPATH=/workspace/Autonomous-Driving-Perception-System:$PYTHONPATH && \
-    ros2 launch yolo_bringup yolov9.launch.py model:=${YOLO_MODEL_PATH} use_fusion:=${YOLO_USE_FUSION}"]
+    ros2 launch yolo_bringup yolov9.launch.py model:=${YOLO_MODEL_PATH} use_fusion:=${YOLO_USE_FUSION} use_sim_time:=${USE_SIM_TIME:-false}"]

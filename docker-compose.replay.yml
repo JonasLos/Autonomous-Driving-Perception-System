@@ -1,0 +1,43 @@
+# Optional overlay for iterating on pairing/sync code without rebuilding images.
+#
+#   USE_SIM_TIME=true docker compose \
+#       -f docker-compose.yml -f docker-compose.replay.yml \
+#       --profile runtime up -d transform_node clrernet_node
+#
+# You do NOT need this to replay a bag. Sim time is an environment variable, so toggling it
+# needs no rebuild. This exists only because transform_node, clrernet_node and
+# sphereformer_node bake their source in with `COPY . .`, so a *code* change in them normally
+# costs a rebuild. yolo_node and sam3_ros already bind-mount the repo and colcon-build at
+# container start, so they are not listed here -- they pick up edits on restart already.
+#
+# These are targeted read-only file mounts rather than a blanket `.:/workspace/...`, because
+# .dockerignore excludes install/ and the repo root carries a host-built install/ that would
+# shadow the image's and break the container outright.
+#
+# Path note: Dockerfile.transform builds with `colcon build --merge-install` (one flat
+# install/lib/...), Dockerfile.clrernet builds without it (per-package install/<pkg>/lib/...).
+# Hence the asymmetry below. Docker silently creates a mount target that does not exist, so if
+# a path here ever goes stale the symptom is your edit having no effect rather than an error --
+# check `docker exec <ctr> python3 -c "import perception_common; print(perception_common.__file__)"`.
+
+services:
+  transform_node:
+    volumes:
+      # Run directly from the working dir: the CMD is `python src/transform.py`.
+      - ./src/transform.py:/workspace/Autonomous-Driving-Perception-System/src/transform.py:ro
+      - ./src/perception_common/perception_common:/workspace/Autonomous-Driving-Perception-System/install/lib/python3.12/site-packages/perception_common:ro
+
+  clrernet_node:
+    volumes:
+      - ./src/clrernet_ros/clrernet_lane_transform.py:/workspace/Autonomous-Driving-Perception-System/install/clrernet_ros/lib/python3.12/site-packages/clrernet_lane_transform.py:ro
+      - ./src/clrernet_ros/clrernet_lane_detection.py:/workspace/Autonomous-Driving-Perception-System/install/clrernet_ros/lib/python3.12/site-packages/clrernet_lane_detection.py:ro
+      - ./src/perception_common/perception_common:/workspace/Autonomous-Driving-Perception-System/install/perception_common/lib/python3.12/site-packages/perception_common:ro
+      # Launch files are read from share/, not from the source tree.
+      - ./src/clrernet_ros/launch:/workspace/Autonomous-Driving-Perception-System/install/clrernet_ros/share/clrernet_ros/launch:ro
+
+  sphereformer_node:
+    volumes:
+      # This service already colcon-builds at container start, so mounting the source is
+      # enough -- no install-path shadowing needed.
+      - ./src/sphereformer_ros:/workspace/Autonomous-Driving-Perception-System/src/sphereformer_ros:ro
+      - ./src/perception_common:/workspace/Autonomous-Driving-Perception-System/src/perception_common:ro

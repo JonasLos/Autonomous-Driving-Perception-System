@@ -58,6 +58,26 @@ ros2 pkg prefix sam2_msgs
 ros2 pkg prefix yolo_msgs
 ```
 
+### Replaying A Bag Offline
+
+The perception containers take raw sensor topics, so a recorded bag can drive the whole stack
+with no code changes — useful for debugging without the vehicle.
+
+```bash
+ros2 run rmw_zenoh_cpp rmw_zenohd &                       # compose defines no router
+USE_SIM_TIME=true docker compose --profile runtime up -d \
+    transform_node sphereformer_node sam3_ros yolo_node clrernet_node
+scripts/play_rosbag.sh /path/to/bag
+```
+
+`USE_SIM_TIME=true` puts the nodes on `/clock`, which is what makes pausing and rate-scaling
+the bag behave — the watchdogs and the pairing deferral read the node clock. Never set it on
+the vehicle: there is no `/clock` there. Do not launch `~/ros_drivers` alongside a bag; the
+bag *is* the sensors.
+
+See [DOCKER.md](DOCKER.md#offline-bag-replay) for QoS gotchas, the pairing-bound tuning
+procedure, and how to iterate on node code without rebuilding images.
+
 To install them into a different prefix, pass the destination as the first argument:
 
 ```bash
