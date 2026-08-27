@@ -58,8 +58,49 @@ LIDAR_TOPIC = topic_config["topics"]["raw"]["lidar_tc"]
 LIDAR_2D_PROJ_TOPIC = topic_config["topics"]["transform"]["lidar_2d_projection"]
 CAMERA_INFO_TOPIC = topic_config["topics"]["raw"]["camera_info"]
 
-# Define limits
+# Define limits. The forward and lateral bounds and the voxel size are the runtime-settable
+# ones (see the parameters in __init__); the rest are fixed here.
+#
+# lim_z's +1 ceiling is worth knowing about: the LiDAR sits 2.46m above the road on this
+# vehicle (measured from near-field ground returns on the 2026-08-20 bag), so +1 is 3.46m
+# above the road surface. Cars, vans and a 3.2m city bus survive it; a 3.5m box truck and
+# anything taller has its upper body cropped away before fusion ever sees it. It removes
+# ~5600 points per sweep, mostly tree canopy and poles.
 lim_x, lim_y, lim_z = [0, 100], [-20, 20], [-3.5, 1]
+
+# Forward distance, in metres, past which returns are discarded -- and it is x, not radial
+# range, so a point 100m dead ahead is dropped while one at 100m radial off to the side is
+# kept. Raised 100 -> 150 to see whether the far field is worth having: the VLP-32C reaches
+# ~200m and the old wall threw away ~4600 raw points per sweep.
+#
+# Measured on the 2026-08-20 bag, the raise on its own is nearly free but also nearly
+# pointless: it adds 18 in-image points per sweep. That is not the range limit's fault, it is
+# CROP_LATERAL_LIMIT below.
+DEFAULT_CROP_MAX_RANGE = 150.0
+
+# Half-width, in metres, of the lateral crop. The camera's horizontal half-FOV is 16.6deg, so
+# the image spans +-0.298*range laterally: +-20m at 67m, +-45m at 150m. Past ~67m this crop is
+# therefore *narrower than the image*, and at 150m it keeps only 45% of the image width. Any
+# increase to the range limit above buys a progressively narrower cone unless this goes up
+# with it. Left at 20 for now because raising both only moved 18 -> 32 points per sweep on
+# this bag -- an empty test track with one distant car -- but on a road with real traffic at
+# range this is the bound that will bite.
+DEFAULT_CROP_LATERAL_LIMIT = 20.0
+
+# Voxel leaf size in metres; 0.0 disables the filter entirely.
+#
+# Turned off by default while we measure what it costs. It never mattered at range: measured
+# retention is 98% at 25-50m and 100% beyond 50m, because the natural sampling out there
+# (0.35m between azimuthal samples, 0.58m between rings at 100m) is already far coarser than
+# a 10cm leaf. It only thins the near field -- 31% kept at 0-10m, 79% at 10-25m -- so removing
+# it costs ~17% more published points (2159 -> ~2519 per sweep) and actually saves ~7ms per
+# sweep, since np.unique over an Nx3 int array is not cheap.
+#
+# Downstream caveat: fusion_node's foreground_points cuts the depth histogram at
+# max(median + 3*MAD, 0.05) of the inter-point gaps. Denser near-field returns shrink that
+# median, so the cut sits on its 0.05m floor more often and may split clusters more eagerly
+# than it did. Worth watching on near objects if this stays off.
+DEFAULT_VOXEL_SIZE = 0.0
 
 
 class LidarTo2DProjection(Node):
@@ -91,6 +132,24 @@ class LidarTo2DProjection(Node):
             .double_value
         )
 
+        # Runtime-settable so the far field and the voxel filter can be A/B'd against a
+        # replaying bag without a restart, the same way the fusion nodes tune their pairing.
+        self._crop_max_range = float(
+            self.declare_parameter("crop_max_range", DEFAULT_CROP_MAX_RANGE)
+            .get_parameter_value()
+            .double_value
+        )
+        self._crop_lateral_limit = float(
+            self.declare_parameter("crop_lateral_limit", DEFAULT_CROP_LATERAL_LIMIT)
+            .get_parameter_value()
+            .double_value
+        )
+        self._voxel_size = float(
+            self.declare_parameter("voxel_size", DEFAULT_VOXEL_SIZE)
+            .get_parameter_value()
+            .double_value
+        )
+
         self._camera_info = StampMatchedBuffer(
             "camera_info",
             buffer_duration=2.0,
@@ -113,6 +172,9 @@ class LidarTo2DProjection(Node):
             f"Node initialized and ready to publish 2D projections. "
             f"camera_info_max_skew={self._camera_info.max_skew:.3f}s "
             f"camera_info_wait_for_newer={self._camera_info.wait_for_newer:.3f}s "
+            f"crop_max_range={self._crop_max_range:.1f}m "
+            f"crop_lateral_limit=+-{self._crop_lateral_limit:.1f}m "
+            f"voxel_size={self._voxel_size:.2f}m{' (off)' if self._voxel_size <= 0.0 else ''} "
             f"fallback geometry={self.image_width}x{self.image_height} "
             f"use_sim_time={self.get_parameter('use_sim_time').value}"
         )
@@ -125,12 +187,19 @@ class LidarTo2DProjection(Node):
         targets = {
             "camera_info_max_skew": (self._camera_info, "max_skew"),
             "camera_info_wait_for_newer": (self._camera_info, "wait_for_newer"),
+            "crop_max_range": (self, "_crop_max_range"),
+            "crop_lateral_limit": (self, "_crop_lateral_limit"),
+            "voxel_size": (self, "_voxel_size"),
         }
+        # These three are metres; the camera_info bounds are seconds.
+        metres = {"crop_max_range", "crop_lateral_limit", "voxel_size"}
         ok, reason, applied = apply_bounded_parameters(params, targets)
         if not ok:
             return SetParametersResult(successful=False, reason=reason)
         for name, value in applied:
-            self.get_logger().info(f"{name} set to {value:.3f}s")
+            self.get_logger().info(
+                f"{name} set to {value:.3f}{'m' if name in metres else 's'}"
+            )
         return SetParametersResult(successful=True)
 
     def camera_info_callback(self, msg):
@@ -178,13 +247,23 @@ class LidarTo2DProjection(Node):
         valid = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
         x, y, z = x[valid], y[valid], z[valid]
         pc_arr = np.column_stack((x, y, z, np.ones(x.shape[0], dtype=np.float32)))
-        pc_arr = crop_pointcloud(pc_arr, lim_x, lim_y, lim_z)
+        # Read the two live bounds per sweep rather than caching them, so a ros2 param set
+        # takes effect on the next cloud instead of on the next restart.
+        lateral = self._crop_lateral_limit
+        pc_arr = crop_pointcloud(
+            pc_arr,
+            [lim_x[0], self._crop_max_range],
+            [-lateral, lateral],
+            lim_z,
+        )
 
         if pc_arr.size == 0:
             return pc_arr, np.array([], dtype=np.float32), np.array([], dtype=np.float32)
 
-        # Downsample to make it sparse
-        pc_arr = self.voxel_downsample(pc_arr, voxel_size=0.1)
+        # Downsample to make it sparse. 0.0 disables it; see DEFAULT_VOXEL_SIZE for why that
+        # costs far less than it looks like it should.
+        if self._voxel_size > 0.0:
+            pc_arr = self.voxel_downsample(pc_arr, voxel_size=self._voxel_size)
 
         # Apply transformation and projection
         t_inv = torch.as_tensor(inverse_rigid_transform(T1), dtype=torch.float32)
