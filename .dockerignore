@@ -20,3 +20,14 @@ src/SAM3_ROS_NODE/.venv/**
 src/Custom_YOLO_ROS/.git
 src/Custom_YOLO_ROS/.git/**
 src/sphereformer_ros/src/SphereFormer/model_semantic_kitti.pth
+# Recorded bags. Replayed from the host into the running stack, never read from inside an
+# image, and multi-GB: adps_2026-08-25_11-52-15 alone is 2.3G and `COPY . .` would bake it in.
+# The 2026-09-02 clrernet rebuild was the first to hit this, because it was the first rebuild
+# after a bag was left in the repo root.
+*.mcap
+*.db3
+**/metadata.yaml
+adps_*/
+rosbag2_*/
+probe_bag*/
+lane_probe_*/
