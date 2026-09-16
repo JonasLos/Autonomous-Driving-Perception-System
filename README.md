@@ -17,6 +17,8 @@ Container build/run detail, troubleshooting, and replay tuning live in [DOCKER.m
 
 ## Features
 - **Object Detection**: YOLOv9 via `yolo_ros` / `yolo_bringup` (Ultralytics), with LiDAR fusion producing `/fused_bbox`.
+- **Radar Association** *(opt-in, off by default)*: `src/radar_ros` attaches Delphi ESR range and
+  radial velocity to the fused objects, publishing `/tracked_objects`. See [Radar](#radar-opt-in).
 - **Road Segmentation**: SAM3 (`src/SAM3_ROS_NODE`), text-prompted, publishing `/sam3_*` contours and 3D boundaries.
 - **Lane Detection**: CLRerNet (mmdet 3.3 / mmcv 2.2), publishing `/clrernet/*` lane polylines and a 3D centerline.
 - **LiDAR Segmentation**: SphereFormer with the SparseTransformer CUDA extension, publishing SemanticKITTI classes with RGB colors.
@@ -290,6 +292,99 @@ Semantic classes are the learned IDs 0-19:
 
 ---
 
+## Radar (opt-in)
+
+A Delphi ESR 2.5 sits on the front bumper, driven by `~/ros_drivers/src/delphi_esr_driver` over
+Kvaser CAN. `radar_ros` subscribes its tracks alongside `/fused_bbox` and publishes
+`/tracked_objects` (`perception_msgs/TrackedObjectArray`), which carries everything `/fused_bbox`
+does plus radar range, radial velocity, provenance, and a range cross-check.
+
+**Radar is off by default, at three independent levels.** The camera+LiDAR pipeline is untouched
+by any of this — `fusion_node`, `transform.py` and `/fused_bbox` are byte-for-byte what they were
+before radar existed.
+
+1. **`radar_node` is in its own Compose profile.** The documented bring-up cannot start it:
+   ```bash
+   docker compose --profile runtime up -d transform_node sphereformer_node yolo_node clrernet_node   # no radar
+   docker compose --profile radar   up -d radar_node                                                 # opt in
+   ```
+2. **`enable_radar_fusion` defaults `false`.** With the container running but the gate closed,
+   `/tracked_objects` is a pure passthrough of `/fused_bbox` with `source=LIDAR_ONLY` and no
+   velocity. Radar cannot alter the output.
+3. **`publish_radar_only` defaults `false`** and additionally requires the gate above. This is the
+   one that lets radar *originate* an obstacle, and the ESR reports guardrails, manhole covers and
+   overhead signs as tracks, so it stays off until the shadow-mode false-alarm count is known.
+
+### Shadow mode
+
+With `enable_radar_fusion=false` the node still associates radar every frame and logs what it
+*would* have contributed — match rate, range and azimuth residuals, radar-only candidate count —
+without applying any of it. That is how you gather the evidence to justify opening the gate:
+
+```
+pairing: ... matched=120 unmatched=0 | SHADOW assoc=360/480 (75.0%) radar_only_candidates=525
+         range_disputed=0 | d_range[m] median=+0.00 p90=0.00 | d_azimuth[deg] median=+0.00 p90=0.00
+```
+
+Flip it live against a replaying bag rather than restarting, so the A/B compares the same frames:
+
+```bash
+ros2 param set /radar_fusion_node enable_radar_fusion true
+```
+
+### What radar adds
+
+| | camera+LiDAR only | with radar matched |
+|---|---|---|
+| Velocity | none at all | radial component, from `range_rate` |
+| Range at distance | can latch onto road returns in front of a vehicle (14.3 m median short, 22.2 m worst, measured at 76–91 m) | cross-checked against radar range; `range_disputed` flags the disagreement |
+| Extent | fixed 1.5 m cube for every class | per-class averages from `config/class_averages.yaml` |
+
+**`velocity` is the radial component only.** The ESR measures closing speed along the
+sensor-to-target ray and nothing else, so a vehicle crossing your path at 20 m/s reports ≈0. It is
+not a full velocity vector and must not be read as one.
+
+### Sign conventions, verified
+
+Both ESR sign conventions are verified against the recorded bag rather than taken from the message
+comments, because getting either backwards is silently wrong rather than obviously wrong:
+
+```bash
+python3 scripts/radar_ab.py adps_2026-08-25_11-52-15 --check-conventions
+```
+
+- `range_rate` positive = **receding**: for a static target it must equal `-v_ego*cos(azimuth)`.
+  98.6% of 16219 track-observations agree within 3 m/s (median −0.06, p90 0.45). Flipping the sign,
+  or dropping the ego-motion term, each drops agreement to 0.0%.
+- `angle` positive = **left**. The test above *cannot* see this — `cos` is even, so a flipped
+  azimuth scores identically. It is settled instead by the lever-arm term, which is odd in azimuth:
+  regressing it recovers `L = +2.82 ± 0.41 m` (6.8σ) against a surveyed radar mounting of +2.915 m
+  forward of `lidar_tc`.
+
+### Frames
+
+Radar is transformed with a real tf2 lookup (`/tf_static` carries `lidar_tc → delphi_esr_radar`),
+not a hardcoded matrix. The driver leaves `header.frame_id` **empty** on the track array — only its
+marker paths set a frame — so the node assumes `delphi_esr_radar`, overridable with
+`radar_frame_override`.
+
+Radar and LiDAR agree with each other in `lidar_tc`, so association is sound. But `lidar_tc` is
+itself yawed ~5.35° from the vehicle axis while `/tf_static` declares `lidar_tc → base_link` as
+identity, so any consumer treating `/tracked_objects` coordinates as vehicle-frame still inherits
+that shear. Unchanged by this work — see [CHANGELOG.md](CHANGELOG.md) 2026-09-02.
+
+### Gotchas
+
+- `min_update_count` **must stay 0**. `EsrTrack.update_count` is a stub this driver never
+  populates: any positive threshold discards 100% of tracks.
+- `min_amplitude` defaults below the sensor floor. Amplitude runs −10..18 and −10 is the single
+  most common value (~30% of tracks), so a "harmless" threshold of 0.0 drops ~72% of them
+  (10.32 → 2.86 tracks per sweep).
+- `ros2 topic echo /tracked_objects` reports nothing without the host overlay even while the topic
+  is flowing. Run `scripts/install_host_custom_msgs.sh` first.
+
+---
+
 ## Legacy and unused files
 
 These are kept for history and are **not** part of the supported Docker path:
@@ -298,6 +393,12 @@ These are kept for history and are **not** part of the supported Docker path:
 - [docker/Dockerfile.cylinder3d](docker/Dockerfile.cylinder3d) — Cylinder3D experiment; superseded by SphereFormer, no Compose service.
 - `scripts/enable_perception.sh` / `scripts/disable_perception.sh` — pre-container host scripts that assume conda environments and hard-coded `/home/dev` paths. Use Docker Compose instead.
 - `src/legacy_code/` — the SAM2 ROS node, replaced by `src/SAM3_ROS_NODE`.
+- `src/yolov9_ros/objects_transform.py` — **removed 2026-09-09.** The original camera+LiDAR+radar
+  fusion node. Dead since 2026-04-29 (`KeyError` on a `topics.yaml` key that never existed), it
+  subscribed `radar_msgs/RadarTrackArray` while the vehicle publishes
+  `delphi_esr_driver/msg/EsrTrackArray`, applied no TF to its radar boxes, and published
+  `/fused_bbox` — the live topic name — with an incompatible message type. Read it at
+  `git show pre-radar-known-good:src/yolov9_ros/objects_transform.py`.
 - [.github/workflows/docker-build.yml](.github/workflows/docker-build.yml) — pushes a `perception_image` tag that the current Compose file no longer produces.
 
 ---

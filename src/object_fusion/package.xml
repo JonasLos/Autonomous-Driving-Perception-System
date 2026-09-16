@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>object_fusion</name>
+  <version>0.1.0</version>
+  <description>
+    Track-level multi-sensor object fusion. Maintains persistent 3D tracks with an EKF in a
+    vehicle-aligned frame, fusing camera+LiDAR objects, Delphi ESR radar and INS ego motion.
+
+    Strictly additive: it consumes /fused_bbox, /lidar_2d_projection and the raw radar as
+    published, modifies no existing node, and emits on its own topics behind default-off
+    gates. Removing this package restores the pre-existing stack exactly.
+
+    Every module under object_fusion/ except the *_node.py files is free of rclpy, so the
+    offline A/B harness and the unit tests exercise the production rule rather than a copy.
+  </description>
+
+  <maintainer email="jonaslo96@tamu.edu">Jonas Los</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>perception_common</exec_depend>
+  <exec_depend>fusion_msgs</exec_depend>
+  <exec_depend>yolo_msgs</exec_depend>
+  <exec_depend>delphi_esr_driver</exec_depend>
+  <exec_depend>radar_ros</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

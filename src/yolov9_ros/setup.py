@@ -16,7 +16,6 @@ setup(
     packages=[],
     py_modules=[
         "yolov9_object_detection",
-        "objects_transform",
     ],
     data_files=[
         (
@@ -36,7 +35,6 @@ setup(
     entry_points={
         "console_scripts": [
             "yolov9_object_detection = yolov9_object_detection:main",
-            "objects_transform = objects_transform:main",
         ],
     },
 )

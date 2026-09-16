@@ -8,7 +8,7 @@ topics:
     # Rear cameras are /camera_rear_1..3/; the rc/tl/tr names survive only as TF frames
     # and calibration filenames, and nothing maps them onto the three namespaces.
     camera: "/camera_fl/image"
-    radar: "/radar_fc/as_tx/radar_tracks"
+    radar: "/delphi_esr_interface/radar/tracks"
     camera_fl: "/camera_fl/image"
     camera_fr: "/camera_fr/image"
     camera_rear_1: "/camera_rear_1/image"
@@ -22,9 +22,15 @@ topics:
     lidar_tl: "/lidar_tl/velodyne_points"
     lidar_tr_packets: "/lidar_tr/velodyne_packets"
     lidar_tr: "/lidar_tr/velodyne_points"
-    radar_objects: "/radar_fc/as_tx/objects"
-    radar_tracks: "/radar_fc/as_tx/radar_tracks"
-    radar_markers: "/radar_fc/as_tx/radar_markers"
+    # Delphi ESR 2.5 on the front bumper, driven over Kvaser CAN by
+    # ~/ros_drivers/src/delphi_esr_driver. The old /radar_fc/as_tx/* names here were
+    # AutonomouStuff conventions for a radar this vehicle does not have -- nothing ever
+    # published them. The driver emits delphi_esr_driver/msg/EsrTrackArray (polar:
+    # range, angle, range_rate; no elevation) and leaves header.frame_id EMPTY; the
+    # frame is delphi_esr_radar, which /tf_static does carry relative to lidar_tc.
+    radar_tracks: "/delphi_esr_interface/radar/tracks"
+    radar_status: "/delphi_esr_interface/radar/status"
+    radar_markers: "/delphi_esr_interface/radar/markers"
     ins: "/novatel/oem7/odom"
     tf_static: "/tf_static"
     camera_info: "/camera_fl/camera_info"
@@ -64,6 +70,10 @@ topics:
   transform:
     lidar_2d_projection: "/lidar_2d_projection"
 
+  radar:
+    tracked_objects: "/tracked_objects"
+    track_markers: "/radar_tracks_markers"
+
   planning:
     local_path: "/local_path"
     global_trajectory: "/corrected_g_traj"
@@ -83,7 +93,6 @@ categories:
     - topics.raw.camera
     - topics.raw.lidar_tc
     - topics.raw.radar_tracks
-    - topics.raw.radar_objects
     - topics.raw.radar_markers
     - topics.raw.imu
     - topics.raw.gps_imu
@@ -110,6 +119,7 @@ categories:
     - topics.clrernet.left_lane
     - topics.clrernet.right_lane
     - topics.clrernet.centerline
+    - topics.radar.tracked_objects
 
   # The minimum set a bag needs to drive the whole perception stack offline. Everything
   # downstream of these is produced by the containers themselves, so replaying any of it
@@ -119,6 +129,13 @@ categories:
     - topics.raw.camera_info
     - topics.raw.lidar_tc
     - topics.raw.tf_static
+    # Radar is an input, not a container output, so it belongs here. Bags recorded
+    # before 2026-09-09 that predate radar simply have no messages on this topic and
+    # play_rosbag.sh skips it; there is no downside to listing it.
+    - topics.raw.radar_tracks
+    # The radar range-rate validation compares against ego velocity, so odom has to be
+    # replayed alongside it.
+    - topics.raw.ins
 
   raw:
     - topics.raw.camera
@@ -133,7 +150,6 @@ categories:
     - topics.raw.lidar_tl
     - topics.raw.lidar_tr
     - topics.raw.radar_tracks
-    - topics.raw.radar_objects
     - topics.raw.imu
     - topics.raw.gps_imu
     - topics.raw.ins

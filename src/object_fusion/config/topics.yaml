@@ -1,0 +1,22 @@
+# Topic names owned by object_fusion.
+#
+# Existing names are read from perception_common's topics.yaml, unchanged and read-only.
+# Only names this package introduces live here, so nothing is added to the shared file and
+# deleting src/object_fusion/ removes every trace of this stack.
+topics:
+  measurements:
+    camera_lidar: "/perception/measurements/camera_lidar"
+    lidar: "/perception/measurements/lidar"
+    radar: "/perception/measurements/radar"
+    # /lidar_2d_projection's (x,y,z,u,v) layout plus a per-point `ground` flag from Patchwork++.
+    # Ground points are FLAGGED, not removed, so the detector can fall back when segmentation
+    # would empty a box.
+    projection_ground_flagged: "/perception/lidar_2d_projection_ground"
+  object_fusion:
+    objects: "/perception/objects"
+    markers: "/perception/objects_markers"
+  frames:
+    # Vehicle-longitudinal frame published by ego_frame_publisher as a child of lidar_tc.
+    # base_link is NOT this frame -- tf_static declares lidar_tc -> base_link as identity,
+    # which is the uncalibrated placeholder. See object_fusion/frames.py.
+    ego: "ego"

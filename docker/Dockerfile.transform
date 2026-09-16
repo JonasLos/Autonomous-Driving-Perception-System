@@ -11,7 +11,7 @@ WORKDIR /workspace/Autonomous-Driving-Perception-System
 # multi-minute reinstall into a colcon build, which matters when iterating against a bag.
 RUN python3 -m venv /opt/transform_venv && \
     /opt/transform_venv/bin/pip install --upgrade pip && \
-    /opt/transform_venv/bin/pip install "numpy<2" pyyaml torch cython transforms3d
+    /opt/transform_venv/bin/pip install "numpy<2" pyyaml torch cython transforms3d scipy
 
 # Install ros2_numpy from source to avoid numpy compatibility issues
 RUN git clone --depth 1 --branch jazzy https://github.com/Box-Robotics/ros2_numpy.git /tmp/ros2_numpy && \
@@ -29,6 +29,18 @@ RUN rosdep install --from-paths src --ignore-src -r -y || true
 
 RUN source /opt/ros/jazzy/setup.bash && \
     colcon build --merge-install || true
+
+# The workspace build above is deliberately tolerant: src/ also holds the GPU nodes, whose
+# dependencies are not in this image, and they are expected to fail here. That tolerance
+# would equally hide a failure in the packages this image actually runs, so those are
+# rebuilt explicitly and NOT masked -- a broken radar build now fails the image build
+# instead of producing a container that dies at startup.
+RUN source /opt/ros/jazzy/setup.bash && \
+    colcon build --merge-install --packages-select \
+        perception_common delphi_esr_driver perception_msgs yolo_msgs radar_ros && \
+    source install/setup.bash && \
+    PYTHONPATH=/opt/transform_venv/lib/python3.12/site-packages:$PYTHONPATH \
+    /opt/transform_venv/bin/python -c "import scipy.optimize, numpy; print('radar deps OK')"
 
 # Read at container start, not baked in: compose passes USE_SIM_TIME through so bag replay
 # needs no rebuild and no duplicated CMD in docker-compose.yml.

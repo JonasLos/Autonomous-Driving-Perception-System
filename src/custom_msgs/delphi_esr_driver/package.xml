@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>delphi_esr_driver</name>
+  <version>0.1.0</version>
+  <description>
+    INTERFACES ONLY. A message-definition-only mirror of the Delphi ESR 2.5 driver package
+    that lives at https://github.com/JonasLos/delphi_esr_driver, so the perception
+    containers can deserialize /delphi_esr_interface/radar/tracks without pulling in the
+    driver's CAN stack.
+
+    This package deliberately shares the NAME of the real driver package: a ROS 2 message's
+    DDS type name is "&lt;package&gt;/msg/&lt;Message&gt;", so a copy under any other name would not
+    match the publisher. The three .msg files are byte-identical copies of upstream and
+    must stay that way -- test_delphi_msgs_vendored.py enforces it.
+
+    Do NOT install this on the vehicle host or add it to install_host_custom_msgs.sh. The
+    host has the real delphi_esr_driver, which also contains the driver node; shadowing it
+    with this stub would remove the node from that overlay.
+  </description>
+  <maintainer email="jonaslo96@tamu.edu">Jonas Los</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
+  <depend>std_msgs</depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+    <build_depend>rosidl_default_generators</build_depend>
+    <exec_depend>rosidl_default_runtime</exec_depend>
+  </export>
+</package>

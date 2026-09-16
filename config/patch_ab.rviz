@@ -1,0 +1,168 @@
+{
+  "Panels": [
+    {
+      "Class": "rviz_common/Displays",
+      "Name": "Displays",
+      "Property Tree Widget": {
+        "Expanded": [],
+        "Splitter Ratio": 0.5
+      }
+    },
+    {
+      "Class": "rviz_common/Views",
+      "Name": "Views"
+    }
+  ],
+  "Visualization Manager": {
+    "Class": "",
+    "Name": "root",
+    "Displays": [
+      {
+        "Class": "rviz_default_plugins/Grid",
+        "Name": "Grid",
+        "Enabled": true,
+        "Cell Size": 5,
+        "Plane Cell Count": 40,
+        "Color": "80; 80; 80"
+      },
+      {
+        "Class": "rviz_default_plugins/PointCloud2",
+        "Name": "projection",
+        "Enabled": true,
+        "Topic": {
+          "Value": "/lidar_2d_projection",
+          "Depth": 1,
+          "Durability Policy": "Volatile",
+          "Reliability Policy": "Reliable"
+        },
+        "Size (Pixels)": 2,
+        "Style": "Points",
+        "Color Transformer": "FlatColor",
+        "Color": "130; 130; 130",
+        "Alpha": 0.6,
+        "Decay Time": 0
+      },
+      {
+        "Class": "rviz_default_plugins/PointCloud2",
+        "Name": "A points",
+        "Enabled": true,
+        "Topic": {
+          "Value": "/ab/A/points",
+          "Depth": 1,
+          "Durability Policy": "Volatile",
+          "Reliability Policy": "Reliable"
+        },
+        "Size (Pixels)": 9,
+        "Style": "Points",
+        "Color Transformer": "FlatColor",
+        "Color": "242; 63; 51",
+        "Alpha": 1.0,
+        "Decay Time": 0
+      },
+      {
+        "Class": "rviz_default_plugins/MarkerArray",
+        "Name": "A markers",
+        "Enabled": true,
+        "Topic": {
+          "Value": "/ab/A/markers",
+          "Depth": 10,
+          "Durability Policy": "Volatile",
+          "Reliability Policy": "Reliable"
+        }
+      },
+      {
+        "Class": "rviz_default_plugins/PointCloud2",
+        "Name": "F_0.6 points",
+        "Enabled": true,
+        "Topic": {
+          "Value": "/ab/F_0_6/points",
+          "Depth": 1,
+          "Durability Policy": "Volatile",
+          "Reliability Policy": "Reliable"
+        },
+        "Size (Pixels)": 9,
+        "Style": "Points",
+        "Color Transformer": "FlatColor",
+        "Color": "51; 204; 89",
+        "Alpha": 1.0,
+        "Decay Time": 0
+      },
+      {
+        "Class": "rviz_default_plugins/MarkerArray",
+        "Name": "F_0.6 markers",
+        "Enabled": true,
+        "Topic": {
+          "Value": "/ab/F_0_6/markers",
+          "Depth": 10,
+          "Durability Policy": "Volatile",
+          "Reliability Policy": "Reliable"
+        }
+      },
+      {
+        "Class": "rviz_default_plugins/PointCloud2",
+        "Name": "B_20px points",
+        "Enabled": true,
+        "Topic": {
+          "Value": "/ab/B_20px/points",
+          "Depth": 1,
+          "Durability Policy": "Volatile",
+          "Reliability Policy": "Reliable"
+        },
+        "Size (Pixels)": 9,
+        "Style": "Points",
+        "Color Transformer": "FlatColor",
+        "Color": "89; 140; 255",
+        "Alpha": 1.0,
+        "Decay Time": 0
+      },
+      {
+        "Class": "rviz_default_plugins/MarkerArray",
+        "Name": "B_20px markers",
+        "Enabled": true,
+        "Topic": {
+          "Value": "/ab/B_20px/markers",
+          "Depth": 10,
+          "Durability Policy": "Volatile",
+          "Reliability Policy": "Reliable"
+        }
+      },
+      {
+        "Class": "rviz_default_plugins/Image",
+        "Name": "camera + masks",
+        "Enabled": true,
+        "Topic": {
+          "Value": "/ab/image",
+          "Depth": 1,
+          "Durability Policy": "Volatile",
+          "Reliability Policy": "Reliable"
+        }
+      }
+    ],
+    "Global Options": {
+      "Background Color": "30; 30; 34",
+      "Fixed Frame": "lidar_tc",
+      "Frame Rate": 30
+    },
+    "Tools": [
+      {
+        "Class": "rviz_default_plugins/MoveCamera"
+      }
+    ],
+    "Views": {
+      "Current": {
+        "Class": "rviz_default_plugins/Orbit",
+        "Name": "Current View",
+        "Distance": 60.0,
+        "Focal Point": {
+          "X": 30.0,
+          "Y": 0.0,
+          "Z": 0.0
+        },
+        "Pitch": 0.35,
+        "Yaw": 3.14,
+        "Target Frame": "lidar_tc"
+      },
+      "Saved": null
+    }
+  }
+}

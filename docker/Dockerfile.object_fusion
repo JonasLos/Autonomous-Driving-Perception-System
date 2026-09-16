@@ -1,0 +1,51 @@
+# Layers the object-fusion stack ON TOP of the already-built transform image.
+#
+# Deliberately NOT a change to Dockerfile.transform. That image backs both transform_node and
+# radar_node, and a build change there puts two working services at risk to ship a third.
+# Layering leaves perception-transform:latest bit-for-bit as it is, and deleting this file
+# plus the compose overlay removes the whole stack.
+#
+# CPU only: numpy and scipy, no GPU reservation. Everything expensive (YOLO, the projection)
+# is already done by the existing nodes, whose outputs this consumes.
+FROM perception-transform:latest
+
+WORKDIR /workspace/Autonomous-Driving-Perception-System
+
+# Patchwork++ ground segmentation (pypatchworkpp 1.4.1). --no-deps is deliberate: pip otherwise
+# pulls numpy 2.x, which breaks this image's scipy (it needs numpy<1.28). The extension was
+# verified working against numpy 1.26.4 before this line was added.
+RUN pip install --no-deps --break-system-packages pypatchworkpp==1.4.1 && \
+    python3 -c "import numpy, pypatchworkpp; print('pypatchworkpp OK, numpy', numpy.__version__)"
+
+COPY src/custom_msgs/fusion_msgs src/custom_msgs/fusion_msgs
+COPY src/object_fusion src/object_fusion
+
+# Intolerant on purpose -- no `|| true`. The base image already carries perception_common,
+# radar_ros, yolo_msgs and delphi_esr_driver; these two are what this image adds, and a
+# failure here must fail the build rather than produce an image that starts and then cannot
+# import its own messages.
+RUN . /opt/ros/jazzy/setup.sh && \
+    . install/setup.sh && \
+    colcon build --merge-install --packages-select fusion_msgs object_fusion && \
+    . install/setup.sh && \
+    python3 -c "from fusion_msgs.msg import FusedObjectArray; \
+                from object_fusion.tracker import radar_h_and_H; \
+                from object_fusion.track_store import TrackStore; \
+                print('object_fusion deps OK')"
+
+ENV USE_SIM_TIME=false
+CMD ["/bin/bash", "-lc", \
+     ". /opt/ros/jazzy/setup.sh && . install/setup.sh && \
+      ros2 launch object_fusion object_fusion.launch.py \
+        use_sim_time:=${USE_SIM_TIME:-false} \
+        publish_mode:=${PUBLISH_MODE:-passthrough} \
+        enable_radar_only_birth:=${ENABLE_RADAR_ONLY_BIRTH:-false} \
+        enable_extent_estimation:=${ENABLE_EXTENT_ESTIMATION:-false} \
+        ego_yaw_correction_deg:=${EGO_YAW_CORRECTION_DEG:--5.35} \
+        projection_topic:=${PROJECTION_TOPIC:-/lidar_2d_projection} \
+        publish_debug_clouds:=${PUBLISH_DEBUG_CLOUDS:-false} \
+        ground_levelling:=${GROUND_LEVELLING:-true} \
+        enable_depth_gate:=${ENABLE_DEPTH_GATE:-true} \
+        enable_class_vote:=${ENABLE_CLASS_VOTE:-true} \
+        segmentation_empty_fallback:=${SEGMENTATION_EMPTY_FALLBACK:-false} \
+        enable_camera_only_fallback:=${ENABLE_CAMERA_ONLY_FALLBACK:-false}"]

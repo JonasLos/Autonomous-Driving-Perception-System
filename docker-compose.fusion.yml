@@ -1,0 +1,35 @@
+# Overlay, composed alongside the base file -- which is NOT edited:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.fusion.yml \
+#       --profile fusion up -d object_fusion_node
+#
+# `docker compose --profile runtime up` stays exactly what it is today, with or without this
+# file present.
+services:
+  object_fusion_node:
+    profiles: ["fusion"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.object_fusion
+    image: perception-object-fusion:${OBJECT_FUSION_IMAGE_TAG:-latest}
+    container_name: perception_object_fusion_node
+    network_mode: host
+    ipc: host
+    restart: "no"
+    environment:
+      ROS_DOMAIN_ID: "0"
+      RMW_IMPLEMENTATION: rmw_zenoh_cpp
+      USE_SIM_TIME: "${USE_SIM_TIME:-false}"
+      PUBLISH_MODE: "${PUBLISH_MODE:-passthrough}"
+      ENABLE_RADAR_ONLY_BIRTH: "${ENABLE_RADAR_ONLY_BIRTH:-false}"
+      ENABLE_EXTENT_ESTIMATION: "${ENABLE_EXTENT_ESTIMATION:-false}"
+      EGO_YAW_CORRECTION_DEG: "${EGO_YAW_CORRECTION_DEG:--5.35}"
+      PROJECTION_TOPIC: "${PROJECTION_TOPIC:-/lidar_2d_projection}"
+      PUBLISH_DEBUG_CLOUDS: "${PUBLISH_DEBUG_CLOUDS:-false}"
+      # Rollbacks for what is live by default, so each can be A/B'd without a rebuild.
+      GROUND_LEVELLING: "${GROUND_LEVELLING:-true}"
+      ENABLE_DEPTH_GATE: "${ENABLE_DEPTH_GATE:-true}"
+      ENABLE_CLASS_VOTE: "${ENABLE_CLASS_VOTE:-true}"
+      SEGMENTATION_EMPTY_FALLBACK: "${SEGMENTATION_EMPTY_FALLBACK:-false}"
+      ENABLE_CAMERA_ONLY_FALLBACK: "${ENABLE_CAMERA_ONLY_FALLBACK:-false}"
+      OMP_NUM_THREADS: "${OMP_NUM_THREADS:-4}"

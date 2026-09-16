@@ -44,6 +44,10 @@ echo "Installing jsk_recognition_msgs..."
 sudo apt-get install -y ros-melodic-jsk-recognition-msgs
 
 # Install radar_msgs via package manager
+# NOTE: nothing in the current stack uses radar_msgs. The Delphi ESR publishes
+# delphi_esr_driver/msg/EsrTrackArray, mirrored for the containers in
+# src/custom_msgs/delphi_esr_driver. This whole script is ROS 1 Melodic and is referenced
+# only by the legacy docker/Dockerfile, which cannot build.
 echo "Installing radar_msgs..."
 sudo apt-get install -y ros-melodic-radar-msgs
 

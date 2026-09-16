@@ -148,6 +148,7 @@ cython_debug/
 
 # Datasets
 dataset/
+adps_*
 
 # Keep local checkpoint out of git history
 src/sphereformer_ros/src/SphereFormer/model_semantic_kitti.pth

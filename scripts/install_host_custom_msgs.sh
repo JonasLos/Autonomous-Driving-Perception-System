@@ -8,7 +8,16 @@ ROS_DISTRO="${ROS_DISTRO:-jazzy}"
 ROS_SETUP="/opt/ros/${ROS_DISTRO}/setup.bash"
 INSTALL_BASE="${1:-${HOME}/.local/opt/adps_custom_msgs}"
 BUILD_BASE="${BUILD_BASE:-${REPO_ROOT}/build/host_custom_msgs}"
-PACKAGES=(clrernet_msgs sam2_msgs yolov9_msgs yolo_msgs)
+# perception_msgs carries TrackedObjectArray on /tracked_objects; without it on the host
+# overlay, `ros2 topic echo /tracked_objects` and `ros2 bag record` cannot see the type even
+# while the topic is flowing.
+#
+# delphi_esr_driver is deliberately NOT listed. src/custom_msgs/delphi_esr_driver is an
+# interfaces-only mirror that exists so the containers can deserialize the radar tracks; the
+# vehicle host already has the REAL delphi_esr_driver, which also contains the driver node.
+# Installing the stub into this overlay would shadow it and take the driver out of the
+# overlay chain.
+PACKAGES=(clrernet_msgs sam2_msgs yolov9_msgs yolo_msgs perception_msgs)
 
 if [[ ! -f "${ROS_SETUP}" ]]; then
   echo "ROS setup file not found: ${ROS_SETUP}" >&2

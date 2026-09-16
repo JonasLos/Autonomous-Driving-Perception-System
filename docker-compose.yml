@@ -475,7 +475,12 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.transform
-    image: perception-transform:latest
+    # Pinnable so the radar rebuild does not have to move transform_node. radar_node shares
+    # this image, so building it for radar also rebuilds transform.py -- which on this
+    # checkout means picking up the 2026-08-27 changes (voxel filter off, crop range 150)
+    # that the deployed image predates. Set TRANSFORM_IMAGE_TAG=pre-radar to keep
+    # transform_node on the last bag-verified image while radar_node runs the new one.
+    image: perception-transform:${TRANSFORM_IMAGE_TAG:-latest}
     container_name: perception_transform_node
     network_mode: "host"
     ipc: "host"
@@ -493,6 +498,48 @@ services:
               capabilities: [gpu]
     restart: "no"
     
+  # Radar association. Reuses the transform image rather than adding a sixth 17GB one --
+  # this node is CPU-only numpy/scipy work and needs exactly the same dependencies.
+  #
+  # Its own profile, NOT "runtime": the documented bring-up
+  #   docker compose --profile runtime up -d transform_node sphereformer_node yolo_node clrernet_node
+  # must stay bit-for-bit the pipeline that shipped before radar existed, and a service in
+  # the runtime profile could be swept up by a bare --profile runtime up. Start it with
+  #   docker compose --profile radar up -d radar_node
+  #
+  # ENABLE_RADAR_FUSION defaults false even once the container IS running: with it false the
+  # node publishes /tracked_objects as a pure passthrough of /fused_bbox and only LOGS what
+  # radar would have contributed. Flip it live against a replaying bag with
+  #   ros2 param set /radar_fusion_node enable_radar_fusion true
+  # rather than restarting, so an A/B compares the same frames.
+  radar_node:
+    profiles: ["radar"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.transform
+    image: perception-transform:latest
+    container_name: perception_radar_node
+    network_mode: "host"
+    ipc: "host"
+    working_dir: /workspace/Autonomous-Driving-Perception-System
+    environment:
+      <<: *common-env
+      ENABLE_RADAR_FUSION: "${ENABLE_RADAR_FUSION:-false}"
+      PUBLISH_RADAR_ONLY: "${PUBLISH_RADAR_ONLY:-false}"
+    command:
+      - bash
+      - -c
+      - |
+        source /opt/ros/jazzy/setup.bash
+        source install/setup.bash
+        export PATH=/opt/transform_venv/bin:$$PATH
+        export PYTHONPATH=/opt/transform_venv/lib/python3.12/site-packages:$$PYTHONPATH
+        ros2 launch radar_ros radar_fusion.launch.py \
+          enable_radar_fusion:=$${ENABLE_RADAR_FUSION} \
+          publish_radar_only:=$${PUBLISH_RADAR_ONLY} \
+          use_sim_time:=$${USE_SIM_TIME}
+    restart: "no"
+
   sam3_ros:
     build:
       context: .

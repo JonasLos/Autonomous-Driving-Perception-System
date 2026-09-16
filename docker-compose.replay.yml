@@ -41,3 +41,13 @@ services:
       # enough -- no install-path shadowing needed.
       - ./src/sphereformer_ros:/workspace/Autonomous-Driving-Perception-System/src/sphereformer_ros:ro
       - ./src/perception_common:/workspace/Autonomous-Driving-Perception-System/src/perception_common:ro
+
+  # Same image and same --merge-install layout as transform_node, so the same flat
+  # install/lib/... paths apply. topics.yaml is mounted too because the node resolves every
+  # topic name through it at startup, so a rename there otherwise needs a rebuild.
+  radar_node:
+    volumes:
+      - ./src/radar_ros/radar_ros:/workspace/Autonomous-Driving-Perception-System/install/lib/python3.12/site-packages/radar_ros:ro
+      - ./src/perception_common/perception_common:/workspace/Autonomous-Driving-Perception-System/install/lib/python3.12/site-packages/perception_common:ro
+      - ./src/perception_common/topics.yaml:/workspace/Autonomous-Driving-Perception-System/install/share/perception_common/topics.yaml:ro
+      - ./src/radar_ros/launch:/workspace/Autonomous-Driving-Perception-System/install/share/radar_ros/launch:ro

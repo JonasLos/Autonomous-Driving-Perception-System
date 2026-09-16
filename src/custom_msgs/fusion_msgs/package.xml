@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>fusion_msgs</name>
+  <version>0.1.0</version>
+  <description>
+    Messages for the track-level object fusion stack: a common per-sensor measurement type
+    and the fused track output.
+
+    A SEPARATE package from perception_msgs on purpose. Adding these to perception_msgs would
+    mean editing its CMakeLists, and that package is what radar_ros and the running
+    /tracked_objects depend on. A new sibling costs nothing and keeps TrackedObject.msg's type
+    hash unquestionably stable.
+  </description>
+
+  <maintainer email="jonaslo96@tamu.edu">Jonas Los</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

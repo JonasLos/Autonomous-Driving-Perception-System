@@ -1,0 +1,13 @@
+# Read-only source mounts so edits take effect without a rebuild. Paths follow the
+# --merge-install FLAT layout the transform image uses (install/lib/python3.12/site-packages),
+# NOT the per-package layout the clrernet image has. Docker silently creates a missing mount
+# target, so a stale path here fails quietly -- check `ros2 param list` sees the node before
+# trusting a change.
+services:
+  object_fusion_node:
+    volumes:
+      - ./src/object_fusion/object_fusion:/workspace/Autonomous-Driving-Perception-System/install/lib/python3.12/site-packages/object_fusion:ro
+      - ./src/object_fusion/config:/workspace/Autonomous-Driving-Perception-System/install/share/object_fusion/config:ro
+      - ./src/object_fusion/launch:/workspace/Autonomous-Driving-Perception-System/install/share/object_fusion/launch:ro
+      - ./src/perception_common/perception_common:/workspace/Autonomous-Driving-Perception-System/install/lib/python3.12/site-packages/perception_common:ro
+      - ./src/radar_ros/radar_ros:/workspace/Autonomous-Driving-Perception-System/install/lib/python3.12/site-packages/radar_ros:ro
