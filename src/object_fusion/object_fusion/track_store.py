@@ -112,8 +112,9 @@ def camera_expected(p_l, uv=None, image_wh=None, *, max_x=150.0, max_y=20.0,
     return True
 
 
-def should_merge(a, b, *, chi2=9.21, max_range_gap=20.0, max_bearing_deg=1.5,
-                 split_branch_only=True, min_range_for_gap=60.0) -> bool:
+def should_merge(a, b, *, chi2=9.21, max_merge_dist=2.5, max_range_gap=20.0,
+                 max_bearing_deg=1.5, split_branch_only=True,
+                 min_range_for_gap=60.0) -> bool:
     """Whether two tracks describe one object.
 
     Merging is REQUIRED, not a nicety. At 80 m the camera branch's position can be 14 m short
@@ -139,13 +140,34 @@ def should_merge(a, b, *, chi2=9.21, max_range_gap=20.0, max_bearing_deg=1.5,
     effect -- the camera+LiDAR range is biased -7.6 m at 80-100 m and -32 m beyond, but only
     -1.1 m under 80 m -- so a 20 m merge close in cannot be that split, and near the car it is
     a cone being swallowed by a radar return from the guardrail behind it.
+
+    The Mahalanobis clause carries a HARD DISTANCE BOUND (``max_merge_dist``) as well as the
+    chi-square one, because on its own it does not bound a distance at all: it bounds a distance
+    in units of the covariance, and a coasting track's covariance grows without limit. At 2 m
+    sigma the 99% two-DOF value spans 8.6 m -- past the next cone in a line -- so the clause
+    that exists to collapse a track onto its own duplicate reached across to the neighbour
+    instead. The two objects this has to tell apart are a duplicate (two tracks on one object,
+    typically under a metre apart, never more than about two) and the next cone up the line
+    (5 m and more on this drive), so 2.5 m separates them with room on both sides.
+
+    Tightening the chi-square instead was tried and is worse. At chi2 4.0 the clause stops
+    reaching genuine duplicates too: the node logged ZERO merges over a whole replay, and two
+    published boxes on one measurement went 1.3% -> 5.6%. The distance bound keeps the 99%
+    chi-square, so duplicates are still merged, and refuses only reaches longer than 2.5 m.
+
+    Measured over a full replay loop of selfcal_loc_2026-09-08, live, `scripts/live_orphans.py`:
+
+        arm                          orphaned   two boxes on one measurement
+        unbounded (as first shipped)   15.7%              1.3%
+        bounded at 2.5 m               10.5%              3.0%
     """
     xa = np.asarray(a.x, dtype=np.float64)
     xb = np.asarray(b.x, dtype=np.float64)
     d = xa - xb
     S = np.asarray(a.P, dtype=np.float64) + np.asarray(b.P, dtype=np.float64)
     try:
-        if float(d @ np.linalg.solve(S, d)) <= chi2:
+        if (float(np.hypot(d[0], d[1])) <= float(max_merge_dist)
+                and float(d @ np.linalg.solve(S, d)) <= chi2):
             return True
     except np.linalg.LinAlgError:
         pass
@@ -352,12 +374,14 @@ class TrackStore:
             kept.append(tr)
         self.tracks = kept
 
-    def merge_pass(self, *, max_range_gap=20.0, max_bearing_deg=1.5, min_range_for_gap=60.0):
+    def merge_pass(self, *, chi2=9.21, max_merge_dist=2.5, max_range_gap=20.0,
+                   max_bearing_deg=1.5, min_range_for_gap=60.0):
         """Collapse tracks that describe one object, keeping the better-supported one."""
         out: list[Track] = []
         for tr in sorted(self.tracks, key=lambda t: -t.logodds):
             dup = next((k for k in out
-                        if should_merge(k, tr, max_range_gap=max_range_gap,
+                        if should_merge(k, tr, chi2=chi2, max_merge_dist=max_merge_dist,
+                                        max_range_gap=max_range_gap,
                                         max_bearing_deg=max_bearing_deg,
                                         min_range_for_gap=min_range_for_gap)), None)
             if dup is None:

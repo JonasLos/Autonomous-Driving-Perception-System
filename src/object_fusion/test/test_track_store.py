@@ -265,3 +265,34 @@ def test_the_range_clause_does_not_fire_near_the_car():
     cone = _track(28.0, 3.0, SENSOR_CAMERA)
     guardrail = _track(44.0, 3.6, SENSOR_RADAR)
     assert not should_merge(cone, guardrail)
+
+
+def test_a_coasting_track_may_not_swallow_the_cone_beside_it():
+    """The Mahalanobis clause does not bound a distance on its own, so it carries one.
+
+    A coasted track has a position variance of several m^2, and at 2 m sigma on each of two
+    tracks the 99% two-DOF value spans 8.6 m -- past the next cone in a line. The hard bound is
+    what stops it. Measured consequence of not having it: 16.0% of camera measurements had no
+    published box within 3 m, live, against 8.0% once the reach was bounded.
+    """
+    from object_fusion.track_store import SENSOR_CAMERA, should_merge
+    coasted = _track(30.0, 0.0, SENSOR_CAMERA)
+    coasted.P = np.diag([4.0, 4.0, 9.0, 9.0])       # ~2 m sigma, a second of coasting
+    cone = _track(37.0, 0.6, SENSOR_CAMERA)         # the next cone up the line
+    cone.P = np.diag([4.0, 4.0, 9.0, 9.0])
+    assert should_merge(coasted, cone, max_merge_dist=float("inf")), \
+        "unbounded, the chi-square alone reaches right across to the neighbour"
+    assert not should_merge(coasted, cone), "7 m apart is not a duplicate, whatever P says"
+
+
+def test_the_duplicate_it_exists_to_collapse_is_still_merged():
+    """The counterpart: bounding the reach must not cost the gate its actual job.
+
+    A track that has just been re-born beside its coasting self sits well under a metre away.
+    Tightening the chi-square instead of bounding the distance loses exactly this case --
+    duplicate published tracks went 2.4% -> 8.6% when it was tried.
+    """
+    from object_fusion.track_store import SENSOR_CAMERA, should_merge
+    coasting = _track(45.0, 1.0, SENSOR_CAMERA)
+    reborn = _track(45.8, 1.2, SENSOR_CAMERA)
+    assert should_merge(coasting, reborn)

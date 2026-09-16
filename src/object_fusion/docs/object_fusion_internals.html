@@ -1,0 +1,800 @@
+<title>Object Fusion Internals</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper: #e9ecee;
+    --surface: #f8f9fa;
+    --surface-2: #eef1f3;
+    --ink: #15191c;
+    --ink-2: #3d474d;
+    --muted: #6b767c;
+    --rule: #ccd3d7;
+    --rule-soft: #dde3e6;
+    --accent: #1f6f8b;          /* instrument teal: chrome, links, stage numerals */
+    --ground: #a97b41;          /* RViz: ground points */
+    --nonground: #7d878e;       /* RViz: non-ground points */
+    --camlidar: #2f6ee0;        /* RViz: new camera+LiDAR measurement */
+    --radar: #d9761b;           /* RViz: radar tracks */
+    --legacy: #2f8f46;          /* RViz: existing /fused_bbox */
+    --bad: #b03a3a;
+    --shadow: 0 1px 2px rgba(20, 30, 36, .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0f1417;
+      --surface: #161c20;
+      --surface-2: #1b2328;
+      --ink: #e8edef;
+      --ink-2: #bcc7cc;
+      --muted: #8d999f;
+      --rule: #2a343a;
+      --rule-soft: #222b30;
+      --accent: #5fb6d0;
+      --ground: #c79a5f;
+      --nonground: #9aa5ac;
+      --camlidar: #6ea2f5;
+      --radar: #f0964a;
+      --legacy: #5cc077;
+      --bad: #e07a7a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0f1417;
+    --surface: #161c20;
+    --surface-2: #1b2328;
+    --ink: #e8edef;
+    --ink-2: #bcc7cc;
+    --muted: #8d999f;
+    --rule: #2a343a;
+    --rule-soft: #222b30;
+    --accent: #5fb6d0;
+    --ground: #c79a5f;
+    --nonground: #9aa5ac;
+    --camlidar: #6ea2f5;
+    --radar: #f0964a;
+    --legacy: #5cc077;
+    --bad: #e07a7a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding-inline: 20px; padding-block: 0 72px; }
+  h1, h2, h3 { font-family: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif; text-wrap: balance; }
+  h1 { font-size: clamp(2rem, 5vw, 2.9rem); line-height: 1.1; margin: 0 0 .4rem; font-weight: 700; letter-spacing: -.01em; }
+  h2 { font-size: 1.5rem; margin: 0; font-weight: 600; }
+  h3 { font-size: 1.05rem; margin: 2rem 0 .5rem; font-weight: 600; color: var(--ink); }
+  p { margin: 0 0 1rem; max-width: 70ch; }
+  a { color: var(--accent); }
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .88em; }
+  code { background: var(--surface-2); padding: .1em .35em; border-radius: 3px; }
+  .lede { font-size: 1.1rem; color: var(--ink-2); max-width: 66ch; }
+  .eyebrow { font-family: "IBM Plex Mono", monospace; font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+
+  header.top { border-bottom: 1px solid var(--rule); padding-block: 40px 28px; margin-bottom: 8px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-top: 18px; font-size: .85rem; color: var(--muted); font-family: "IBM Plex Mono", monospace; }
+  .facts b { color: var(--ink-2); font-weight: 500; }
+
+  nav.jump { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--paper); border-bottom: 1px solid var(--rule-soft); padding-block: 8px; margin-bottom: 8px; }
+  nav.jump ul { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 0; padding: 0; font-family: "IBM Plex Mono", monospace; font-size: .76rem; }
+  nav.jump a { text-decoration: none; color: var(--muted); }
+  nav.jump a:hover, nav.jump a:focus-visible { color: var(--accent); }
+
+  section.stage { border-top: 1px solid var(--rule); padding-block: 34px 8px; }
+  .stage-head { display: grid; grid-template-columns: 3.2rem 1fr; gap: 0 16px; align-items: start; margin-bottom: 14px; }
+  .numeral { font-family: "IBM Plex Mono", monospace; font-size: 1.5rem; color: var(--accent); font-weight: 500; line-height: 1.1; }
+  .stage-head .sub { grid-column: 2; color: var(--muted); font-size: .9rem; margin-top: 2px; }
+
+  figure { margin: 22px 0; padding: 0; }
+  .figbox { background: var(--surface); border: 1px solid var(--rule-soft); border-radius: 6px; padding: 14px; overflow-x: auto; }
+  svg.diagram { display: block; width: 100%; max-width: 100%; height: auto; color: var(--ink-2); }
+  figcaption { font-size: .85rem; color: var(--muted); margin-top: 8px; max-width: 74ch; }
+
+  .tablewrap { overflow-x: auto; margin: 18px 0; border: 1px solid var(--rule-soft); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .87rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th { font-family: "IBM Plex Sans Condensed", sans-serif; font-weight: 600; color: var(--ink); background: var(--surface-2); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.p { font-family: "IBM Plex Mono", monospace; white-space: nowrap; color: var(--ink); }
+
+  .why { border-left: 2px solid var(--accent); padding: 2px 0 2px 14px; margin: 16px 0; color: var(--ink-2); }
+  .why b { color: var(--ink); font-weight: 600; }
+  .off { border-left: 2px solid var(--muted); padding: 2px 0 2px 14px; margin: 16px 0; color: var(--muted); }
+  .warn { border-left: 2px solid var(--bad); padding: 2px 0 2px 14px; margin: 16px 0; color: var(--ink-2); }
+
+  ul.tight { margin: 0 0 1rem; padding-left: 1.1rem; max-width: 70ch; }
+  ul.tight li { margin-bottom: .35rem; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .8rem; color: var(--muted); font-family: "IBM Plex Mono", monospace; margin-top: 10px; }
+  .sw { display: inline-block; width: .7em; height: .7em; border-radius: 2px; margin-right: .4em; vertical-align: baseline; }
+  pre { background: var(--surface-2); border: 1px solid var(--rule-soft); border-radius: 6px; padding: 12px 14px; overflow-x: auto; font-family: "IBM Plex Mono", monospace; font-size: .82rem; line-height: 1.55; margin: 14px 0; }
+  footer { border-top: 1px solid var(--rule); margin-top: 40px; padding-top: 20px; color: var(--muted); font-size: .85rem; }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+  @media (max-width: 560px) { .stage-head { grid-template-columns: 2.2rem 1fr; } .numeral { font-size: 1.15rem; } }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">object_fusion · perception stack</div>
+  <h1>Object Fusion Internals</h1>
+  <p class="lede">How a camera box, a LiDAR sweep and a radar sweep become one object — every rule in the chain, the exact parameter it runs with, and the measurement that set it.</p>
+  <div class="facts">
+    <span><b>Reference drive</b> selfcal_loc_2026-09-08 · 398 s · 4 519 detections</span>
+    <span><b>Ruler</b> Delphi ESR range, ~0.1 m</span>
+    <span><b>State</b> 2026-09-16 · merge reach bounded; cones and offset measured</span>
+  </div>
+</header>
+
+<nav class="jump" aria-label="Sections">
+  <ul>
+    <li><a href="#flow">Data flow</a></li>
+    <li><a href="#s1">1 Ground</a></li>
+    <li><a href="#s2">2 Levelling</a></li>
+    <li><a href="#s3">3 Point selection</a></li>
+    <li><a href="#s4">4 Depth gate</a></li>
+    <li><a href="#s5">5 Class vote</a></li>
+    <li><a href="#s6">6 Covariance</a></li>
+    <li><a href="#s7">7 Radar</a></li>
+    <li><a href="#s8">8 Aggregator</a></li>
+    <li><a href="#params">Parameters</a></li>
+    <li><a href="#off">Switched off</a></li>
+    <li><a href="#limits">Limits</a></li>
+  </ul>
+</nav>
+
+<section id="flow" class="stage" style="border-top:0">
+  <div class="stage-head">
+    <div class="numeral">§</div>
+    <div>
+      <h2>What the stack is</h2>
+      <div class="sub">A parallel consumer, not a replacement</div>
+    </div>
+  </div>
+
+  <p>The existing pipeline is untouched and still publishes <code>/fused_bbox</code> and <code>/tracked_objects</code> exactly as before — verified bit-identical with this stack running, on 1 484 frames, obstacle-only and under full GPU load. <code>object_fusion</code> subscribes to the same inputs, re-runs neither YOLO nor the projection, and publishes its own topics.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg class="diagram" viewBox="0 0 980 360" role="img" aria-label="Data flow: camera and LiDAR feed the existing YOLO pipeline, which publishes tracking and a 2D projection; object_fusion adds a ground projection node, a camera-LiDAR detector, a radar detector and an aggregator, publishing separate topics.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="currentColor"/>
+          </marker>
+          <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="#2f6ee0"/>
+          </marker>
+        </defs>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <!-- sensors -->
+          <g fill="currentColor">
+            <rect x="8" y="26" width="120" height="30" rx="4" fill="none" stroke="currentColor"/>
+            <text x="68" y="45" text-anchor="middle">camera_fl</text>
+            <rect x="8" y="150" width="120" height="30" rx="4" fill="none" stroke="currentColor"/>
+            <text x="68" y="169" text-anchor="middle">lidar_tc</text>
+            <rect x="8" y="274" width="120" height="30" rx="4" fill="none" stroke="currentColor"/>
+            <text x="68" y="293" text-anchor="middle">delphi_esr</text>
+            <rect x="8" y="212" width="120" height="30" rx="4" fill="none" stroke="currentColor"/>
+            <text x="68" y="231" text-anchor="middle">novatel odom</text>
+          </g>
+
+          <!-- existing pipeline -->
+          <rect x="176" y="14" width="168" height="80" rx="5" fill="none" stroke="#2f8f46" stroke-width="1.5"/>
+          <text x="260" y="38" text-anchor="middle" fill="#2f8f46">yolo · tracking</text>
+          <text x="260" y="56" text-anchor="middle" fill="#2f8f46">fusion_node</text>
+          <text x="260" y="76" text-anchor="middle" fill="#2f8f46" font-size="10">→ /fused_bbox</text>
+          <rect x="176" y="138" width="168" height="54" rx="5" fill="none" stroke="#2f8f46" stroke-width="1.5"/>
+          <text x="260" y="160" text-anchor="middle" fill="#2f8f46">transform.py</text>
+          <text x="260" y="178" text-anchor="middle" fill="#2f8f46" font-size="10">→ /lidar_2d_projection</text>
+
+          <!-- new nodes -->
+          <rect x="404" y="130" width="176" height="70" rx="5" fill="none" stroke="#2f6ee0" stroke-width="1.5"/>
+          <text x="492" y="152" text-anchor="middle" fill="#2f6ee0">ground_projection</text>
+          <text x="492" y="169" text-anchor="middle" fill="#2f6ee0" font-size="10">Patchwork++ ×2</text>
+          <text x="492" y="186" text-anchor="middle" fill="#2f6ee0" font-size="10">x y z u v ground</text>
+
+          <rect x="636" y="34" width="176" height="86" rx="5" fill="none" stroke="#2f6ee0" stroke-width="1.5"/>
+          <text x="724" y="56" text-anchor="middle" fill="#2f6ee0">camera_lidar_detector</text>
+          <text x="724" y="74" text-anchor="middle" fill="#2f6ee0" font-size="10">select · gate · vote</text>
+          <text x="724" y="92" text-anchor="middle" fill="#2f6ee0" font-size="10">covariance</text>
+          <text x="724" y="110" text-anchor="middle" fill="#2f6ee0" font-size="10">→ measurements/camera_lidar</text>
+
+          <rect x="636" y="262" width="176" height="60" rx="5" fill="none" stroke="#d9761b" stroke-width="1.5"/>
+          <text x="724" y="284" text-anchor="middle" fill="#d9761b">radar_detector</text>
+          <text x="724" y="302" text-anchor="middle" fill="#d9761b" font-size="10">→ measurements/radar</text>
+
+          <rect x="636" y="150" width="176" height="76" rx="5" fill="none" stroke="#2f6ee0" stroke-width="2"/>
+          <text x="724" y="174" text-anchor="middle" fill="#2f6ee0">object_aggregator</text>
+          <text x="724" y="192" text-anchor="middle" fill="#2f6ee0" font-size="10">queue · EKF · tracks</text>
+          <text x="724" y="210" text-anchor="middle" fill="#2f6ee0" font-size="10">→ /perception/objects</text>
+
+          <!-- arrows -->
+          <g stroke="currentColor" fill="none" marker-end="url(#ar)">
+            <path d="M128 41 H172"/>
+            <path d="M128 165 H172"/>
+            <path d="M128 289 H632"/>
+            <path d="M128 227 H200 V210 h-0.1" stroke-dasharray="3 3"/>
+          </g>
+          <g stroke="#2f8f46" fill="none" marker-end="url(#ar)" color="#2f8f46">
+            <path d="M344 165 H400"/>
+            <path d="M344 54 H360 V70 H632" />
+          </g>
+          <g stroke="#2f6ee0" fill="none" marker-end="url(#arb)">
+            <path d="M580 165 H600 V78 H632"/>
+            <path d="M812 78 H840 V180 h-28"/>
+            <path d="M812 292 H860 V196 h-48"/>
+          </g>
+          <text x="470" y="238" fill="currentColor" font-size="10" text-anchor="middle">roll · pitch (105 Hz)</text>
+          <text x="404" y="66" fill="#2f8f46" font-size="10">/yolo/tracking</text>
+          <text x="596" y="120" fill="#2f6ee0" font-size="10" text-anchor="middle">ground-flagged</text>
+          <text x="878" y="120" fill="#2f6ee0" font-size="10" text-anchor="middle">Detection3D</text>
+          <text x="878" y="250" fill="#d9761b" font-size="10" text-anchor="middle">Detection3D</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Green is the existing pipeline, consumed as-is. Blue and orange are new. The only new subscriber load on the shared topics is <code>ground_projection</code> on the raw sweep and the detector on the projection; both were measured not to perturb the green path.</figcaption>
+  </figure>
+
+  <div class="why"><b>Frames.</b> Everything is computed in <code>lidar_tc</code>. A separate <code>ego_frame_publisher</code> adds one static edge <code>lidar_tc → ego</code>, a pure yaw of <code>ego_yaw_correction_deg = −5.35°</code>, because <code>/tf_static</code> declares <code>lidar_tc → base_link</code> as identity and it is not. Three independent methods agree within 0.19°; a fourth (the vehicle self-calibration project) measures −5.4078° ± 0.020, which we have not adopted because it would move the published <code>ego</code> frame for a 0.1 m gain at 100 m.</div>
+</section>
+
+<section id="s1" class="stage">
+  <div class="stage-head">
+    <div class="numeral">01</div>
+    <div>
+      <h2>Ground segmentation</h2>
+      <div class="sub">Patchwork++ on the full sweep, flags not deletions</div>
+    </div>
+  </div>
+
+  <p>A 2D box around a vehicle also contains the road in front of it, and the road is <em>nearer</em>. Any nearest-point rule adopts it. So every sweep is segmented before projection, and each published point carries a <code>ground</code> flag — flags rather than deletions, because the detector needs to know what it is discarding.</p>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Parameter</th><th class="num">Value</th><th>Why this value</th></tr></thead>
+    <tbody>
+      <tr><td class="p">ground_backend</td><td class="num">auto → patchworkpp</td><td>Concentric zones with adaptive elevation thresholds. The polar-grid fallback is 5× slower and fits ground planes <em>through</em> vehicles: it emptied 9.8% of 25–40 m boxes.</td></tr>
+      <tr><td class="p">ground_max_range</td><td class="num">120 m</td><td>The library default of 80 m leaves 60–80 m worse than no segmentation (range sd 4.24 → 5.29). At 150 m a zone boundary lands inside that band and its jitter p90 reaches 49 m.</td></tr>
+      <tr><td class="p">sensor_height</td><td class="num">2.37 m</td><td>Measured twice: the self-calibration project gives 2.366 ± 0.005, a direct median of near-field ground returns gives 2.394. The stack previously used 2.46, which was wrong — though measurably inert here, since Patchwork++ re-learns the offset.</td></tr>
+      <tr><td class="p">crop_max_range<br>crop_lateral_limit</td><td class="num">150 m<br>±20 m</td><td>Identical to <code>transform.py</code>, so the published point set is exactly what the offline harness scored.</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>Cost is 12–13 ms per sweep at 10 Hz — two Patchwork++ passes, see the next stage.</p>
+</section>
+
+<section id="s2" class="stage">
+  <div class="stage-head">
+    <div class="numeral">02</div>
+    <div>
+      <h2>Near-field levelling</h2>
+      <div class="sub">Two passes; levelled labels inside 25 m only</div>
+    </div>
+  </div>
+
+  <p>In curves the body rolls and the road banks, so the road plane tilts in the sensor frame and Patchwork++ — which assumes a roughly level road around the sensor — calls road near the car non-ground. The sweep is therefore levelled by the vehicle's own attitude before segmenting.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg class="diagram" viewBox="0 0 900 300" role="img" aria-label="Two Patchwork plus plus passes per sweep: one on the levelled cloud supplying labels within 25 metres, one on the raw cloud supplying labels beyond, because levelling the whole sweep moves the far field by about a metre at 70 metres.">
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <text x="14" y="20" fill="currentColor" font-size="12">tilted sweep (roll φ, pitch θ from /novatel/oem7/odom at 105 Hz)</text>
+
+          <!-- sensor -->
+          <circle cx="70" cy="150" r="5" fill="currentColor"/>
+          <text x="70" y="176" text-anchor="middle" fill="currentColor" font-size="10">lidar_tc</text>
+
+          <!-- raw tilted road -->
+          <line x1="70" y1="150" x2="860" y2="96" stroke="#a97b41" stroke-width="2"/>
+          <text x="600" y="92" fill="#a97b41" font-size="10">road as the sensor sees it (tilt up to ~1.5°)</text>
+
+          <!-- levelled -->
+          <line x1="70" y1="150" x2="860" y2="150" stroke="#a97b41" stroke-width="2" stroke-dasharray="5 4"/>
+          <text x="600" y="168" fill="#a97b41" font-size="10">after levelling: flat, seeds and zone planes valid</text>
+
+          <!-- boundary -->
+          <line x1="330" y1="40" x2="330" y2="260" stroke="#2f6ee0" stroke-width="1.5" stroke-dasharray="4 4"/>
+          <text x="336" y="252" fill="#2f6ee0" font-size="11">25 m</text>
+
+          <text x="190" y="228" text-anchor="middle" fill="#2f6ee0" font-size="11">labels from the</text>
+          <text x="190" y="244" text-anchor="middle" fill="#2f6ee0" font-size="11">LEVELLED pass</text>
+          <text x="600" y="228" text-anchor="middle" fill="currentColor" font-size="11">labels from the RAW pass</text>
+          <text x="600" y="244" text-anchor="middle" fill="currentColor" font-size="11">(unchanged from before)</text>
+
+          <!-- error illustration far field -->
+          <line x1="790" y1="96" x2="790" y2="150" stroke="#b03a3a" stroke-width="1.5"/>
+          <text x="800" y="128" fill="#b03a3a" font-size="10">~1 m at 70 m</text>
+          <text x="800" y="144" fill="#b03a3a" font-size="10">if levelled globally</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The tilt model is fitted, not rigid: only ~0.8 of roll and ~0.5 of pitch show up as road tilt, because a banked road tilts with the car, and a constant row carries the static ~0.8° mount tilt. Levelling the whole sweep regressed far-field boxes (depth spikes 1.5% → 2.6%, cones at 60–80 m 5.7% → 18.9%), so the levelled labels are used only inside 25 m.</figcaption>
+  </figure>
+
+  <p>The attitude → tilt map is <code>ODOM_TILT_COEF</code>, pooled over 2 427 sweeps of two drives: slopes in <code>lidar_tc</code> per degree of odometry roll and pitch, plus a constant.</p>
+  <pre>slope_x = −0.00107·roll + 0.00884·pitch − 0.00919
+slope_y = −0.01451·roll − 0.00048·pitch − 0.01419      (degrees in, slope out)</pre>
+
+  <div class="why"><b>Cross-validated twice.</b> Each drive's own fit held on the other (residual road tilt 1.41° → 0.59° and 1.19° → 0.61° out of sample). The constant row, −0.0142 in roll, equals −0.813°, against a mount roll of <b>−0.865°</b> measured independently by the vehicle self-calibration project — agreement to 0.05° from unrelated data.</div>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Result: road called non-ground</th><th class="num">Before</th><th class="num">After</th></tr></thead>
+    <tbody>
+      <tr><td>selfcal 09-08 — straight / curve</td><td class="num">3.4% / 0.8%</td><td class="num">2.4% / 0.4%</td></tr>
+      <tr><td>selfcal 09-03 — straight / curve <span style="color:var(--muted)">(out of sample)</span></td><td class="num">3.1% / 6.6%</td><td class="num">2.8% / 4.3%</td></tr>
+      <tr><td>terrain beside the road, 09-08</td><td class="num">4.2% / 6.0%</td><td class="num">3.2% / 3.5%</td></tr>
+      <tr><td>cost: real objects called ground (09-03 curves)</td><td class="num">1.2%</td><td class="num">1.5%</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>Scored against an independent reference — flat, smooth, locally-lowest 0.4 m cells inside a ±6 m corridor around the vehicle's path arc. An earlier version of this metric used a RANSAC plane, which is the same plane one of the candidate methods levels by; it graded that method against its own answer and was discarded.</p>
+</section>
+
+<section id="s3" class="stage">
+  <div class="stage-head">
+    <div class="numeral">03</div>
+    <div>
+      <h2>Point selection inside a box</h2>
+      <div class="sub">Three filters, then a median — and a box that may publish nothing</div>
+    </div>
+  </div>
+
+  <p>Every point that projects inside the 2D box is a candidate. Three rules run in order, and what survives gives the position as a component-wise median.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg class="diagram" viewBox="0 0 900 340" role="img" aria-label="Depth axis inside one 2D box: road rings nearer than the object are dropped by the ground flags and the percentile cut, then the nearest surviving depth cluster is kept and its median is the published position.">
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <text x="14" y="18" fill="currentColor" font-size="12">one 2D box · points by forward depth x</text>
+
+          <!-- axis -->
+          <line x1="60" y1="270" x2="860" y2="270" stroke="currentColor"/>
+          <text x="860" y="290" text-anchor="end" fill="currentColor" font-size="10">x (m)</text>
+          <g fill="currentColor" font-size="10">
+            <text x="150" y="288" text-anchor="middle">22</text>
+            <text x="330" y="288" text-anchor="middle">24</text>
+            <text x="560" y="288" text-anchor="middle">25</text>
+            <text x="780" y="288" text-anchor="middle">51</text>
+          </g>
+
+          <!-- road rings (ground) -->
+          <g fill="#a97b41">
+            <circle cx="130" cy="240" r="4"/><circle cx="146" cy="240" r="4"/><circle cx="162" cy="240" r="4"/>
+            <circle cx="310" cy="236" r="4"/><circle cx="326" cy="236" r="4"/><circle cx="342" cy="236" r="4"/>
+            <circle cx="770" cy="228" r="4"/><circle cx="786" cy="228" r="4"/>
+          </g>
+          <text x="146" y="222" text-anchor="middle" fill="#a97b41" font-size="10">road ring</text>
+          <text x="326" y="218" text-anchor="middle" fill="#a97b41" font-size="10">road ring</text>
+          <text x="778" y="210" text-anchor="middle" fill="#a97b41" font-size="10">road, far</text>
+
+          <!-- object column (non-ground) -->
+          <g fill="#7d878e">
+            <circle cx="560" cy="100" r="4"/><circle cx="560" cy="124" r="4"/><circle cx="560" cy="148" r="4"/>
+            <circle cx="560" cy="172" r="4"/><circle cx="560" cy="196" r="4"/><circle cx="574" cy="112" r="4"/>
+            <circle cx="574" cy="136" r="4"/><circle cx="574" cy="160" r="4"/><circle cx="574" cy="184" r="4"/>
+          </g>
+          <text x="567" y="88" text-anchor="middle" fill="#7d878e" font-size="10">object (non-ground)</text>
+
+          <!-- filters -->
+          <g stroke="#b03a3a" stroke-width="1.4">
+            <line x1="118" y1="252" x2="174" y2="228"/><line x1="118" y1="228" x2="174" y2="252"/>
+            <line x1="298" y1="248" x2="354" y2="224"/><line x1="298" y1="224" x2="354" y2="248"/>
+            <line x1="758" y1="240" x2="798" y2="216"/><line x1="758" y1="216" x2="798" y2="240"/>
+          </g>
+          <text x="240" y="318" text-anchor="middle" fill="#b03a3a" font-size="11">① ground flags drop these</text>
+          <text x="600" y="318" text-anchor="middle" fill="#b03a3a" font-size="11">② 10th-percentile height cut + 0.4 m, from 10 m out</text>
+
+          <!-- chosen cluster bracket -->
+          <path d="M546 74 h44" stroke="#2f6ee0" stroke-width="2" fill="none"/>
+          <path d="M546 74 v10 M590 74 v10" stroke="#2f6ee0" stroke-width="2"/>
+          <text x="568" y="66" text-anchor="middle" fill="#2f6ee0" font-size="11">③ nearest depth cluster → median = published x, y</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Stage ① is the segmentation flag; ② is a per-box height cut that runs only beyond 10 m; ③ splits the survivors at the first depth gap wider than <code>max(median + 3·MAD, 0.05 m)</code> and keeps the nearest group. Without ①, 79 of 191 cones at 10–25 m were published on the road ring 1.5–4.5 m in front of the actual cone.</figcaption>
+  </figure>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Parameter</th><th class="num">Value</th><th>Why this value</th></tr></thead>
+    <tbody>
+      <tr><td class="p">ground_rejection_min_range</td><td class="num">10 m</td><td>Swept over four replays. 25 → 10 m halves the 15–25 m error spread (2.24 → 1.15) and cuts &gt;1 m near-field jumps 25.9% → 17.4%. Below 10 m the ground-intercept error is under a decimetre anyway, and the 0.4 m margin starts eating short objects.</td></tr>
+      <tr><td class="p">ground_margin</td><td class="num">0.4 m</td><td>Height above the box's 10th-percentile return. Measured <em>not</em> to cost cones: removing the cut leaves cones unchanged (spikes 1.6% → 1.7%) but makes vehicles worse (1.5% → 2.9%).</td></tr>
+      <tr><td class="p">ground_min_points</td><td class="num">2</td><td>A box left with fewer falls back to the unfiltered set, so a sparsely-sampled object is never placed worse than before.</td></tr>
+      <tr><td class="p">segmentation_empty_fallback</td><td class="num">false</td><td>A box whose every return is ground publishes <b>nothing</b>. This reverses the original "never lose a detection" rule: 165 of the 169 emptied boxes were cones the LiDAR missed that sweep, and falling back placed them on a road ring — 27% of all position spikes.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s4" class="stage">
+  <div class="stage-head">
+    <div class="numeral">04</div>
+    <div>
+      <h2>The depth-jump gate</h2>
+      <div class="sub">Withhold one frame, never two</div>
+    </div>
+  </div>
+
+  <p>The jumps that remain are one-frame depth spikes: 82% lie along the line of sight (median 5.8 m along, 0.38 m across) while the 2D box stays still in the image. No per-frame selection rule fixed them — centre crops, 3D clustering by size or centrality, prediction-chosen clusters all left 11–13% big jumps. So the measurement is <em>refused</em> instead of repaired.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg class="diagram" viewBox="0 0 900 300" role="img" aria-label="Range against time for one tracker id: a constant-velocity prediction with a tolerance band; a frame outside the band is withheld, and a second consecutive disagreement is accepted as a real change.">
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <line x1="70" y1="250" x2="860" y2="250" stroke="currentColor"/>
+          <line x1="70" y1="30" x2="70" y2="250" stroke="currentColor"/>
+          <text x="40" y="40" fill="currentColor" font-size="10">range</text>
+          <text x="860" y="270" text-anchor="end" fill="currentColor" font-size="10">frames, 10 Hz</text>
+
+          <!-- accepted track -->
+          <g fill="#2f6ee0">
+            <circle cx="130" cy="90" r="5"/><circle cx="210" cy="110" r="5"/><circle cx="290" cy="130" r="5"/>
+            <circle cx="370" cy="150" r="5"/><circle cx="530" cy="190" r="5"/><circle cx="610" cy="210" r="5"/>
+          </g>
+          <polyline points="130,90 210,110 290,130 370,150" fill="none" stroke="#2f6ee0" stroke-width="1.5"/>
+          <polyline points="450,170 530,190 610,210" fill="none" stroke="#2f6ee0" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+          <!-- gate band -->
+          <rect x="430" y="150" width="40" height="40" fill="#2f6ee0" opacity="0.13"/>
+          <line x1="450" y1="150" x2="450" y2="190" stroke="#2f6ee0" stroke-dasharray="2 2"/>
+          <circle cx="450" cy="170" r="4" fill="none" stroke="#2f6ee0" stroke-dasharray="2 2"/>
+          <text x="450" y="142" text-anchor="middle" fill="#2f6ee0" font-size="10">prediction</text>
+          <text x="492" y="176" fill="#2f6ee0" font-size="10">± max(1.5 m, 5% of range)</text>
+
+          <!-- outlier -->
+          <circle cx="450" cy="66" r="5" fill="#b03a3a"/>
+          <line x1="450" y1="72" x2="450" y2="150" stroke="#b03a3a" stroke-dasharray="3 3"/>
+          <text x="458" y="60" fill="#b03a3a" font-size="11">measurement 6 m off → withheld (box blinks for 0.1 s)</text>
+
+          <!-- second miss -->
+          <circle cx="690" cy="100" r="5" fill="#b03a3a"/>
+          <circle cx="770" cy="96" r="5" fill="#2f6ee0"/>
+          <text x="690" y="88" text-anchor="middle" fill="#b03a3a" font-size="10">miss</text>
+          <text x="782" y="86" fill="#2f6ee0" font-size="10">second disagreement in a row → accepted,</text>
+          <text x="782" y="100" fill="#2f6ee0" font-size="10">history restarts (a real manoeuvre, or a</text>
+          <text x="782" y="114" fill="#2f6ee0" font-size="10">ByteTrack id handed to another object)</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>State is per ByteTrack id: the last two accepted positions extrapolate at constant velocity; a measurement further than the gate is withheld once. Gate width barely matters — every combination from 0.75–2.5 m and 2–8% lands at 1.5–2.0% spikes with the same radar agreement, so the defaults sit on a plateau, not on a tuned optimum.</figcaption>
+  </figure>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Spike rate (&gt;2 m from the same id's neighbours)</th><th class="num">All</th><th class="num">Cones</th><th class="num">Vehicles</th></tr></thead>
+    <tbody>
+      <tr><td>old rule (no segmentation)</td><td class="num">15.4%</td><td class="num">28.4%</td><td class="num">2.3%</td></tr>
+      <tr><td>+ segmentation</td><td class="num">8.2%</td><td class="num">12.9%</td><td class="num">3.5%</td></tr>
+      <tr><td>+ empty-box drop</td><td class="num">5.2%</td><td class="num">7.4%</td><td class="num">3.3%</td></tr>
+      <tr><td><b>+ depth gate (live)</b></td><td class="num"><b>1.5%</b></td><td class="num"><b>1.6%</b></td><td class="num"><b>1.5%</b></td></tr>
+    </tbody>
+  </table></div>
+  <p>Cost: 6.3% of detections withheld, nearly all cones — 3.7% empty boxes plus 2.5% single inconsistent frames. Range agreement with radar improves in every band out to 80 m at the same time (60–80 m spread 2.76 → 1.75 m).</p>
+</section>
+
+<section id="s5" class="stage">
+  <div class="stage-head">
+    <div class="numeral">05</div>
+    <div>
+      <h2>Class vote</h2>
+      <div class="sub">A box is sized by the class the tracker has seen, not the latest label</div>
+    </div>
+  </div>
+
+  <p>Extent estimation is off, so an object's size comes from a per-class table. That makes a one-frame relabel a resize. A truck passing at 9 m was labelled <code>train</code> for its last 2 of 41 frames, and <code>train</code> in the table is 200 m × 3.2 m — a 200 m bar across the scene.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg class="diagram" viewBox="0 0 900 220" role="img" aria-label="Label timeline for one tracker id: thirty-nine truck frames then two train frames; a two-second score-weighted majority keeps the size at truck.">
+        <defs>
+          <marker id="ar-vote" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <text x="14" y="20" fill="currentColor" font-size="12">tracker id 130 · YOLO label per frame</text>
+          <g>
+            <rect x="60" y="40" width="620" height="26" rx="3" fill="#2f6ee0" opacity="0.18"/>
+            <text x="370" y="58" text-anchor="middle" fill="#2f6ee0">39 frames · truck · score ≈ 0.8</text>
+            <rect x="684" y="40" width="80" height="26" rx="3" fill="#b03a3a" opacity="0.22"/>
+            <text x="724" y="58" text-anchor="middle" fill="#b03a3a">train ×2</text>
+          </g>
+          <line x1="524" y1="76" x2="524" y2="112" stroke="currentColor" stroke-dasharray="3 3"/>
+          <line x1="764" y1="76" x2="764" y2="112" stroke="currentColor" stroke-dasharray="3 3"/>
+          <path d="M524 100 H764" stroke="currentColor" marker-end="url(#ar-vote)" marker-start="url(#ar-vote)" fill="none"/>
+          <text x="644" y="94" text-anchor="middle" fill="currentColor" font-size="10">class_vote_window_s = 2.0 s</text>
+
+          <text x="60" y="146" fill="currentColor">score-weighted majority in the window</text>
+          <text x="60" y="170" fill="#2f6ee0">→ truck · 5.3 × 1.9 m box, unchanged through the relabel</text>
+          <text x="60" y="196" fill="currentColor" opacity="0.6">without the vote → 200 × 3.2 m for two frames</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The window is in capture seconds, so a genuine reclassification still takes over once it holds the majority — a far "car" that resolves into a truck switches after about a second. Measured on the long drive: a frame's label disagrees with its id's recent majority on 2.3% of detections, and 45 of those would have changed the box length by more than 2 m (mostly truck ↔ bus, 5.3 ↔ 12 m).</figcaption>
+  </figure>
+</section>
+
+<section id="s6" class="stage">
+  <div class="stage-head">
+    <div class="numeral">06</div>
+    <div>
+      <h2>Position covariance</h2>
+      <div class="sub">Anisotropic, in the ray frame, from measured spreads</div>
+    </div>
+  </div>
+
+  <p>A camera+LiDAR object is far better known across the ray than along it, and the radar is the mirror image. Every measurement therefore carries a 2D covariance built in its own sensor's natural axes and rotated into the frame — which is what lets radar repair range without dragging the object sideways.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg class="diagram" viewBox="0 0 900 300" role="img" aria-label="Camera plus LiDAR uncertainty is a thin ellipse elongated along the ray; radar uncertainty is a thin arc across it; beyond eighty metres the camera range component is dropped entirely.">
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <circle cx="60" cy="230" r="5" fill="currentColor"/>
+          <text x="60" y="256" text-anchor="middle" fill="currentColor" font-size="10">sensor</text>
+
+          <!-- rays -->
+          <line x1="60" y1="230" x2="420" y2="120" stroke="currentColor" stroke-dasharray="3 3"/>
+          <line x1="60" y1="230" x2="820" y2="80" stroke="currentColor" stroke-dasharray="3 3"/>
+
+          <!-- camera ellipse at 40 m -->
+          <ellipse cx="360" cy="134" rx="30" ry="7" transform="rotate(-17 360 134)" fill="#2f6ee0" opacity="0.28" stroke="#2f6ee0"/>
+          <text x="360" y="112" text-anchor="middle" fill="#2f6ee0" font-size="10">camera+LiDAR at 40 m</text>
+          <text x="360" y="168" text-anchor="middle" fill="#2f6ee0" font-size="10">σ along 1.09 m · σ across 0.26 m</text>
+
+          <!-- radar arc at 40 m -->
+          <path d="M330 168 A 300 300 0 0 1 392 148" fill="none" stroke="#d9761b" stroke-width="7" opacity="0.5"/>
+          <text x="470" y="180" fill="#d9761b" font-size="10">radar: σ range 0.1 m, σ azimuth 1.0°</text>
+
+          <!-- far field -->
+          <ellipse cx="760" cy="90" rx="58" ry="7" transform="rotate(-11 760 90)" fill="#2f6ee0" opacity="0.18" stroke="#2f6ee0" stroke-dasharray="4 3"/>
+          <text x="760" y="64" text-anchor="middle" fill="#2f6ee0" font-size="10">beyond 80 m the along-ray</text>
+          <text x="760" y="50" text-anchor="middle" fill="#2f6ee0" font-size="10">component is DROPPED, not inflated</text>
+          <text x="760" y="120" text-anchor="middle" fill="currentColor" font-size="10">(range there is biased −7.6 m, not noisy)</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Along-ray sigma is a measured table, not a formula: neither a linear fit nor a constant reproduces it, because the spread is a mixture of well-placed and road-adopted objects whose proportions change with range.</figcaption>
+  </figure>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th class="num">Range</th><th class="num">20 m</th><th class="num">30</th><th class="num">40</th><th class="num">50</th><th class="num">60</th><th class="num">72</th><th class="num">90</th><th class="num">150</th></tr></thead>
+    <tbody>
+      <tr><td class="p">σ along (m)</td><td class="num">1.27</td><td class="num">0.64</td><td class="num">1.09</td><td class="num">1.30</td><td class="num">1.53</td><td class="num">1.85</td><td class="num">6.82</td><td class="num">20.21</td></tr>
+      <tr><td class="p">σ across (m)</td><td class="num">0.18</td><td class="num">0.22</td><td class="num">0.26</td><td class="num">0.30</td><td class="num">0.34</td><td class="num">0.39</td><td class="num">0.46</td><td class="num">0.70</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="why"><b>Cross-ray, bracketed rather than guessed.</b> It was an invented 0.5 + 0.010·r. Two independent measurements now bound it: the lateral spread against radar azimuth is 0.18–0.78 m, but at every band that is <em>entirely</em> the ESR's own 0.5° — the object's share is unmeasurable with that ruler. The track's own lateral jitter (a second difference, so immune to slow bias) gives 0.045–0.14 m. The model sits between them at <code>0.10 + 0.004·r</code>. Tightening it fixed the 60–80 m band in the filter (2.0 → 0.9 m) and the error tail (p90 27.2 → 21.1 m).</div>
+</section>
+
+<section id="s7" class="stage">
+  <div class="stage-head">
+    <div class="numeral">07</div>
+    <div>
+      <h2>Radar detector</h2>
+      <div class="sub">Deliberately dumb: gate, convert, publish</div>
+    </div>
+  </div>
+
+  <p>One <code>Detection3D</code> per surviving ESR track, carrying the <em>native polar</em> fields plus a derived Cartesian pose. All association intelligence lives in the aggregator, because converting to Cartesian here would throw away the good axis.</p>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Gate</th><th class="num">Value</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td class="p">min_range / max_range</td><td class="num">1.0 / 175 m</td><td>Sensor span.</td></tr>
+      <tr><td class="p">min_amplitude</td><td class="num">−1e9 (off)</td><td>−10 is this sensor's floor, not a weak return: ~30% of real tracks sit on it and a 0.0 threshold discards ~72%.</td></tr>
+      <tr><td class="p">min_update_count</td><td class="num">0 (off)</td><td>The driver never populates the field; any positive value drops 100% of tracks.</td></tr>
+    </tbody>
+  </table></div>
+  <p>Radar rate is bag-dependent — 29.9 Hz on the selfcal drives, 20.9 Hz on the adps ones — so nothing downstream assumes half a period is 17 ms.</p>
+</section>
+
+<section id="s8" class="stage">
+  <div class="stage-head">
+    <div class="numeral">08</div>
+    <div>
+      <h2>Aggregator</h2>
+      <div class="sub">Capture-ordered queue, CV EKF, polar radar updates</div>
+    </div>
+  </div>
+
+  <p>Three streams at three rates with three latencies cannot be paired two at a time. Measurements are buffered, sorted by their own capture stamp, and released when <code>now − stamp &gt; measurement_lag</code>; each released measurement predicts the filter forward to <em>its own</em> stamp and then updates.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg class="diagram" viewBox="0 0 900 260" role="img" aria-label="Radar measurements at thirty hertz and camera measurements at ten hertz are buffered and released in capture-stamp order after a fixed lag of one hundred and twenty milliseconds, each predicting the filter to its own stamp before updating.">
+        <defs>
+          <marker id="ar-q" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <text x="14" y="20" fill="currentColor" font-size="12">arrival (wall clock) → queue → release in capture order</text>
+          <!-- radar row -->
+          <text x="60" y="66" fill="#d9761b" font-size="11">radar 30 Hz</text>
+          <g fill="#d9761b">
+            <circle cx="180" cy="62" r="4"/><circle cx="212" cy="62" r="4"/><circle cx="244" cy="62" r="4"/>
+            <circle cx="276" cy="62" r="4"/><circle cx="308" cy="62" r="4"/><circle cx="340" cy="62" r="4"/>
+            <circle cx="372" cy="62" r="4"/><circle cx="404" cy="62" r="4"/>
+          </g>
+          <!-- camera row -->
+          <text x="60" y="110" fill="#2f6ee0" font-size="11">camera 10 Hz</text>
+          <g fill="#2f6ee0">
+            <circle cx="196" cy="106" r="5"/><circle cx="292" cy="106" r="5"/><circle cx="388" cy="106" r="5"/>
+          </g>
+          <text x="196" y="130" text-anchor="middle" fill="currentColor" opacity="0.6" font-size="9">arrives late: YOLO + pairing</text>
+
+          <!-- queue box -->
+          <rect x="470" y="40" width="150" height="90" rx="5" fill="none" stroke="currentColor"/>
+          <text x="545" y="72" text-anchor="middle" fill="currentColor">fixed-lag queue</text>
+          <text x="545" y="92" text-anchor="middle" fill="currentColor" font-size="10">measurement_lag</text>
+          <text x="545" y="108" text-anchor="middle" fill="currentColor" font-size="10">= 0.12 s</text>
+
+          <g stroke="currentColor" fill="none" marker-end="url(#ar-q)">
+            <path d="M420 62 H466"/>
+            <path d="M404 106 H466 V96"/>
+            <path d="M620 86 H700"/>
+          </g>
+
+          <!-- filter -->
+          <rect x="702" y="52" width="170" height="66" rx="5" fill="none" stroke="#2f6ee0" stroke-width="1.5"/>
+          <text x="787" y="78" text-anchor="middle" fill="#2f6ee0">predict → update</text>
+          <text x="787" y="98" text-anchor="middle" fill="#2f6ee0" font-size="10">CV, Joseph form</text>
+
+          <text x="60" y="180" fill="currentColor" font-size="11">camera update: 2-D position, χ² gate 9.21, escape after 3 rejects</text>
+          <text x="60" y="204" fill="#d9761b" font-size="11">radar update: h(x) = [range, range rate, azimuth], χ² gate 16.27</text>
+          <text x="60" y="228" fill="currentColor" font-size="11">ego motion: odom twist only, integrated — never differenced from the pose</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The queue keeps the repo's invariant — compare capture stamps, never arrival stamps — while handling N streams. Output always carries the capture stamp; nothing is forward-predicted to wall-clock now, which would hide the latency from every consumer.</figcaption>
+  </figure>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Parameter</th><th class="num">Value</th><th>Why this value</th></tr></thead>
+    <tbody>
+      <tr><td class="p">measurement_lag</td><td class="num">0.12 s</td><td>The camera path is the slowest; <code>fusion_node</code> already budgets 0.06 s of pairing skew on top of inference.</td></tr>
+      <tr><td class="p">sigma_long / sigma_lat</td><td class="num">2.0 / 1.0 m/s²</td><td>Process noise as piecewise-constant white acceleration, anisotropic in the track's own axes. Swept 2/1, 4/2, 8/4 — all beat the raw measurement on jumps; 2/1 is the best on accuracy and tail.</td></tr>
+      <tr><td class="p">RANGE_TRUST_MAX_M</td><td class="num">80 m</td><td>Beyond it the camera+LiDAR range is not noisy but <em>wrong</em> (−7.6 m at 80–100, −32 m past 100). No covariance expresses a bias, so the along-ray component is dropped and radar owns range.</td></tr>
+      <tr><td class="p">CAMERA_GATE_CHI2</td><td class="num">9.21</td><td>Innovations are a heavy-tailed mixture; no single σ satisfies both the mean and the under-gate fraction. Gating the outlier population beat inflating σ (NIS mean 11.2 → 1.54).</td></tr>
+      <tr><td class="p">RADAR_GATE_CHI2</td><td class="num">16.266</td><td>Radar NIS is already calibrated — 94.5–96.9% under-gate in every band from 0 to 180 m. Left alone.</td></tr>
+      <tr><td class="p">assoc_max_dist<br>sticky_sanity_dist</td><td class="num">6.0 m<br>20.0 m</td><td>A ByteTrack id is a hard claim on its track, subject only to the outer sanity bound: when the fused position jumps, the id is stable in the image even though the 3D position is not.</td></tr>
+      <tr><td class="p">publish_mode</td><td class="num">passthrough</td><td>Publishes the raw measurement. See below — the filter now beats it, but switching the default is a decision to take with eyes on RViz.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="why"><b>Does the filter earn its keep?</b> Measured with radar held out of one camera track in four, so the scored tracks never saw the reference (n = 425 paired): median range error <b>1.57 → 1.21 m</b>, p90 <b>14.8 → 12.4 m</b>, jumps &gt; 2 m <b>4.4% → 2.9%</b>, lag +0.04 m. By band it wins everywhere: 60–80 m goes 3.17 → 0.76 m, 80–100 m 4.38 → 3.75 m. The earlier verdict that the filter was worse than its input was measured on the superseded measurement stream, with radar updates switched off.</div>
+  <p class="warn">Scoring a radar-updated state against radar range is circular — it "wins" at 0.25 m by construction. Only the held-out numbers above are evidence.</p>
+
+  <h3>The clock: two rules that look contradictory and are not</h3>
+  <p>Measurements do not arrive in capture order — the camera path is slower than the radar's, and the node counts hundreds of late releases per drive. Two different backwards jumps need two different answers, and getting one of them wrong froze the filter completely.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg class="diagram" viewBox="0 0 900 250" role="img" aria-label="A measurement arriving tens of milliseconds late must not move the clock backwards, while a loop restart jumping back by the length of the bag must reset the tracks and the clock.">
+        <defs>
+          <marker id="ar-clk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+          <line x1="60" y1="120" x2="860" y2="120" stroke="currentColor" marker-end="url(#ar-clk)"/>
+          <text x="60" y="146" fill="currentColor" font-size="10">capture stamp</text>
+
+          <g fill="#2f6ee0">
+            <circle cx="140" cy="120" r="5"/><circle cx="215" cy="120" r="5"/><circle cx="290" cy="120" r="5"/><circle cx="440" cy="120" r="5"/>
+          </g>
+          <circle cx="365" cy="120" r="5" fill="#d9761b"/>
+          <text x="365" y="100" text-anchor="middle" fill="#d9761b" font-size="10">arrives late</text>
+          <path d="M290 88 q 37 -26 75 0" fill="none" stroke="#d9761b" stroke-dasharray="3 3"/>
+          <text x="330" y="160" text-anchor="middle" fill="currentColor" font-size="10">−30 ms</text>
+          <text x="330" y="176" text-anchor="middle" fill="#d9761b" font-size="11">clock HOLDS · update still applied</text>
+
+          <line x1="560" y1="70" x2="560" y2="170" stroke="#b03a3a" stroke-width="1.5" stroke-dasharray="4 4"/>
+          <circle cx="620" cy="120" r="5" fill="#b03a3a"/>
+          <path d="M700 96 q -40 -22 -80 16" fill="none" stroke="#b03a3a" stroke-dasharray="3 3"/>
+          <text x="712" y="92" fill="#b03a3a" font-size="10">loop restart: −18 s</text>
+          <text x="700" y="176" text-anchor="middle" fill="#b03a3a" font-size="11">clock RESETS · tracks dropped</text>
+          <text x="700" y="192" text-anchor="middle" fill="currentColor" font-size="10">threshold: REWIND_S = 1 s</text>
+
+          <text x="60" y="222" fill="currentColor" font-size="11">pinning the clock instead cost every prediction: 74% of measurements at dt ≤ 0, median −8.3 s</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>A late arrival must not rewind the clock, or the next measurement re-applies ego motion it already applied. A loop restart must reset it, or nothing is ever predicted again. One threshold separates them.</figcaption>
+  </figure>
+
+  <div class="why"><b>Three motion bugs, found by watching RViz (2026-09-16).</b> Filtered tracks sat behind their own detections: the box closed at 6.43 m/s while the object approached at 3.01, sitting 0.79 m nearer than its measurement between camera frames. The cause was not radar, association or process noise — every ablation gave the same answer — but the prediction clock <em>rewinding</em>. A measurement released out of capture order (the camera path is slower than the radar's; <code>late</code> counts hundreds per drive) set <code>_last_t</code> backwards, so the next measurement predicted across an interval already applied and ego motion counted twice. Static objects then drifted forward at ~35% of ego speed. Fixed with <code>_last_t = max(_last_t, t)</code>: the offset between track and measurement went to <b>+0.00 m</b> and the spurious speed to <b>0.00 m/s</b>. A second, offline-only bug had the harness pre-load a whole drive into an 8 s twist buffer, which kept its last 8 s and served a twist from minutes later; ego displacement integrated to 86.3% of v·dt. <b>And the first fix created a third bug:</b> on a looping replay the clock pinned at the highest stamp ever seen, so from the second loop onward nothing was predicted at all — the track's range froze (<b>+0.00 m/s</b> while the object closed at 24.99 m/s), sat 6.79 m from its own measurement, and lagged 310 ms. With the rewind rule above: <b>1.46 m</b>, closing at <b>−24.22 m/s</b>, lag <b>70 ms</b>, and <code>dt ≤ 0</code> on 0 of 595 measurements. All three are regression-tested, and the twist buffer now refuses a stamp far before its range instead of clamping.</div>
+
+  <div class="why"><b>The merge rule was swallowing cones (2026-09-16).</b> Tracks vanished that the measurements clearly had. <code>should_merge</code>'s range-generous clause exists to reconcile a camera branch sitting 14 m short of its radar branch past 80 m — but a line of traffic cones has the same signature: consecutive cones within a degree of bearing, metres apart in range. Measured as measurements with no track within 3 m: <b>30.6%</b> orphaned, against a <b>7.8%</b> floor with merging off; association width (29.1%) and the camera gate (25.4%) were not the cause. The clause now requires the two tracks to come from different branches — two camera-backed tracks are two objects the camera saw separately — and a range of at least 60 m, where the camera's range actually is unreliable. That takes it to <b>17.2%</b>.</div>
+
+  <div class="why"><b>…and the rest of it was the Mahalanobis clause, which never bounded a distance (2026-09-16).</b> That clause measures separation in units of the two tracks&rsquo; covariance, and a coasting track&rsquo;s covariance grows without limit: at 2&nbsp;m sigma the 99% two-degree-of-freedom value spans 8.6&nbsp;m, past the next cone in a line. So the clause written to collapse a track onto its own duplicate was reaching across to the neighbour. The fix bounds the reach in metres — <code>max_merge_dist&nbsp;=&nbsp;2.5&nbsp;m</code>, between a duplicate (under 2&nbsp;m apart) and the next cone up the line (5&nbsp;m and more). Measured live over a full 398&nbsp;s replay loop: orphaned measurements <b>15.7% &rarr; 10.5%</b>, while two boxes landing on one measurement went 1.3% &rarr; 3.0%. Tightening the chi-square instead was measured and rejected — it switches merging off entirely (the node logs <code>merged=0</code> for a whole replay) and doubles boxes to 5.6%.</div>
+</section>
+
+<section id="params" class="stage">
+  <div class="stage-head">
+    <div class="numeral">§</div>
+    <div>
+      <h2>Parameter reference</h2>
+      <div class="sub">Every default, and how to put it back</div>
+    </div>
+  </div>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Parameter</th><th class="num">Default</th><th>Rollback / note</th></tr></thead>
+    <tbody>
+      <tr><td class="p">ground_levelling</td><td class="num">true</td><td><code>--no-levelling</code> — near-field labels revert to the unlevelled pass</td></tr>
+      <tr><td class="p">levelling_near_range</td><td class="num">25.0 m</td><td>Boundary between levelled and raw labels</td></tr>
+      <tr><td class="p">max_odom_gap_s</td><td class="num">0.2 s</td><td>No attitude within this of the sweep stamp → unlevelled</td></tr>
+      <tr><td class="p">enable_depth_gate</td><td class="num">true</td><td><code>--no-depth-gate</code></td></tr>
+      <tr><td class="p">depth_gate_min_m / _range_frac</td><td class="num">1.5 m / 0.05</td><td>On a plateau; 0.75–2.5 m and 2–8% all equivalent</td></tr>
+      <tr><td class="p">enable_class_vote</td><td class="num">true</td><td><code>--no-class-vote</code></td></tr>
+      <tr><td class="p">class_vote_window_s</td><td class="num">2.0 s</td><td>Capture seconds, score-weighted</td></tr>
+      <tr><td class="p">segmentation_empty_fallback</td><td class="num">false</td><td>true restores "never lose a detection"</td></tr>
+      <tr><td class="p">projection_topic</td><td class="num">ground-flagged</td><td>Set by <code>run_fusion.sh --ground</code>; without it the detector reads the old projection and segmentation is inert</td></tr>
+      <tr><td class="p">ground_max_range</td><td class="num">120 m</td><td>80 m and 150 m both measurably worse</td></tr>
+      <tr><td class="p">sensor_height / camera_height_m</td><td class="num">2.37 / 1.5275 m</td><td>Measured; camera height is derived from it and the camera_fl extrinsic</td></tr>
+      <tr><td class="p">ego_yaw_correction_deg</td><td class="num">−5.35°</td><td>0.0 reproduces today's uncorrected frame</td></tr>
+      <tr><td class="p">measurement_lag</td><td class="num">0.12 s</td><td>Raise if <code>late</code> counters climb</td></tr>
+      <tr><td class="p">publish_mode</td><td class="num">passthrough</td><td><code>filtered</code> publishes the EKF state with covariance and velocity</td></tr>
+      <tr><td class="p">REWIND_S</td><td class="num">1.0 s</td><td>Backwards jump above this = a bag rewind: drop the tracks, clear odometry, restart the clock. Below it, an out-of-order arrival that must not move the clock back</td></tr>
+      <tr><td class="p">split_branch_only</td><td class="num">true</td><td>The range-generous merge clause fires only between a camera-backed track and a radar-only one</td></tr>
+      <tr><td class="p">min_range_for_gap</td><td class="num">60 m</td><td>…and only out there, where the camera's range is actually unreliable</td></tr>
+      <tr><td class="p">max_merge_dist</td><td class="num">2.5 m</td><td>Hard bound on the Mahalanobis clause's reach. <code>inf</code> restores the unbounded behaviour, which cost 5 points of cones</td></tr>
+      <tr><td class="p">assoc_max_dist</td><td class="num">6 m</td><td>Widest gap at which a detection may claim a track. 4 m recovers 1.5 points more objects and pays 2.6 in duplicate boxes — measured, rejected</td></tr>
+    </tbody>
+  </table></div>
+
+  <pre># the whole stack, replay
+scripts/run_radar.sh  --replay ~/selfcal_loc_2026-09-08_11-47-43 --obstacle-only
+scripts/run_fusion.sh --replay ~/selfcal_loc_2026-09-08_11-47-43 --ground --debug-clouds
+scripts/play_rosbag.sh -l ~/selfcal_loc_2026-09-08_11-47-43     # from the START: tf_static
+
+# switch one rule off without rebuilding
+scripts/run_fusion.sh --ground --no-depth-gate</pre>
+</section>
+
+<section id="off" class="stage">
+  <div class="stage-head">
+    <div class="numeral">§</div>
+    <div>
+      <h2>Switched off, and why</h2>
+      <div class="sub">Built, measured, not enabled</div>
+    </div>
+  </div>
+
+  <div class="off"><b>enable_extent_estimation</b> — a BEV rectangle fit for real length, width and heading. Off by the user's decision after a live comparison; the fit is only identifiable within ~40 m, where 0.23 m ring spacing still puts ~6 rings on a 1.5 m body.</div>
+  <div class="off"><b>enable_camera_only_fallback</b> — ranging a box with no object return from where its bottom edge meets the road. The geometry is now correct (full extrinsic, local ground height; the old version treated image row <code>cy</code> as the horizon and put a 30 m cone at 200 m). It stays off because the residual is 3.3 m at 25 m and 10.1 m at 67 m: one pixel of box edge is 0.81 m of range at 67 m. Cones show a constant, fixable +0.7° offset; vehicles drift −0.08° → +0.91° with range.</div>
+  <div class="off"><b>enable_radar_only_birth</b> — creating tracks from radar alone. Blocked until the false-alarm rate is measured with the camera as a label; the often-quoted "81.5% radar-originated" is a ratio of candidate counts, not a measured false-alarm rate.</div>
+  <div class="off"><b>enable_centroid_correction</b> — pushing the visible-surface position back to the object centre. Off because both the LiDAR and the radar report a surface, and correcting one without the other builds a permanent ~2 m inconsistency that looks converged.</div>
+</section>
+
+<section id="limits" class="stage">
+  <div class="stage-head">
+    <div class="numeral">§</div>
+    <div>
+      <h2>Known limits</h2>
+      <div class="sub">What this chain still gets wrong</div>
+    </div>
+  </div>
+  <ul class="tight">
+    <li><b>Beyond 80 m</b> the camera+LiDAR range is biased, not noisy, and 12.6% of frames there still spike. The fix is radar-owned range, which only acts in <code>filtered</code> mode.</li>
+    <li><b>Inside 15 m</b> nothing is validated: those objects sit at 15–26° azimuth, the edge of the camera's field of view, where radar coverage is too sparse to serve as a ruler. Range error there reads −3.95 m and should not be quoted as accuracy.</li>
+    <li><b>Withheld frames blink.</b> 6.3% of detections publish nothing — the marker disappears for one frame rather than jumping.</li>
+    <li><b>10.5% of measurements have no track on them</b>, down from 15.7%, and under 80 m every band now sits at 7–11%. What is left is concentrated past 80 m, where the band is <b>30.5%</b> orphaned: out there the camera and the radar disagree about range by tens of metres, so no single track can sit on both. It is the same far-field failure as the first item in this list, seen from the aggregator's side.</li>
+    <li><b>The published position sits behind the measurement when radar has touched it</b> — 0.91 m, against 0.12 m for a track the radar never saw. That is the radar disagreeing with the camera (the radar itself sits 0.32 m behind), and 51% of tracks land between the two sensors. The tail is the open part: 19% sit beyond the radar return, where the return on that bearing is a different object behind the target.</li>
+    <li><b>A bag rewind drops every track</b> by design; the node logs it as <code>rewinds=</code>.</li>
+    <li><b>A genuine reclassification lags</b> up to ~2 s behind, by construction of the class vote.</li>
+    <li><b>Curve evidence is thin:</b> the levelling model rests on 232 + 15 curve sweeps across two drives. A curve-rich, cone-rich drive would firm it up.</li>
+    <li><b>The radar's lateral mounting offset is unresolved.</b> Fitting it on turning data gives −0.105 m against a surveyed −0.809, but split by turn direction it flips sign (−0.248 left, +0.040 right): sideslip at the sensor has the same signature, so the compensation stays off.</li>
+    <li><b>Objects exist only where the front-left camera looks.</b> The VLP-32C is 360°; the 360° clustering path is designed but unbuilt.</li>
+  </ul>
+</section>
+
+<footer>
+  <p>Every number here is measured on a named bag and reproducible from <code>scripts/</code>: <code>ground_ab.py</code> (point selection), <code>neighbour_ab.py</code> (box jumping, gates, classes), <code>lean_ab.py</code> (ground misclassification), <code>object_ab.py</code> (filter, NIS, ego yaw), <code>radar_ab.py</code> (radar conventions, lever arm), <code>fusion_isolation_check.sh</code> (does this stack disturb the old one). Each harness imports the production rule rather than a copy, and refuses to print metrics until it reproduces what the shipped node published.</p>
+  <p>Full working state, open questions and the prioritised to-do list live in <code>src/object_fusion/HANDOFF.md</code>.</p>
+</footer>
+</div>

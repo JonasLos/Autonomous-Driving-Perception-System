@@ -48,4 +48,6 @@ CMD ["/bin/bash", "-lc", \
         enable_depth_gate:=${ENABLE_DEPTH_GATE:-true} \
         enable_class_vote:=${ENABLE_CLASS_VOTE:-true} \
         segmentation_empty_fallback:=${SEGMENTATION_EMPTY_FALLBACK:-false} \
-        enable_camera_only_fallback:=${ENABLE_CAMERA_ONLY_FALLBACK:-false}"]
+        enable_camera_only_fallback:=${ENABLE_CAMERA_ONLY_FALLBACK:-false} \
+        assoc_max_dist:=${ASSOC_MAX_DIST:-6.0} \
+        merge_max_dist:=${MERGE_MAX_DIST:-2.5}"]

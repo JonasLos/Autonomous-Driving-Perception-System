@@ -107,7 +107,18 @@ class ObjectAggregatorNode(Node):
         # Widest Euclidean gap at which a camera detection may claim an existing track.
         # INVENTED; it is the one association bound here that is not in a sensor's native
         # space, and it exists only to stop a birth-per-frame in a crowded scene.
+        #
+        # Narrowing it to 4 m was measured and REJECTED. It does recover objects -- orphaned
+        # measurements 10.5% -> 9.0% over a full replay loop -- but it pays for them with
+        # births beside tracks that are still coasting: two published boxes on ONE measurement
+        # went 3.0% -> 5.6%. The merge distance bound below buys the same objects far more
+        # cheaply. ASSOC_MAX_DIST=4.0 reaches the measured alternative without a rebuild.
         self._assoc_max_dist = float(self.declare_parameter("assoc_max_dist", 6.0).value)
+        # How far apart two tracks may be and still be called one object. The Mahalanobis
+        # clause in should_merge cannot answer that on its own -- it measures distance in units
+        # of a covariance that grows without limit while a track coasts -- so the reach is
+        # bounded in metres here. Set it to inf to get the original unbounded behaviour back.
+        self._merge_max_dist = float(self.declare_parameter("merge_max_dist", 2.5).value)
         # Outer bound on a sticky ByteTrack claim. Generous on purpose: the claim is meant to
         # survive the 14 m road-adoption jump that breaks a position-only associator, and only
         # to refuse a RECYCLED id that would teleport a track.
@@ -329,7 +340,7 @@ class ObjectAggregatorNode(Node):
             self._apply_radar(meas.payload, t)
 
         self._store.prune(t)
-        self._store.merge_pass()
+        self._store.merge_pass(max_merge_dist=self._merge_max_dist)
         self._store.promote()
         self._publish(meas.payload.header, t)
 

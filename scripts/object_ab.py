@@ -240,7 +240,8 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
         sigma_along_scale=1.0, range_trust=None, cam_gate=None, collect_ab=False,
         radar_holdout=0, lever=True, radar_range_gate=60.0, collect_speed=False,
         merge=True, count_objects=False, merge_range_gap=20.0, merge_bearing_deg=1.5,
-        radar_birth=True, assoc_max_dist=6.0, sigma_cross_scale=1.0):
+        radar_birth=True, assoc_max_dist=6.0, sigma_cross_scale=1.0, merge_chi2=9.21,
+        merge_max_dist=2.5):
     """One arm. Returns a dict of diagnostics.
 
     ``collect_ab`` scores the RAW camera measurement (what publish_mode=passthrough publishes)
@@ -450,7 +451,8 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                     speed_log.setdefault("all", []).append((sp, ego_sp, cos))
         store.prune(t)
         if merge:
-            store.merge_pass(max_range_gap=merge_range_gap,
+            store.merge_pass(chi2=merge_chi2, max_merge_dist=merge_max_dist,
+                             max_range_gap=merge_range_gap,
                              max_bearing_deg=merge_bearing_deg)
         store.promote()
         if count_objects and meas.sensor == "camera_lidar":
@@ -460,7 +462,18 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
             # the user's metric: a measurement with no published box on it is a lost object
             orphan = sum(1 for p in xy
                          if not any(float(np.hypot(p[0]-q[0], p[1]-q[1])) < 3.0 for q in shown))
-            counts.setdefault("per_frame", []).append((len(xy), len(shown), orphan))
+            # what merging exists to prevent: two published boxes on one object. Counting
+            # tracks with nothing under them instead would mostly count objects this camera
+            # frame simply did not detect, which is not a duplicate.
+            dup = sum(1 for i, q in enumerate(shown)
+                      if any(float(np.hypot(q[0]-r[0], q[1]-r[1])) < 2.0
+                             for j, r in enumerate(shown) if j != i))
+            # and the failure the user saw in RViz: one box standing in for two cones
+            shared = sum(1 for q in shown
+                         if sum(1 for p in xy
+                                if float(np.hypot(p[0]-q[0], p[1]-q[1])) < 3.0) >= 2)
+            counts.setdefault("per_frame", []).append(
+                (len(xy), len(shown), orphan, dup, shared))
 
     return {"speed": speed_log, "nis": nis, "nis_banded": nis_banded, "static_speeds": static_speeds,
             "static_radial": static_radial, "static_rr_innov": static_rr_innov,
@@ -998,33 +1011,41 @@ def main():
 
     if args.count_objects:
         print("\n=== OBJECTS PUBLISHED vs MEASURED ===")
-        print(f"  {'arm':40s} {'meas/frame':>11s} {'published':>10s} {'ratio':>7s}"
-              f" {'orphaned':>10s} {'gated':>9s}")
-        for label, kw in (("node behaviour (no radar birth, merge on)", dict(radar_birth=False)),
-                          ("  merge OFF", dict(radar_birth=False, merge=False)),
-                          ("  merge range gap 20 -> 3 m", dict(radar_birth=False, merge_range_gap=3.0)),
-                          ("  merge bearing 1.5 -> 0.4 deg", dict(radar_birth=False, merge_bearing_deg=0.4)),
-                          ("  assoc 6 -> 2.5 m", dict(radar_birth=False, assoc_max_dist=2.5)),
-                          ("  assoc 2.5 m AND merge gap 3 m", dict(radar_birth=False, assoc_max_dist=2.5,
-                                                                   merge_range_gap=3.0)),
-                          ("  camera gate ON (chi2 9.21), as the node runs",
-                           dict(radar_birth=False, cam_gate=CAMERA_GATE_CHI2)),
-                          ("  gate ON + sigma_cross x3 (pre-2026-09-15)",
-                           dict(radar_birth=False, cam_gate=CAMERA_GATE_CHI2, sigma_cross_scale=3.0)),
-                          ("  range clause OFF (Mahalanobis only)",
-                           dict(radar_birth=False, merge_range_gap=0.0)),
-                          ("  gate ON + sigma_cross x3 + assoc 2.5 m",
-                           dict(radar_birth=False, cam_gate=CAMERA_GATE_CHI2, sigma_cross_scale=3.0,
-                                assoc_max_dist=2.5))):
+        print("  orphaned = a measurement with no track within 3 m (objects lost)")
+        print("  dup      = a published track within 2 m of another one (two boxes, one object)")
+        print("  shared   = a published track covering 2+ measurements (one box, two objects)")
+        print(f"  {'arm':40s} {'meas/frame':>11s} {'published':>10s} {'orphaned':>10s}"
+              f" {'dup':>9s} {'shared':>9s}")
+        base = dict(radar_birth=False, cam_gate=CAMERA_GATE_CHI2)   # what the node runs
+        # The merge gate's reach is bounded two ways: in units of covariance (chi2) and in
+        # metres (merge_max_dist). Only the second tells a duplicate from the next cone.
+        for label, kw in (("LIVE NOW: bound 2.5 m, chi2 9.21, assoc 6 m", dict()),
+                          ("  as first shipped: no bound, assoc 6 m",
+                           dict(merge_max_dist=float("inf"))),
+                          ("  merge OFF entirely (the floor)", dict(merge=False)),
+                          ("  chi2 -> 4.0, still unbounded", dict(merge_chi2=4.0,
+                                                                  merge_max_dist=float("inf"))),
+                          ("  chi2 -> 4.0, unbounded, assoc 4 m (rejected: merging never fires)",
+                           dict(merge_chi2=4.0, merge_max_dist=float("inf"),
+                                assoc_max_dist=4.0)),
+                          ("  bound 2.5 m, chi2 9.21, assoc 4 m (rejected: doubles boxes)",
+                           dict(assoc_max_dist=4.0)),
+                          ("  bound 1.5 m, chi2 9.21, assoc 4 m", dict(merge_max_dist=1.5,
+                                                                       assoc_max_dist=4.0)),
+                          ("  bound 3.5 m, chi2 9.21, assoc 4 m", dict(merge_max_dist=3.5,
+                                                                       assoc_max_dist=4.0)),
+                          ("  bound 2.5 m, chi2 9.21, assoc 5 m", dict(assoc_max_dist=5.0))):
+            kw = {**base, **kw}
             d = run(fused, radar, odom, R_sl, t_sl, ego_yaw_deg=-5.35, max_frames=args.max_frames,
                     count_objects=True, **kw)
             pf = np.array(d["counts"].get("per_frame", []))
             if pf.size:
-                m, p, orph = pf[:, 0].mean(), pf[:, 1].mean(), pf[:, 2].sum() / max(pf[:, 0].sum(), 1)
-                gated = d["counts"].get("cam_gated", 0)
-                applied = d["counts"].get("cam_updates", 0)
-                print(f"  {label:40s} {m:11.2f} {p:10.2f} {p/max(m,1e-9):7.2f}"
-                      f" {100*orph:9.1f}% {100*gated/max(gated+applied,1):8.1f}%")
+                m, p = pf[:, 0].mean(), pf[:, 1].mean()
+                orph = pf[:, 2].sum() / max(pf[:, 0].sum(), 1)
+                dup = pf[:, 3].sum() / max(pf[:, 1].sum(), 1)
+                shr = pf[:, 4].sum() / max(pf[:, 1].sum(), 1)
+                print(f"  {label:40s} {m:11.2f} {p:10.2f} {100*orph:9.1f}%"
+                      f" {100*dup:8.1f}% {100*shr:8.1f}%")
 
     if args.track_speed:
         print("\n=== TRACK SPEED -- what the filter thinks objects are doing ===")

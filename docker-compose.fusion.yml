@@ -32,4 +32,8 @@ services:
       ENABLE_CLASS_VOTE: "${ENABLE_CLASS_VOTE:-true}"
       SEGMENTATION_EMPTY_FALLBACK: "${SEGMENTATION_EMPTY_FALLBACK:-false}"
       ENABLE_CAMERA_ONLY_FALLBACK: "${ENABLE_CAMERA_ONLY_FALLBACK:-false}"
+      # The aggregator's two association widths. ASSOC_MAX_DIST=6.0 MERGE_MAX_DIST=inf is the
+      # behaviour as first shipped, kept reachable for A/B.
+      ASSOC_MAX_DIST: "${ASSOC_MAX_DIST:-6.0}"
+      MERGE_MAX_DIST: "${MERGE_MAX_DIST:-2.5}"
       OMP_NUM_THREADS: "${OMP_NUM_THREADS:-4}"

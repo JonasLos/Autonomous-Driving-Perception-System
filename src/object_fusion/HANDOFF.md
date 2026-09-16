@@ -8,12 +8,23 @@ at any point. `git status` shows the same 12 pre-existing entries it did at the 
 **Start with "TO DO" at the bottom of this file** -- it is the prioritised plan, each item with
 its steps and a done-when test.
 
-**User constraints -- keep obeying them:** never modify a pre-existing repository file
-(`git status --short | grep -v '^??'` must show exactly the 12 pre-existing entries); never touch
+**User constraints -- keep obeying them:** never modify a pre-existing repository file; never touch
 the existing pipeline in `Custom_YOLO_ROS`; all new code lives in `object_fusion` or new files.
 Runtime `ros2 param set` is fine. Measure offline before changing behaviour and show the user the
 numbers. sudo needs a password -- never ask for it; `systemctl --no-ask-password reboot` works,
-restarting system services (e.g. anydesk) does not. Nothing is committed yet (all untracked).
+restarting system services (e.g. anydesk) does not.
+
+**The work is COMMITTED** (by the user, 2026-09-16) on branch **`radar_integration_and_fusion`**,
+commit `e462094`, which also carried the 12 pre-existing modifications that were already in the
+working tree. So the old isolation check -- "`git status` shows exactly 12 entries" -- no longer
+applies; the tree is clean. Check isolation instead with
+`git diff --name-only e462094..HEAD` and confirm every path is new work
+(`src/object_fusion/`, `src/custom_msgs/fusion_msgs/`, `scripts/*_ab.py`, `scripts/run_fusion.sh`,
+`scripts/fusion_isolation_check.sh`, `scripts/isolation_compare.py`,
+`scripts/record_baseline_replay.sh`, `scripts/live_orphans.py`, `scripts/radar_pull.py`,
+`docker/Dockerfile.object_fusion`, `docker-compose.fusion*`). As of 2026-09-16 the tree carries
+nine modified paths, every one of them first added by `e462094` itself -- check with
+`git log --oneline --diff-filter=A -- <path>`.
 
 **Live demo** (the user watches RViz on DISPLAY=:1). The `perception-object-fusion` image is
 current as of 2026-09-15; rebuild only after code changes.
@@ -33,7 +44,7 @@ reinstall host Patchwork++ per "Run it" before any offline harness.
 **Live by default (all measured, all with a rollback parameter):** Patchwork++ ground flags
 (`--ground`), empty-box drop (`segmentation_empty_fallback:=true` reverts), depth-jump gate
 (`enable_depth_gate`), class vote (`enable_class_vote`), near-field odometry levelling
-(`ground_levelling`). `publish_mode` stays `passthrough`, extent estimation off (user's choice).
+(`ground_levelling`), merge distance bound (`MERGE_MAX_DIST=inf` reverts). `publish_mode` stays `passthrough`, extent estimation off (user's choice).
 
 **This version is the one the user watched and called good** (2026-09-16, on
 `adps_2026-08-25_11-58-32` in `publish_mode:=filtered`). It carries the three motion fixes and the
@@ -57,6 +68,8 @@ scripts/lean_ab.py            ground misclassification in curves (levelling vari
 scripts/run_fusion.sh         bring-up / status / shadow-report / down
 scripts/fusion_isolation_check.sh + isolation_compare.py   does the new stack perturb the old one
 scripts/record_baseline_replay.sh   record the existing pipeline's output for a new bag
+scripts/live_orphans.py       LIVE audit: does every measurement have a box on it? (items 11/12)
+scripts/radar_pull.py         LIVE: is the track-vs-measurement offset the radar, or error?
 docker/Dockerfile.object_fusion      layered on perception-transform:latest (+ pypatchworkpp 1.4.1)
 docker-compose.fusion.yml + .replay.yml
 ```
@@ -81,13 +94,48 @@ python3 -m pytest src/object_fusion/test -q
   radar frame never resolves (RViz shows the radar display red, the aggregator gets nothing).
 - RViz colours: grey non-ground, brown ground, green existing `/fused_bbox`, blue new
   camera-LiDAR measurement, orange radar tracks.
-- Offline Patchwork++ on the host: `pip install --target <dir> pypatchworkpp==1.4.1`, then
-  delete `numpy*` from `<dir>` (it pulls numpy 2.x, which breaks the system scipy/mcap), and run
-  with `PYTHONPATH=<dir>`. No venv — `python3.12-venv` is not installed and sudo needs a password.
+- Offline Patchwork++ on the host: **`scripts/install_host_patchworkpp.sh`** (idempotent; it
+  installs to `~/.local/lib/patchworkpp`, deletes the numpy 2.x it drags in — that one breaks the
+  system scipy and mcap — and verifies the import). Then run harnesses with
+  `PYTHONPATH=$(scripts/install_host_patchworkpp.sh --path)`. No venv — `python3.12-venv` is not
+  installed and sudo needs a password.
 
 `/perception/objects` cannot be echoed from the host — `fusion_msgs` lives only inside the
 image. Use `docker exec perception_object_fusion_node bash -lc '. /opt/ros/jazzy/setup.sh &&
 . install/setup.sh && ros2 topic echo /perception/objects --once'`.
+
+## Replicating any number in this file
+
+Everything here was produced by a script in `scripts/`, from data that lives in **`~/fusion_data/`**
+(331 MB, outside the repo, with its own README naming every file and the command that regenerates
+it). None of it is an input to the running system — deleting it costs replay time, not work.
+
+    ~/fusion_data/measurements/rows_gate2.pkl   detection dump, the offline harness's input
+    ~/fusion_data/recordings/loop{A,B,C}/       the item-11 live A/B, one full replay loop each
+
+    host Patchwork++          scripts/install_host_patchworkpp.sh
+    offline, filter + tracks  scripts/object_ab.py --count-objects|--full-ab|--nis|--track-speed
+                                --measurements ~/fusion_data/measurements/rows_gate2.pkl
+    offline, one comparison   scripts/merge_accuracy.py <pkl>        (radar held out, edit ARMS)
+    offline, point selection  scripts/neighbour_ab.py, ground_ab.py, lean_ab.py, radar_ab.py
+    offline, one-off fits     scripts/cross_sigma.py (sigma_cross), cam_pitch.py (item 5)
+    LIVE, objects vs boxes    scripts/live_orphans.py <recording>.mcap
+    LIVE, where the offset is scripts/radar_pull.py <recording>.mcap
+    isolation                 scripts/fusion_isolation_check.sh + isolation_compare.py
+    the published write-up    src/object_fusion/docs/object_fusion_internals.html
+
+Three rules that this work got wrong at least once each, and which silently produce confident
+wrong answers:
+
+1. **Record a FULL loop** (>= 420 s; the bag is 398 s) before comparing two live arms. A 4-minute
+   window covers a different stretch each time and the counts move by 2x.
+2. **Rotate `lidar_tc` -> `ego` (5.35 deg)** when comparing the measurement markers to the object
+   markers. Unrotated, the aggregator is charged 6.5 m of cross-offset at 70 m: 84% "orphans".
+3. **Hold radar out** (`--radar-holdout 4`) when scoring the filter against radar, or the state is
+   fitted to the very reference it is graded against.
+
+`ros2 bag record` ignores SIGINT off a terminal — always `timeout -s TERM`, or it runs forever and
+leaves a 0-byte mcap.
 
 ## Bags
 
@@ -390,6 +438,77 @@ before bug 3 was fixed was taken with a frozen filter. That includes the live 29
 the live track-speed figures in this section. The offline numbers (`--count-objects`, `--full-ab`,
 `--track-speed`) are unaffected -- the harness feeds measurements in stamp order.
 
+## The merge gate's reach, and where the offset comes from (2026-09-16) -- items 11 and 12
+
+Both of the user's remaining concerns, measured live over FULL replay loops so the two arms see the
+same drive. The bag is 398 s; a 4-minute recording covers a different stretch each time and the
+counts move by a factor of two, which is not a result. Use `scripts/live_orphans.py` on a >= 420 s
+recording of `/perception/objects_markers` + `/perception/measurements/camera_lidar_markers`.
+
+**The two marker streams are in DIFFERENT FRAMES** -- measurements in `lidar_tc`, tracks in `ego`,
+5.35 deg apart. Comparing them unrotated charges the aggregator 6.5 m of cross-offset at 70 m and
+reads as a 98.8% orphan rate in the far bands. `live_orphans.py` rotates; anything that does not is
+measuring the frame difference.
+
+### Item 11: the Mahalanobis clause did not bound a distance
+
+`should_merge`'s chi-square clause measures separation in units of the tracks' covariance, and a
+coasting track's covariance grows without limit. At 2 m sigma the 99% two-DOF value spans 8.6 m --
+past the next cone in a line. So the clause written to collapse a track onto its own duplicate was
+reaching across to the neighbour instead, which is what the user saw as cones disappearing.
+
+Fixed with a hard bound in metres, `max_merge_dist = 2.5` (parameter `merge_max_dist`, `inf`
+restores the old behaviour). The two cases it has to separate are a duplicate (under 2 m apart,
+usually well under) and the next cone up the line (5 m and more on this drive).
+
+    full loop, live            orphaned   two boxes on ONE measurement
+    unbounded (as shipped)       15.7%              1.3%
+    bounded at 2.5 m             10.5%              3.0%     <- ADOPTED
+    bounded + assoc 6 -> 4 m      9.0%              5.6%     <- measured, REJECTED
+
+Read the third row before repeating it: narrowing `assoc_max_dist` buys 1.5 more points of objects
+and pays 2.6 points of duplicate boxes, because a detection that cannot reach its coasting track
+births a second one beside it. The bound buys 5.2 points for 1.7. `ASSOC_MAX_DIST=4.0` reaches the
+rejected arm without a rebuild if it ever looks worth re-testing.
+
+Also measured and rejected: **tightening the chi-square** (9.21 -> 4.0) instead of bounding the
+distance. It looks good offline (orphans 16.6% -> 11.1%) but it switches merging OFF -- the node
+logged `merged=0` over an entire replay -- and duplicates went to 5.6%. With the bound in place the
+same node logs ~100 merges per replay loop, so the rule is alive rather than quietly disabled;
+`merged=` in the 5 s status line is the one-line check for that (read it a few minutes in, it is
+cumulative and a freshly restarted node legitimately shows 0).
+
+Offline the picture agrees and is cheaper to re-run
+(`scripts/object_ab.py --count-objects --measurements <dump>`): orphaned 16.6% -> 8.7%, against a
+10.1% floor with merging off entirely. Note the offline duplicate column BARELY MOVES across these
+arms (6.2-6.8%) where live it triples -- the offline metric counts tracks within 2 m of each other,
+which on a cone drive counts two genuine cones. `live_orphans.py` reports both, and the honest one
+is TRUE DUP, two tracks whose nearest measurement is the same measurement.
+
+Held out from radar (one track in four, `scripts/object_ab.py --full-ab --radar-holdout 4`), the
+bound costs nothing measurable: median range error 1.10 -> 1.07 m, p90 15.06 -> 14.03, jumps > 2 m
+3.3% -> 3.2%, lag +0.13 -> +0.08 m.
+
+### Item 12: the offset is the radar, and only for tracks the radar touched
+
+`scripts/radar_pull.py` splits the published tracks by whether a radar return exists on the same
+bearing, and asks where the track sits on the camera -> radar segment.
+
+    tracks with NO radar return   |along-ray offset| median 0.12 m   <- the filter on its own
+    tracks WITH a radar return    track sits +0.91 m behind the camera measurement
+                                  the radar itself sits +0.32 m behind it
+                                  51% of tracks lie BETWEEN the two sensors
+
+So the filter is not adding error of its own: left alone it sits 12 cm from its measurement. The
+offset the user sees is the radar disagreeing with the camera about where the object is, and the
+filter splitting the difference -- which is its job. The tail is the real risk: the p75 of the
+camera-radar gap is +6.5 m, i.e. the return on that bearing is sometimes a DIFFERENT object behind
+the target, and 19% of tracks sit beyond the radar rather than between the two.
+
+Pick the radar return by BEARING, never by nearest range: picking the return closest in range to
+the camera measurement forces the measured gap to zero and answers the question with its own
+assumption (it reported the radar 0.06 m from the camera; by bearing it is 0.32 m).
+
 ## Radar matching in the harnesses, fixed (2026-09-15) -- to-do item 3
 
 Every "range error vs radar" number in these harnesses depends on deciding which radar return is
@@ -604,40 +723,34 @@ separates sideslip from geometry (a stationary yaw test, or the INS sideslip est
 speed, extent decay/clamp, camera sigma_px, odom hold, track_store increments and coast budgets,
 tracker inflation/noise. Most are tunable with NIS or shadow logs once item 2 runs.
 
-### 11. Cones still dropped by the aggregator  (small-medium, user-reported)
-17.2% of measurements still have no track within 3 m, against a 7.8% floor with merging off (see
-"Three motion bugs"). The remaining share is the Mahalanobis clause in `should_merge`: an unupdated
-track's covariance grows until it swallows a neighbour.
-1. Re-measure LIVE first -- the 29.7% figure predates the rewind fix and is contaminated. Record
-   `/perception/objects_markers` + `/perception/measurements/camera_lidar_markers` on the cone-rich
-   stretch of selfcal_loc_2026-09-08 and compute the orphan rate by band.
-2. Offline, sweep the Mahalanobis gate (`chi2`, default 9.21) and cap the covariance the clause may
-   use, with `--count-objects`; a track that has not been updated recently should not be allowed to
-   absorb a fresh one.
-3. Check the camera gate's share separately (25.4% arm) -- it is not the driver but it is not zero.
-Done when: the orphan rate approaches the 7.8% floor without re-inflating the duplicate-track rate
-the merge exists to control.
+### 11. ~~Cones still dropped by the aggregator~~ -- DONE 2026-09-16, see the section above
+The Mahalanobis merge clause did not bound a distance; `merge_max_dist = 2.5` bounds it. Live over
+a full replay loop, orphaned measurements 15.7% -> 10.5% for 1.7 points of duplicate boxes.
+WHAT IS LEFT, and it is the biggest single band: **80-200 m is still 30.5% orphaned** while every
+band under 80 m is now 7-11%. That is the same far-field range failure as item 6, seen from the
+aggregator's side -- the camera measurement and the radar disagree by tens of metres out there, so
+the track cannot sit on both. Do item 6 first; this band will move with it.
 
-### 12. Aggregator positional accuracy  (small, user-reported)
-The user finds the published position less accurate than the measurement in RViz. Measured, the
-track sits 1.46 m from its measurement (p90 9.06) on the truck pass -- and the expected honest part
-of that is the radar-vs-LiDAR surface difference (~1.1 m; the radar's scattering centre is deeper
-into the vehicle than the visible face).
-Plan: one pass scoring track, measurement and matched radar range together by band, so the split
-between "the filter moved it toward radar, correctly" and "the filter is wrong" is visible. Reuse
-`object_ab.py --full-ab` plumbing and the matching rules in `ground_ab.match_radar_range`.
-Done when: the residual is attributed, and either accepted as the scattering-centre offset or
-fixed via the per-sensor offset model the plan calls for (`o_s(x)` in the measurement models).
+### 12. ~~Aggregator positional accuracy~~ -- ATTRIBUTED 2026-09-16, see the section above
+It is the radar, not the filter. A track with no radar return on its bearing sits 0.12 m from its
+camera measurement; one the radar has touched sits 0.91 m behind it, and the radar itself is 0.32 m
+behind it, with 51% of tracks between the two sensors.
+WHAT IS LEFT: the tail, not the median. 19% of radar-updated tracks sit BEYOND the radar return,
+and the p75 camera-radar gap is +6.5 m -- on those the bearing-matched return is a different object
+behind the target. That is a radar ASSOCIATION question (`associate_radar`'s gate), not a filter
+one, and it is worth measuring the same way a false-alarm rate would be: count radar updates whose
+range disagrees with the camera by more than the range-trust bound, by band.
 
 ### Housekeeping
-- Commit the new work (all untracked) -- user's call on branch and message.
+- ~~Commit the new work~~ -- DONE 2026-09-16 by the user: branch `radar_integration_and_fusion`,
+  commit `e462094`.
 - CHANGELOG.md / README.md are pre-existing files: document the new stack there only with the
   user's OK.
 - `/perception/objects` cannot be echoed from the host: add a NEW install script for fusion_msgs
   (the existing install_host_custom_msgs.sh must not change).
-- Expose the new rollback parameters (`ground_levelling`, `enable_depth_gate`, `enable_class_vote`,
-  `segmentation_empty_fallback`) as env vars in docker-compose.fusion.yml / Dockerfile CMD so they
-  can be A/B'd without a rebuild.
+- ~~Expose the rollback parameters as env vars~~ -- DONE. `GROUND_LEVELLING`,
+  `ENABLE_DEPTH_GATE`, `ENABLE_CLASS_VOTE`, `SEGMENTATION_EMPTY_FALLBACK`, and since 2026-09-16
+  `ASSOC_MAX_DIST` / `MERGE_MAX_DIST`, all A/B without a rebuild.
 - Low priority: why turning RNR off changes labels far from the returns it filters; unused imports
   cleanup; `detection_geometry.camera_only_range` is now dead (kept, marked invalid).
 
@@ -650,6 +763,7 @@ fixed via the per-sensor offset model the plan calls for (`o_s(x)` in the measur
   the node logs it as `rewinds=`. Expect `skipped_no_odom` to track `rewinds` one-for-one (measured
   36 against 37): the first measurement after a rewind finds the odometry buffer empty and is
   skipped while it refills. Any larger ratio is a real odometry problem.
-- 17.2% of measurements still have no published track within 3 m (item 11).
+- 10.5% of measurements have no published track within 3 m, and 3.0% of published tracks are a
+  second box on a measurement that already has one (item 11, measured live over a full loop).
 - Levelling evidence in curves rests on 232 + 15 curve sweeps from two drives.
 - The 360 deg path (item 7) would add clutter with no semantic check outside the camera FOV.

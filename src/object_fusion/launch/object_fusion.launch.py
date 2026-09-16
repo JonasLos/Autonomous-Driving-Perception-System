@@ -13,7 +13,8 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 _FLOAT = {"ego_yaw_correction_deg", "ego_z_offset", "measurement_lag", "sigma_long",
-          "sensor_height", "camera_height_m", "assoc_max_dist", "sticky_sanity_dist",
+          "sensor_height", "camera_height_m", "assoc_max_dist", "merge_max_dist",
+          "sticky_sanity_dist",
           "ground_max_range",
           "ground_rejection_min_range", "ground_margin",
           "depth_gate_min_m", "depth_gate_range_frac", "class_vote_window_s",
@@ -82,6 +83,7 @@ _ARGS = {
     "class_vote_window_s": "2.0",
     "camera_height_m": "1.5275",
     "assoc_max_dist": "6.0",
+    "merge_max_dist": "2.5",
     "sticky_sanity_dist": "20.0",
 }
 
@@ -134,5 +136,6 @@ def generate_launch_description():
              parameters=_params("use_sim_time", "publish_mode", "enable_radar_only_birth",
                                 "ego_yaw_correction_deg", "measurement_lag", "sigma_long",
                                 "sigma_lat", "output_timeout", "odom_topic",
-                                "assoc_max_dist", "sticky_sanity_dist")),
+                                "assoc_max_dist", "merge_max_dist",
+                                "sticky_sanity_dist")),
     ])
