@@ -14,9 +14,10 @@ Runtime `ros2 param set` is fine. Measure offline before changing behaviour and 
 numbers. sudo needs a password -- never ask for it; `systemctl --no-ask-password reboot` works,
 restarting system services (e.g. anydesk) does not.
 
-**The work is COMMITTED** (by the user, 2026-09-16) on branch **`radar_integration_and_fusion`**,
-commit `e462094`, which also carried the 12 pre-existing modifications that were already in the
-working tree. So the old isolation check -- "`git status` shows exactly 12 entries" -- no longer
+**The work is COMMITTED** on branch **`radar_integration_and_fusion`**: `e462094` (by the user,
+2026-09-16) which also carried the 12 pre-existing modifications that were already in the working
+tree, then `de9a28d` (the merge distance bound, items 11/12, and the replicability work). Neither
+is pushed. So the old isolation check -- "`git status` shows exactly 12 entries" -- no longer
 applies; the tree is clean. Check isolation instead with
 `git diff --name-only e462094..HEAD` and confirm every path is new work
 (`src/object_fusion/`, `src/custom_msgs/fusion_msgs/`, `scripts/*_ab.py`, `scripts/run_fusion.sh`,
