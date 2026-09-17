@@ -72,6 +72,9 @@ scripts/fusion_isolation_check.sh + isolation_compare.py   does the new stack pe
 scripts/record_baseline_replay.sh   record the existing pipeline's output for a new bag
 scripts/live_orphans.py       LIVE audit: does every measurement have a box on it? (items 11/12)
 scripts/radar_pull.py         LIVE: is the track-vs-measurement offset the radar, or error?
+scripts/install_host_fusion_msgs.sh   fusion_msgs on the host (planner bridge, ros2 topic echo)
+scripts/run_planner_ab_nodes.sh       legacy tracker.py + planner bridge side by side, for the A/B
+scripts/planner_objects_ab.py LIVE: planner obstacle input, legacy tracker.py vs bridge
 docker/Dockerfile.object_fusion      layered on perception-transform:latest (+ pypatchworkpp 1.4.1)
 docker-compose.fusion.yml + .replay.yml
 ```
@@ -102,9 +105,10 @@ python3 -m pytest src/object_fusion/test -q
   `PYTHONPATH=$(scripts/install_host_patchworkpp.sh --path)`. No venv — `python3.12-venv` is not
   installed and sudo needs a password.
 
-`/perception/objects` cannot be echoed from the host — `fusion_msgs` lives only inside the
-image. Use `docker exec perception_object_fusion_node bash -lc '. /opt/ros/jazzy/setup.sh &&
-. install/setup.sh && ros2 topic echo /perception/objects --once'`.
+`/perception/objects` on the host needs `fusion_msgs` there: **`scripts/install_host_fusion_msgs.sh`**
+merge-installs it into `~/.local/opt/adps_custom_msgs`, the overlay `~/.bashrc` already sources
+(done 2026-09-17; the planner's bridge depends on it). A new terminal can then
+`ros2 topic echo /perception/objects`.
 
 ## Replicating any number in this file
 
@@ -123,6 +127,7 @@ it). None of it is an input to the running system — deleting it costs replay t
     offline, one-off fits     scripts/cross_sigma.py (sigma_cross), cam_pitch.py (item 5)
     LIVE, objects vs boxes    scripts/live_orphans.py <recording>.mcap
     LIVE, where the offset is scripts/radar_pull.py <recording>.mcap
+    planner obstacle input    scripts/planner_objects_ab.py ~/fusion_data/recordings/planner_ab
     isolation                 scripts/fusion_isolation_check.sh + isolation_compare.py
     the published write-up    src/object_fusion/docs/object_fusion_internals.html
 
@@ -511,6 +516,42 @@ Pick the radar return by BEARING, never by nearest range: picking the return clo
 the camera measurement forces the measured gap to zero and answers the question with its own
 assumption (it reported the radar 0.06 m from the camera; by bearing it is 0.32 m).
 
+## Feeding the planner (2026-09-17)
+
+The local planner (`~/planner/src/AVA_Local_Planner`, its own repo) now has launch files that take
+obstacles from this stack. **The full write-up lives in the planner repo:
+`~/planner/docs/object_fusion_integration.md`.** In short:
+
+- `fusion_object_bridge.py` (planner repo) replaces `tracker.py`: `/perception/objects` +
+  `/novatel/oem7/odom_grid` -> `ObjectList` on `/planner/tracked_objects`, in the format the planners
+  already parse. New launch files `tracker_planner_refGenerator_lane_fusion.launch.py` and
+  `gps_obj_tracker_fusion.launch.py` use it. The second enables obstacles in the GPS follower,
+  whose original has them commented out; that was the user's call. The originals are the rollback,
+  and every existing planner file is untouched except three lines in `CMakeLists.txt`.
+- Replay A/B, one full loop, both fed from the same replay at the same time
+  (`scripts/planner_objects_ab.py`):
+
+      latency error (along-track error vs ego speed)   legacy +99 +/- 5 ms    bridge +16 +/- 22 ms
+      planner's kalman_predict reads object > 3 m/s    legacy 44.9%           bridge 5.8%
+
+  The second row is the one that matters for safety. The drive is almost all static cones and parked
+  cars, and the FSM follows a "moving" object instead of avoiding it.
+- **Found and fixed here on the way:** the aggregator published COASTING tracks as TENTATIVE, and
+  never set `missed_updates`. An old camera-only track that misses one cycle cannot be re-promoted
+  (`may_confirm` stops after 5 camera opportunities), so most long-lived cones were going out
+  TENTATIVE, and a consumer that drops tentative tracks would have dropped them.
+  `Track.published_status()` / `Track.missed_updates()`, with tests.
+- **Open (to-do 13):** where the LiDAR sits relative to the `/odom_grid` position. Three sources
+  disagree: 2.39 m forward (what `tracker.py` uses and the bridge defaults to), 0.66 m (vendor
+  IMU extrinsic, if the INS reports at the IMU), and about 3.0 m (static objects seen from opposite
+  headings on the replay, 9 pairs only). The legacy tracker has the same uncertainty.
+
+**Replay trap, hit this session: exactly ONE bag player.** A player the user had started was still
+running when another was launched. The two interleaved camera/LiDAR/radar from points 95 s apart
+and both published `/clock`: 90% of the bridge's messages found no odometry, and a ROS-time timer
+fired every 10 ms. `pgrep -fa 'bin/ros2 bag play'` before starting one, and when the bridge's
+`no_pose` count climbs, suspect this first.
+
 ## Radar matching in the harnesses, fixed (2026-09-15) -- to-do item 3
 
 Every "range error vs radar" number in these harnesses depends on deciding which radar return is
@@ -743,13 +784,21 @@ behind the target. That is a radar ASSOCIATION question (`associate_radar`'s gat
 one, and it is worth measuring the same way a false-alarm rate would be: count radar updates whose
 range disagrees with the camera by more than the range-trust bound, by band.
 
+### 13. LiDAR position relative to the odometry output point  (small, blocks planner accuracy)
+The planner bridge's `lidar_offset` (default 2.393, 0.206 m) is not settled, per "Feeding the planner"
+above. Cheapest resolution: drive an out-and-back course past a line of cones, record the A/B, and
+read `planner_objects_ab.py`'s offset check (it needs far more than today's 9 opposed-heading
+pairs). Or read the receiver's configured INS output point (`INSCONFIG`; see
+`~/0702_planner/.../calibrate_novatel_vehicle_alignment.py`).
+Done when: two independent methods agree to about 0.2 m, and the bridge default is set to that value.
+
 ### Housekeeping
 - ~~Commit the new work~~ -- DONE 2026-09-16 by the user: branch `radar_integration_and_fusion`,
   commit `e462094`.
 - CHANGELOG.md / README.md are pre-existing files: document the new stack there only with the
   user's OK.
-- `/perception/objects` cannot be echoed from the host: add a NEW install script for fusion_msgs
-  (the existing install_host_custom_msgs.sh must not change).
+- ~~`/perception/objects` cannot be echoed from the host~~ -- DONE 2026-09-17:
+  `scripts/install_host_fusion_msgs.sh` (install_host_custom_msgs.sh untouched).
 - ~~Expose the rollback parameters as env vars~~ -- DONE. `GROUND_LEVELLING`,
   `ENABLE_DEPTH_GATE`, `ENABLE_CLASS_VOTE`, `SEGMENTATION_EMPTY_FALLBACK`, and since 2026-09-16
   `ASSOC_MAX_DIST` / `MERGE_MAX_DIST`, all A/B without a rebuild.

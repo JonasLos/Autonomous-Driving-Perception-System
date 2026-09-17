@@ -296,3 +296,30 @@ def test_the_duplicate_it_exists_to_collapse_is_still_merged():
     coasting = _track(45.0, 1.0, SENSOR_CAMERA)
     reborn = _track(45.8, 1.2, SENSOR_CAMERA)
     assert should_merge(coasting, reborn)
+
+
+# ------------------------------------------------------------------- published fields
+def test_a_coasting_track_is_published_as_coasting_not_tentative():
+    """An old camera-only track that misses one cycle can never be re-promoted -- may_confirm
+    stops at 5 camera opportunities -- so it coasts for the rest of its life. Folding that into
+    TENTATIVE mislabelled nearly every long-lived cone, and a consumer that drops tentative
+    tracks (the planner bridge) dropped them."""
+    from object_fusion.track_store import COASTING, CONFIRMED, TENTATIVE
+    s = TrackStore()
+    tr = s.add(mk(stamp=0.0, mask=SENSOR_CAMERA))
+    tr.hits["camera_lidar"], tr.opportunities["camera_lidar"] = 30, 30
+    tr.status = CONFIRMED
+    s.prune(0.05)                                   # not updated by this measurement
+    s.promote()
+    assert tr.status == COASTING, "the premise: an old camera-only track cannot re-promote"
+    assert tr.published_status() == COASTING
+    assert TENTATIVE == 0 and CONFIRMED == 1 and COASTING == 2, "must equal FusedObject.STATUS_*"
+
+
+def test_missed_updates_counts_camera_periods_since_the_last_update():
+    tr = mk(stamp=10.0)
+    assert tr.missed_updates(10.0) == 0
+    assert tr.missed_updates(10.05) == 0
+    assert tr.missed_updates(10.3) == 3
+    assert tr.missed_updates(100.0) == 255, "uint8 on the wire"
+    assert tr.missed_updates(9.0) == 0, "a late stamp is not a negative miss"

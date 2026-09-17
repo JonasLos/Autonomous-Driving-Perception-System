@@ -269,6 +269,28 @@ class Track:
     def age(self, now) -> float:
         return float(now) - self.born
 
+    def published_status(self) -> int:
+        """The status to put on the wire: 0 tentative, 1 confirmed, 2 coasting.
+
+        The numbers are FusedObject's STATUS_* constants, which match this module's.
+
+        COASTING must go out as coasting. It used to be folded into TENTATIVE, and that mislabelled
+        almost every long-lived cone: `may_confirm` only re-promotes a camera-only track while
+        it has had at most 5 camera opportunities, so an old camera-only track that misses one
+        cycle stays COASTING for the rest of its life. A consumer that drops tentative tracks --
+        the planner bridge does exactly that -- was dropping them.
+        """
+        return COASTING if self.status == COASTING else (
+            CONFIRMED if self.status == CONFIRMED else TENTATIVE)
+
+    def missed_updates(self, now, period=0.1) -> int:
+        """Camera periods since any sensor last updated this track, clipped to a uint8.
+
+        The aggregator runs per measurement, not per cycle, so a "cycle" is taken as the 10 Hz
+        camera period -- the slowest stream, and the one a missed object shows up in.
+        """
+        return int(min(255, max(0, math.floor((float(now) - self.last_update) / period + 1e-9))))
+
     def class_name(self):
         """Majority vote over the track's history, not the latest frame.
 

@@ -52,7 +52,7 @@ from object_fusion.tracker import (
 )
 from object_fusion.detection_geometry import ExtentFilter
 from object_fusion.track_store import (
-    CONFIRMED, SENSOR_CAMERA, SENSOR_RADAR, Track, TrackStore, camera_expected,
+    SENSOR_CAMERA, SENSOR_RADAR, Track, TrackStore, camera_expected,
     radar_expected,
 )
 
@@ -553,8 +553,8 @@ class ObjectAggregatorNode(Node):
             o.velocity_covariance = [float(c) for c in np.asarray(tr.P)[2:, 2:].ravel()]
             o.velocity_valid = filtered and self._twist.newest() is not None
             o.existence_probability = float(tr.existence)
-            o.track_status = (FusedObject.STATUS_CONFIRMED if tr.status == CONFIRMED
-                              else FusedObject.STATUS_TENTATIVE)
+            o.track_status = tr.published_status()
+            o.missed_updates = tr.missed_updates(t)
             o.contributions = int(tr.sensors_ever)
             o.contributions_this_frame = int(tr.sensors_this_cycle)
             o.camera_range_dropped = not range_is_trustworthy(
