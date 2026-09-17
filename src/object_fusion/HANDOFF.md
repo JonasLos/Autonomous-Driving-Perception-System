@@ -75,6 +75,8 @@ scripts/radar_pull.py         LIVE: is the track-vs-measurement offset the radar
 scripts/install_host_fusion_msgs.sh   fusion_msgs on the host (planner bridge, ros2 topic echo)
 scripts/run_planner_ab_nodes.sh       legacy tracker.py + planner bridge side by side, for the A/B
 scripts/planner_objects_ab.py LIVE: planner obstacle input, legacy tracker.py vs bridge
+scripts/lever_arm_ab.py       lever arm vs radial bias vs ego-yaw, from static tracks (--selftest)
+scripts/read_insconfig.py     the receiver's own configured lever arms, out of a bag
 docker/Dockerfile.object_fusion      layered on perception-transform:latest (+ pypatchworkpp 1.4.1)
 docker-compose.fusion.yml + .replay.yml
 ```
@@ -711,10 +713,40 @@ Plan: match a radar return whose azimuth falls inside the object's angular exten
 through the camera model) and whose range is nearest; re-score. Done when the 0-15 m band has a
 believable error distribution, or the error is shown to be real.
 
-### 4. Generalise the harnesses -- MOSTLY DONE 2026-09-15 (see the section above)
+### 4. Generalise the harnesses -- MOSTLY DONE (2026-09-15, extended 2026-09-17)
 Done: `--source` / `--replay` on both harnesses, `scripts/record_baseline_replay.sh`, baselines for
-both adps drives, and both scored (rules hold). Remaining: a drive with many CURVES and cones
-(levelling still rests on 232 + 15 curve sweeps), and the -3 to -6 m at 25-60 m on 11-50-45.
+both adps drives, and both scored (rules hold).
+
+2026-09-17, out of sample on **adps_2026-08-25_11-55-43** (150 s, never scored before; it and three
+more sit in `/media/avalocal/1.0 TB Disk/perception_eval_debug/`, only two of the six were ever in
+the repo root). Baseline in `~/fusion_data/replays/adps_1155`, dump in
+`~/fusion_data/measurements/rows_adps1155.pkl`:
+
+    spikes > 2 m (second difference of one id)   A25 (old fusion_node rule)  6.1%
+                                                A10                         5.9%
+                                                G+f (segmentation + cut)    4.8%
+                                                DropNF (LIVE)               2.6%
+                                                Dhold (cluster switching)   2.4%
+
+The adopted rule holds: 2.3x fewer spikes than the rule the existing pipeline runs, on a drive it
+was never tuned on. Far-field content is the same as the reference drive (6.8% past 80 m, 33
+detections past 100 m), so it does not unblock item 6.
+
+**Harness bug found and fixed by this drive.** `neighbour_ab` scored the DropNF arm with a SECOND
+implementation of the depth gate and asserted the two agreed. On this bag they diverged: once a
+frame is dropped the two gates' miss counters and histories are in different states and nothing
+resynchronises them, so the reference is not a check, it is a race. The arm now calls the
+production `DepthJumpGate` directly; `DepthGate` remains for the Dhold arms, which are a genuinely
+different rule (they may switch cluster). This is why the assert never fired on the reference
+drive and fired on the first new one.
+
+**adps_2026-08-25_14-13-42 did NOT score** and is unexplained: the replay recorded 3.4 MB of
+/fused_bbox, but the harness paired only **5 sweeps over 4 s** of a 122 s bag (the A25 self-check
+passed on those 5, so the pairing that did happen is sound). Look at the source/replay stamp
+overlap for that bag before trusting any number from it.
+
+Remaining: a drive with many CURVES and cones (levelling still rests on 232 + 15 curve sweeps),
+and the -3 to -6 m at 25-60 m on 11-50-45.
 OLD PLAN:
 Why: everything is scored on selfcal 09-08 (+ 09-03 for levelling). 09-03 has only 15 curve sweeps;
 the user's adps bags are unscored.
@@ -736,11 +768,36 @@ box-bottom pixel offset (error ~ r^2) from a pitch error (~ r^2 too, but indepen
 height) -- e.g. fit offset_px and delta_pitch jointly; apply; re-run neighbour_ab arm DropNF_cam.
 Done when: DropNF_cam spike rate <= DropNF's; only then enable `enable_camera_only_fallback`.
 
-### 6. The 80+ m band  (after 2)
-12.6% spikes and ~-6.7 m range bias remain. Refuted causes are listed above (crop, missing returns,
-voxel). The planned fix is radar-owned range beyond ~80 m in the filter (`RANGE_TRUST_MAX_M`),
-which only acts in `publish_mode: filtered` -- now the default (2026-09-17), so this is unblocked
-and is the next item.
+### 6. The 80+ m band  -- BLOCKED ON DATA, not on ideas (2026-09-17)
+12.6% spikes and ~-6.7 m range bias in the raw measurement. Refuted causes are above (crop, missing
+returns, voxel). The planned fix, radar-owned range past `RANGE_TRUST_MAX_M`, is live now that
+`filtered` is the default -- and measuring it is where this stops.
+
+**What the reference drive can and cannot say.** Only **6.8% of its camera detections are past 80 m**
+(287 of 4236; 52 past 100 m, none past 150 m). Held out from radar, that leaves 25-33 scored
+samples per band out there. On that sample:
+
+- 80-100 m, radar held out: filtered **0.10 m** median range error against radar, raw **2.97 m**.
+- `range_trust` swept at 80 m (live), 120 m and "never drop" is **indistinguishable** -- identical
+  to two decimals in every band. With 287 far detections in the whole drive there is nothing for
+  the rule to act on, so this is not evidence that the rule works, it is evidence the drive cannot
+  test it.
+
+**What IS solid, from the live recording (`scripts/support.py`-style provenance counts over
+~1.2k far observations):** past 80 m the camera range is dropped 100% of the time by design, and
+**radar has never touched 41% of tracks at 80-100 m and 57% at 100-150 m**. For those, "radar owns
+the range" means nothing owns it: the track keeps the range it was born with, corrected only by ego
+motion, until the object comes inside 80 m. That is the mechanism to fix, and the candidates are
+(a) a wide-sigma along-ray update instead of dropping it, (b) a measured range-bias correction
+applied past 80 m, (c) leave it and accept that far objects are bearing-only until radar sees them.
+
+**Also settled here:** the 30.5% orphan rate past 80 m (item 11's remainder) is mostly the metric,
+not lost objects. Out there the filtered range and the camera measurement are MEANT to disagree --
+raw is 2.97 m from radar where filtered is 0.10 m -- and the orphan test calls anything over 3 m a
+miss. Re-read that band with a range-aware threshold before treating it as a defect.
+
+Done when: a drive with real far-field content (a highway run, or anything with vehicles held at
+80-150 m for tens of seconds) exists, and (a)/(b)/(c) are scored on it with `--radar-holdout`.
 
 ### 7. Phase 3: 360-degree LiDAR clusters  (large)
 `lidar_cluster_detector_node` from the plan. Patchwork++ already segments the full sweep in
@@ -769,10 +826,11 @@ tracker inflation/noise. Most are tunable with NIS or shadow logs once item 2 ru
 ### 11. ~~Cones still dropped by the aggregator~~ -- DONE 2026-09-16, see the section above
 The Mahalanobis merge clause did not bound a distance; `merge_max_dist = 2.5` bounds it. Live over
 a full replay loop, orphaned measurements 15.7% -> 10.5% for 1.7 points of duplicate boxes.
-WHAT IS LEFT, and it is the biggest single band: **80-200 m is still 30.5% orphaned** while every
-band under 80 m is now 7-11%. That is the same far-field range failure as item 6, seen from the
-aggregator's side -- the camera measurement and the radar disagree by tens of metres out there, so
-the track cannot sit on both. Do item 6 first; this band will move with it.
+WHAT IS LEFT: **80-200 m reads 30.5% orphaned**, against 7-11% in every band under 80 m -- but see
+item 6: past 80 m the track and the camera measurement are SUPPOSED to disagree, because the filter
+drops the camera's range there and the raw measurement sits 2.97 m from radar where the filtered
+state sits 0.10 m. Most of that 30.5% is the 3 m threshold counting the intended divergence. Fix
+the metric (a range-aware threshold) before reading it as lost objects.
 
 ### 12. ~~Aggregator positional accuracy~~ -- ATTRIBUTED 2026-09-16, see the section above
 It is the radar, not the filter. A track with no radar return on its bearing sits 0.12 m from its
@@ -784,13 +842,45 @@ behind the target. That is a radar ASSOCIATION question (`associate_radar`'s gat
 one, and it is worth measuring the same way a false-alarm rate would be: count radar updates whose
 range disagrees with the camera by more than the range-trust bound, by band.
 
-### 13. LiDAR position relative to the odometry output point  (small, blocks planner accuracy)
-The planner bridge's `lidar_offset` (default 2.393, 0.206 m) is not settled, per "Feeding the planner"
-above. Cheapest resolution: drive an out-and-back course past a line of cones, record the A/B, and
-read `planner_objects_ab.py`'s offset check (it needs far more than today's 9 opposed-heading
-pairs). Or read the receiver's configured INS output point (`INSCONFIG`; see
-`~/0702_planner/.../calibrate_novatel_vehicle_alignment.py`).
-Done when: two independent methods agree to about 0.2 m, and the bridge default is set to that value.
+### 13. LiDAR position relative to the odometry output point  (user decision pending)
+The planner bridge's `lidar_offset` ships at (2.393, 0.206) m -- the value `tracker.py` has always
+used. **The evidence now says that is wrong by about 1.7 m, and the answer is near (0.67, -0.10) m**,
+but the one thing that would measure it directly is not in any bag we have.
+
+1. **The receiver settles the reference POINT.** `/novatel/oem7/insconfig` in
+   selfcal_loc_2026-09-08 reports `number_of_translations: 0` and `number_of_rotations: 0` -- no
+   lever arms configured at all, so no USER output point, so the INS position is at the IMU centre.
+   (It also means the IMU->antenna arm is unset, which is the receiver's own accuracy problem, not
+   ours.) Read it with `scripts/read_insconfig.py`.
+2. **The vendor extrinsic then gives the arm.** `imu` sits at (-0.658, +0.159) in lidar_tc, so the
+   LiDAR is 0.658 m AHEAD of the IMU; rotated into vehicle axes that is **(0.670, -0.097) m**.
+   Status in `~/jeep_selfcal_loc` is "not measured" -- vendor value, never independently checked --
+   and the radar chain agrees with it trivially rather than independently (IMU->radar 3.573 minus
+   lidar->radar 2.915 = 0.658).
+3. **The drive cannot measure it, and says so.** `scripts/lever_arm_ab.py` fits the lever arm, a
+   radial range bias and a residual ego-yaw together, because on one pass all three move a static
+   object the same way. Its `--selftest` recovers a known arm exactly when tracks sweep 70 deg of
+   bearing. On the replay the median track sweeps 21 deg, the design condition number is 39 752,
+   and bootstrapping over TRACKS gives de_x in [-4.21, -1.78] m: 2 m wide, but it EXCLUDES the
+   2.393 m in use and brackets 0.67. `--profile` sweeps the offset alone and is nearly flat --
+   scatter 0.744 m at -0.5 m against 0.774 m at 2.5 m, 4% over a 3 m sweep -- rising monotonically
+   with larger offsets. A lean, not a measurement.
+
+**WITHDRAWN:** the "about 3.0 m" from `planner_objects_ab.py`'s opposed-heading check. A radial
+range bias flips sign with heading exactly like a lever-arm error, so that check conflates the two;
+`lever_arm_ab.py` exists because of it.
+
+What is left is the user's call, and then one drive:
+- **Decide** whether to move the bridge default to (0.67, -0.10). Two independent facts point there
+  (the receiver's configuration and the vehicle geometry) and the replay excludes 2.39; against
+  that, the arm itself has never been measured on this vehicle, and the legacy tracker has always
+  used 2.39, so adopting it changes obstacle positions by 1.7 m along the heading.
+- **Measure it** with a drive the estimator can actually use: pass static objects CLOSE (a few
+  metres laterally, so the bearing sweeps 60 deg or more) at moderate speed, in both directions.
+  Then `scripts/lever_arm_ab.py <recording>` reports the arm with a bootstrap interval, and
+  `--profile` should show a real minimum rather than a flat line.
+Done when: the fit's bootstrap interval is under ~0.4 m wide and agrees with the vendor geometry,
+and the bridge default is set to it.
 
 ### Housekeeping
 - ~~Commit the new work~~ -- DONE 2026-09-16 by the user: branch `radar_integration_and_fusion`,

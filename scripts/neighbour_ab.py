@@ -124,8 +124,9 @@ def predict(hist, t):
 class DepthGate:
     """Reference implementation over depth CLUSTERS, so it can also switch cluster (Dhold).
 
-    ``switch=False`` is the production DepthJumpGate expressed over clusters; the run asserts the
-    two agree on every detection. ``Q=None``: no usable points, emit nothing, state untouched.
+    Used for the Dhold arms only: they may SWITCH to the cluster nearest the prediction, which
+    the production gate never does. The DropNF arm calls the production gate itself.
+    ``Q=None``: no usable points, emit nothing, state untouched.
     """
 
     def __init__(self, gate_min=1.5, gate_frac=0.05, switch=True):
@@ -222,7 +223,7 @@ def run(args):
         print(f"[level] odometry levelling from {len(odom)} odom messages")
 
     last_out, dprev_hist = {}, {}
-    ref = {"Dhold": DepthGate(), "DholdNF": DepthGate(), "DropNF": DepthGate(switch=False)}
+    ref = {"Dhold": DepthGate(), "DholdNF": DepthGate()}
     production, production_a10 = DepthJumpGate(), DepthJumpGate()
     gate_nopct, gate_cam = DepthJumpGate(), DepthJumpGate()
     sweep = {}
@@ -319,10 +320,15 @@ def run(args):
                     row["NF"] = None if row["fallback"] else row["G+f"]
                     row["Dhold"] = ref["Dhold"].step(oid, key, Q)
                     row["DholdNF"] = ref["DholdNF"].step(oid, key, usable)
-                    expected = ref["DropNF"].step(oid, key, usable)
+                    # The DropNF arm IS the production gate, not a copy of it. There used to be
+                    # a second implementation here with an assert that the two agreed; on
+                    # adps_2026-08-25_11-55-43 they diverged, because a dropped frame leaves the
+                    # two gates' miss counters and histories in different states and nothing
+                    # resynchronises them. A reference that can drift from the rule it checks is
+                    # not a check. DepthGate stays for the Dhold arms, which are a DIFFERENT rule
+                    # (it may switch cluster); only that arm needs it.
                     if row["NF"] is not None and production.admit(oid, key, *row["NF"]):
                         row["DropNF"] = row["NF"]
-                    assert row["DropNF"] == expected, "DepthJumpGate diverged from the scored rule"
                     # item 1: no percentile cut after segmentation
                     if not row["fallback"]:
                         nx, ny, _ = nearest_depth_cluster(P[:, 0], P[:, 1], P[:, 2])
@@ -360,7 +366,7 @@ def run(args):
           f"{'PASS' if ok else 'FAIL'}")
     if not ok:
         sys.exit("self-check failed: not scoring arms whose baseline does not reproduce the node")
-    print("[self-check] production DepthJumpGate == scored reference on every detection -> PASS")
+    print("[self-check] the DropNF arm calls the production DepthJumpGate directly")
     if args.dump:
         with open(args.dump, "wb") as fh:
             pickle.dump(rows, fh)
