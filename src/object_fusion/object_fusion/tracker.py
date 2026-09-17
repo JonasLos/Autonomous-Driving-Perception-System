@@ -270,8 +270,11 @@ def process_noise(dt, sigma_long, sigma_lat, heading=None):
     What the filter DOES buy is stability against large excursions: frame-to-frame jumps over
     2 m fall from 15.3% (raw) to 11.7-12.4% (filtered) at every Q tried. So the trade is
     "slightly worse typical range accuracy, meaningfully fewer big jumps", and whether that is
-    worth having depends on the consumer. It is NOT the range-accuracy win this design assumed,
-    and publish_mode stays at passthrough until that changes.
+    worth having depends on the consumer. It is NOT the range-accuracy win this design assumed.
+
+    SUPERSEDED: that verdict was measured on the old /fused_bbox stream with radar updates off.
+    On the current measurements, radar held out, the filter wins (median 1.57 -> 1.21 m, jumps
+    4.4% -> 2.9%), and publish_mode defaults to filtered since 2026-09-17.
     """
     dt = float(dt)
     Sa = np.diag([float(sigma_long) ** 2, float(sigma_lat) ** 2])

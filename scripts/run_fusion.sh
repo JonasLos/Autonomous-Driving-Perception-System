@@ -15,8 +15,11 @@
 # This composes an OVERLAY over docker-compose.yml; the base file is not modified, and
 # `docker compose --profile runtime up` is unaffected whether or not this stack is running.
 #
-# Everything is gated OFF by default:
-#   PUBLISH_MODE=passthrough        the filter runs but the output is a passthrough
+# Output mode (default filtered since 2026-09-17):
+#   --passthrough     PUBLISH_MODE=passthrough  publish the raw camera+LiDAR position instead of
+#                                               the filter's (rollback: no radar range, no velocity)
+#
+# Still gated OFF by default:
 #   ENABLE_RADAR_ONLY_BIRTH=false   radar may refine, never create
 #   ENABLE_EXTENT_ESTIMATION=false  class priors, as today
 set -euo pipefail
@@ -24,7 +27,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.fusion.yml)
 MODE="vehicle"; BAG=""; ACTION="up"
-export PUBLISH_MODE="${PUBLISH_MODE:-passthrough}"
+export PUBLISH_MODE="${PUBLISH_MODE:-filtered}"
 export ENABLE_RADAR_ONLY_BIRTH="${ENABLE_RADAR_ONLY_BIRTH:-false}"
 export ENABLE_EXTENT_ESTIMATION="${ENABLE_EXTENT_ESTIMATION:-false}"
 export EGO_YAW_CORRECTION_DEG="${EGO_YAW_CORRECTION_DEG:--5.35}"
@@ -44,7 +47,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --replay) MODE="replay"; BAG="${2:-}"; shift 2 ;;
     --vehicle) MODE="vehicle"; shift ;;
-    --filtered) PUBLISH_MODE="filtered"; shift ;;
+    --filtered) PUBLISH_MODE="filtered"; shift ;;       # the default; kept so old commands work
+    --passthrough) PUBLISH_MODE="passthrough"; shift ;;
     --ground) PROJECTION_TOPIC="/perception/lidar_2d_projection_ground"; shift ;;
     --debug-clouds) PUBLISH_DEBUG_CLOUDS="true"; shift ;;
     --no-levelling) GROUND_LEVELLING="false"; shift ;;
@@ -133,7 +137,7 @@ Up.
   /perception/objects          FusedObjectArray, frame `ego`
   TF: lidar_tc -> ego          the vehicle-longitudinal frame (base_link is NOT this)
 
-  gates (live):  ros2 param set /object_aggregator publish_mode filtered
+  output (live): ros2 param set /object_aggregator publish_mode passthrough|filtered
   stats:         scripts/run_fusion.sh --shadow-report
   stop:          scripts/run_fusion.sh --down
 MSG

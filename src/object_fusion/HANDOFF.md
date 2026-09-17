@@ -28,7 +28,7 @@ nine modified paths, every one of them first added by `e462094` itself -- check 
 `git log --oneline --diff-filter=A -- <path>`.
 
 **Live demo** (the user watches RViz on DISPLAY=:1). The `perception-object-fusion` image is
-current as of 2026-09-15; rebuild only after code changes.
+current as of 2026-09-17 (filtered default); rebuild only after code changes.
 
 ```bash
 scripts/run_radar.sh  --replay ~/selfcal_loc_2026-09-08_11-47-43 --obstacle-only     # existing stack
@@ -45,7 +45,8 @@ reinstall host Patchwork++ per "Run it" before any offline harness.
 **Live by default (all measured, all with a rollback parameter):** Patchwork++ ground flags
 (`--ground`), empty-box drop (`segmentation_empty_fallback:=true` reverts), depth-jump gate
 (`enable_depth_gate`), class vote (`enable_class_vote`), near-field odometry levelling
-(`ground_levelling`), merge distance bound (`MERGE_MAX_DIST=inf` reverts). `publish_mode` stays `passthrough`, extent estimation off (user's choice).
+(`ground_levelling`), merge distance bound (`MERGE_MAX_DIST=inf` reverts). **`publish_mode` is `filtered`** (the user's decision, 2026-09-17; `--passthrough` or
+`PUBLISH_MODE=passthrough` is the rollback). Extent estimation off (user's choice).
 
 **This version is the one the user watched and called good** (2026-09-16, on
 `adps_2026-08-25_11-58-32` in `publish_mode:=filtered`). It carries the three motion fixes and the
@@ -621,8 +622,8 @@ too wide at 65-80 m, and described the superseded rule):
 - camera gate rejection on the current measurements: **3.1%** overall (11.6% at 0-20 m, 0% past
   80 m), against 10.6% on the old stream.
 
-`publish_mode` still ships `passthrough`. Switching it is a user decision and should follow a live
-look in RViz; the user rejected filtered before, on the old measurements.
+`publish_mode` now defaults to `filtered` -- the user switched it on 2026-09-17 after watching it
+live on these measurements (they had rejected filtered once before, on the old ones).
 
 ## TO DO (prioritised; updated 2026-09-15)
 
@@ -641,8 +642,7 @@ re-measured, Q swept (2/1, 4/2, 8/4 -- all beat raw on jumps; 4/2 is the balance
 Also done: `sigma_cross` bracketed by measurement and set to 0.10 + 0.004 r, which fixed the
 60-80 m band (filtered 5.91 -> 0.89 m vs raw 1.98) and the tail (p90 27.19 -> 21.12 vs raw 22.45).
 ~~(a) show the user filtered live~~ -- done 2026-09-16; it exposed the three motion bugs above, and
-after fixing them the user called the result good. `publish_mode` still ships `passthrough`; the
-default is theirs to change.
+after fixing them the user called the result good, and on 2026-09-17 made `filtered` the default.
 Remaining: (b) camera NIS median is still 0.29 vs a target of 2 and near-field gating rejects 19.5%,
 both entangled with item 3; (c) 80-100 m is worse than raw when radar is absent, by design
 (RANGE_TRUST_MAX_M).
@@ -698,7 +698,8 @@ Done when: DropNF_cam spike rate <= DropNF's; only then enable `enable_camera_on
 ### 6. The 80+ m band  (after 2)
 12.6% spikes and ~-6.7 m range bias remain. Refuted causes are listed above (crop, missing returns,
 voxel). The planned fix is radar-owned range beyond ~80 m in the filter (`RANGE_TRUST_MAX_M`),
-which only acts in `publish_mode: filtered` -- so this follows item 2.
+which only acts in `publish_mode: filtered` -- now the default (2026-09-17), so this is unblocked
+and is the next item.
 
 ### 7. Phase 3: 360-degree LiDAR clusters  (large)
 `lidar_cluster_detector_node` from the plan. Patchwork++ already segments the full sweep in

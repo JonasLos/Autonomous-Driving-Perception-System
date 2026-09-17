@@ -38,7 +38,7 @@ CMD ["/bin/bash", "-lc", \
      ". /opt/ros/jazzy/setup.sh && . install/setup.sh && \
       ros2 launch object_fusion object_fusion.launch.py \
         use_sim_time:=${USE_SIM_TIME:-false} \
-        publish_mode:=${PUBLISH_MODE:-passthrough} \
+        publish_mode:=${PUBLISH_MODE:-filtered} \
         enable_radar_only_birth:=${ENABLE_RADAR_ONLY_BIRTH:-false} \
         enable_extent_estimation:=${ENABLE_EXTENT_ESTIMATION:-false} \
         ego_yaw_correction_deg:=${EGO_YAW_CORRECTION_DEG:--5.35} \

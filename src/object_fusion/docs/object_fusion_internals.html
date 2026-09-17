@@ -127,7 +127,7 @@
   <div class="facts">
     <span><b>Reference drive</b> selfcal_loc_2026-09-08 · 398 s · 4 519 detections</span>
     <span><b>Ruler</b> Delphi ESR range, ~0.1 m</span>
-    <span><b>State</b> 2026-09-16 · merge reach bounded; cones and offset measured</span>
+    <span><b>State</b> 2026-09-17 · filtered output is the default</span>
   </div>
 </header>
 
@@ -661,7 +661,7 @@ slope_y = −0.01451·roll − 0.00048·pitch − 0.01419      (degrees in, slop
       <tr><td class="p">CAMERA_GATE_CHI2</td><td class="num">9.21</td><td>Innovations are a heavy-tailed mixture; no single σ satisfies both the mean and the under-gate fraction. Gating the outlier population beat inflating σ (NIS mean 11.2 → 1.54).</td></tr>
       <tr><td class="p">RADAR_GATE_CHI2</td><td class="num">16.266</td><td>Radar NIS is already calibrated — 94.5–96.9% under-gate in every band from 0 to 180 m. Left alone.</td></tr>
       <tr><td class="p">assoc_max_dist<br>sticky_sanity_dist</td><td class="num">6.0 m<br>20.0 m</td><td>A ByteTrack id is a hard claim on its track, subject only to the outer sanity bound: when the fused position jumps, the id is stable in the image even though the 3D position is not.</td></tr>
-      <tr><td class="p">publish_mode</td><td class="num">passthrough</td><td>Publishes the raw measurement. See below — the filter now beats it, but switching the default is a decision to take with eyes on RViz.</td></tr>
+      <tr><td class="p">publish_mode</td><td class="num">filtered</td><td>Publishes the EKF state — radar-owned range past 80 m, velocity, covariance. Made the default on 2026-09-17 after it beat the raw measurement with radar held out and was watched live. <code>passthrough</code> (the raw camera+LiDAR position) is the rollback; which objects are published is identical in both.</td></tr>
     </tbody>
   </table></div>
 
@@ -738,7 +738,7 @@ slope_y = −0.01451·roll − 0.00048·pitch − 0.01419      (degrees in, slop
       <tr><td class="p">sensor_height / camera_height_m</td><td class="num">2.37 / 1.5275 m</td><td>Measured; camera height is derived from it and the camera_fl extrinsic</td></tr>
       <tr><td class="p">ego_yaw_correction_deg</td><td class="num">−5.35°</td><td>0.0 reproduces today's uncorrected frame</td></tr>
       <tr><td class="p">measurement_lag</td><td class="num">0.12 s</td><td>Raise if <code>late</code> counters climb</td></tr>
-      <tr><td class="p">publish_mode</td><td class="num">passthrough</td><td><code>filtered</code> publishes the EKF state with covariance and velocity</td></tr>
+      <tr><td class="p">publish_mode</td><td class="num">filtered</td><td><code>passthrough</code> reverts to the raw camera+LiDAR position: no radar range, no velocity</td></tr>
       <tr><td class="p">REWIND_S</td><td class="num">1.0 s</td><td>Backwards jump above this = a bag rewind: drop the tracks, clear odometry, restart the clock. Below it, an out-of-order arrival that must not move the clock back</td></tr>
       <tr><td class="p">split_branch_only</td><td class="num">true</td><td>The range-generous merge clause fires only between a camera-backed track and a radar-only one</td></tr>
       <tr><td class="p">min_range_for_gap</td><td class="num">60 m</td><td>…and only out there, where the camera's range is actually unreliable</td></tr>

@@ -29,7 +29,7 @@ _INT = {"min_update_count", "ground_min_points"}
 
 _ARGS = {
     "use_sim_time": "false",
-    "publish_mode": "passthrough",
+    "publish_mode": "filtered",
     "enable_radar_only_birth": "false",
     "enable_extent_estimation": "false",
     "ego_yaw_correction_deg": "-5.35",

@@ -1,10 +1,12 @@
 """The track-level aggregator: three measurement streams + ego motion -> /perception/objects.
 
-Shadow mode is the default. ``publish_mode`` starts at ``passthrough``, which republishes the
-camera+LiDAR measurements as objects with the filter running INTERNALLY and its divergence
-logged. Nothing radar does can reach the output until the gates are opened, and the shadow
-counters accrue the evidence to justify opening them. That is the same introduction the radar
-node had.
+``publish_mode`` defaults to ``filtered``: the published position is the EKF state, fused from
+camera+LiDAR and radar, with velocity and covariance. It started as ``passthrough`` -- the
+camera+LiDAR measurements republished with the filter running only INTERNALLY -- which is how the
+radar node was introduced too, and it was switched on 2026-09-17 by the user once the filter beat
+its input with radar held out (median range error 1.57 -> 1.21 m, jumps > 2 m 4.4% -> 2.9%,
+lag +0.04 m) and they had watched it in RViz. ``publish_mode:=passthrough`` is the rollback;
+the set of published objects is identical in both modes, only their position differs.
 
 TIME. Measurements are released in CAPTURE order across sensors by a fixed-lag queue, and the
 filter predicts to each measurement's own stamp before updating it. This is deliberately NOT
@@ -94,7 +96,8 @@ class ObjectAggregatorNode(Node):
         # and logs but genuinely cannot reach the output. An earlier version published the
         # filtered state in both modes and only blanked the covariance, which meant the safety
         # gate did not gate anything.
-        self._publish_mode = str(self.declare_parameter("publish_mode", "passthrough").value)
+        # filtered is the default since 2026-09-17 (the user's call, after watching it live).
+        self._publish_mode = str(self.declare_parameter("publish_mode", "filtered").value)
         self._enable_radar_only_birth = bool(
             self.declare_parameter("enable_radar_only_birth", False).value)
         self._ego_yaw_deg = float(self.declare_parameter(
@@ -172,9 +175,11 @@ class ObjectAggregatorNode(Node):
             f"enable_radar_only_birth={self._enable_radar_only_birth} "
             f"ego_yaw={self._ego_yaw_deg:+.2f}deg lag={self._lag:.3f}s odom={odom_topic}")
         if self._publish_mode == "passthrough":
-            self.get_logger().info(
-                "publish_mode=passthrough: the filter runs but the OUTPUT is a passthrough of "
-                "the camera+LiDAR measurements. Set publish_mode:=filtered to enable.")
+            self.get_logger().warning(
+                "publish_mode=passthrough (ROLLBACK): the filter runs but the OUTPUT is a "
+                "passthrough of the camera+LiDAR measurements -- no radar range, no velocity. "
+                "The default is publish_mode:=filtered.")
+
 
     # ------------------------------------------------------------------ housekeeping
     def _now(self):
