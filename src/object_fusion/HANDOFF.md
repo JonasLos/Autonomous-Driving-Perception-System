@@ -77,6 +77,8 @@ scripts/run_planner_ab_nodes.sh       legacy tracker.py + planner bridge side by
 scripts/planner_objects_ab.py LIVE: planner obstacle input, legacy tracker.py vs bridge
 scripts/lever_arm_ab.py       lever arm vs radial bias vs ego-yaw, from static tracks (--selftest)
 scripts/read_insconfig.py     the receiver's own configured lever arms, out of a bag
+scripts/radar_false_alarm_ab.py  item 8: would radar-only birth publish false alarms?
+scripts/lidar_cluster_ab.py   item 7: would 360-deg LiDAR clusters keep departing tracks alive?
 docker/Dockerfile.object_fusion      layered on perception-transform:latest (+ pypatchworkpp 1.4.1)
 docker-compose.fusion.yml + .replay.yml
 ```
@@ -799,14 +801,52 @@ miss. Re-read that band with a range-aware threshold before treating it as a def
 Done when: a drive with real far-field content (a highway run, or anything with vehicles held at
 80-150 m for tens of seconds) exists, and (a)/(b)/(c) are scored on it with `--radar-holdout`.
 
-### 7. Phase 3: 360-degree LiDAR clusters  (large)
-`lidar_cluster_detector_node` from the plan. Patchwork++ already segments the full sweep in
-ground_projection_node; publish its non-ground cloud and cluster that (range-adaptive eps). Ship
-gated off with shadow logging; clusters may SUSTAIN tracks, never birth them (clutter).
+### 7. Phase 3: 360-degree LiDAR clusters  -- MEASURED 2026-09-18: small gain on current data
+Plan unchanged: clusters may SUSTAIN tracks, never birth them. Stage 1 is built and tested:
+`object_fusion/lidar_clusters.py` (voxelise 0.2 m, range-adaptive gap 0.45 + 0.012 r, reject walls
+and flat patches; 8 tests). Stage 2 measured whether it is worth a node
+(`scripts/lidar_cluster_ab.py`): for each camera-track death on selfcal_loc_2026-09-08, propagate
+the object with ego motion and look for a cluster in the following sweeps, with the same test at
+the MIRRORED position as a chance control.
 
-### 8. Phase 4: radar-only track birth  (large, blocked)
-Blocked on a false-alarm rate: in the camera/radar overlap, count radar-only candidates that never
-get a camera detection over their life. Measure, then decide `enable_radar_only_birth`.
+    track deaths                      n    kept alive >= 0.5 s     chance (mirror)
+    after leaving the camera view    96    26.0%                   0.0%
+    dying inside the view            76     3.9%                   0.0%
+
+    how long it keeps them: median 0.7 s, p90 1.3 s; the full 3 s window only 4%
+    cost: 37.8 ms/sweep for Patchwork++ + clustering (the clustering alone is ~20-25 ms, since
+          ground_projection already runs Patchwork++); 41 clusters/sweep, 39 outside the camera
+
+So the effect is real (0% chance) but small: a quarter of departing tracks live ~0.7 s longer.
+The likely ceiling is physical: this drive is mostly 0.45 m cones, and the roof LiDAR's lowest
+beam cannot see one closer than ~4 m, which is exactly where a passed cone goes. Cars alongside
+are the case the path is FOR, and this drive barely has any.
+**Do not build the node on this evidence.** Re-run `lidar_cluster_ab.py` on a drive with traffic
+alongside (a multi-lane road); if vehicles leaving the view are held for seconds rather than 0.7 s,
+build `lidar_cluster_detector_node` gated off, and an aggregator path that only UPDATES existing
+tracks (the track store already reserves a `lidar` sensor: LOGODDS_HIT 0.40, its own counters).
+
+### 8. Phase 4: radar-only track birth  -- MEASURED 2026-09-18: blocked on traffic, keep it OFF
+`scripts/radar_false_alarm_ab.py` follows each ESR object by track_id (split on gaps and on range
+jumps, because ids recycle), applies the production radar-only confirmation (>= 8 observations,
+>= 80% moving over the ground), and asks whether the camera ever saw it where the two overlap.
+
+    drive (minutes)          would be born, in view   never seen by camera   born outside view
+    selfcal 09-08 (6.6)                 0                     -                      1
+    adps 11-55-43 (2.5)                32                  62.5%                     6
+    adps 11-58-32 (0.3)                 4                  25.0%                     3
+    adps 11-50-45 (0.9)                 0                     -                      0
+    pooled (10.3)                      36                  58%  (21)                10
+
+- The stationarity gate is doing its job: 91.5% of STATIONARY radar objects in view are never seen
+  by the camera (~700 lives a minute on selfcal) and none of them can be born.
+- Among movers that would be born, the unconfirmed ones are NOT compensation leakage from turning
+  (0% of them during turns; same ~3.5 m/s as confirmed ones). What differs is lifetime: 1.9 s
+  against 4.6 s for the confirmed.
+- 58% is an UPPER bound (YOLO's missing classes, occlusion), but n = 36 cannot set a gate, and it
+  is small because these drives have almost no moving traffic -- selfcal has none at all.
+Keep `enable_radar_only_birth` false. Re-run on a drive with real traffic; if the rate stays high,
+the lifetime difference is the first thing to try as a gate (it costs birth latency).
 
 ### 9. ~~Radar lateral lever arm~~ -- DONE 2026-09-15: NOT IDENTIFIABLE, surveyed value stands
 `scripts/radar_ab.py --lever-arm` now fits both components on turning data (and reads every mcap
