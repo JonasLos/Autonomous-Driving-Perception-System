@@ -141,3 +141,39 @@ def test_detections_without_an_id_fall_through_to_geometry():
                            id_of_track=lambda t: t.bytetrack_id,
                            id_of_detection=lambda d: d["id"])
     assert out == [(0, 0)]
+
+
+# ------------------------------------------------------- camera-referenced radar gate
+def _radar_scene(return_range):
+    """One track 50 m ahead on the radar boresight, one return on the same bearing."""
+    from types import SimpleNamespace
+    from object_fusion.association import associate_radar
+    R_sl, t_sl = np.eye(2), np.zeros(2)
+    tr = SimpleNamespace(x=np.array([50.0, 0.0, 0.0, 0.0]), P=np.diag([25.0, 25.0, 4.0, 4.0]))
+    sweep = SimpleNamespace(range=np.array([return_range]), azimuth=np.array([0.0]),
+                            range_rate=np.array([0.0]))
+    return associate_radar, [tr], sweep, R_sl, t_sl
+
+
+def test_a_ghost_behind_a_camera_ranged_vehicle_is_refused():
+    """The measured failure: at 40-80 m a return 3+ m behind the vehicle was, per the LiDAR on that
+    bearing, a multipath ghost 83% of the time. The track's own P admits it; the camera does not."""
+    assoc, tracks, sweep, R_sl, t_sl = _radar_scene(return_range=57.0)
+    pairs, _ = assoc(tracks, sweep, R_sl, t_sl, np.zeros(2))
+    assert pairs, "the premise: a coasting track's covariance admits a return 7 m behind it"
+    pairs, _ = assoc(tracks, sweep, R_sl, t_sl, np.zeros(2), camera_ref=[50.0])
+    assert pairs == [], "7 m from the camera's own range at 50 m is not this object"
+
+
+def test_a_return_on_the_vehicle_is_still_accepted():
+    assoc, tracks, sweep, R_sl, t_sl = _radar_scene(return_range=51.2)
+    pairs, _ = assoc(tracks, sweep, R_sl, t_sl, np.zeros(2), camera_ref=[50.0])
+    assert pairs == [(0, 0)]
+
+
+def test_past_the_trust_bound_radar_still_owns_range():
+    """Beyond 80 m the camera range is biased (-7.6 m at 80-100 m); gating radar on it there would
+    drop exactly the objects radar exists to fix."""
+    from object_fusion.tracker import camera_radar_range_cap
+    assert camera_radar_range_cap(95.0) is None
+    assert camera_radar_range_cap(50.0) >= 3.0

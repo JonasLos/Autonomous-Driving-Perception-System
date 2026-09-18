@@ -75,6 +75,10 @@ class _Sweep:
 #: radar's, so measurements genuinely interleave by tens of milliseconds).
 REWIND_S = 1.0
 
+#: A camera measurement older than this is not a reference for the radar range gate: at 10 Hz it
+#: means the camera has missed the object for two frames, and an object can move.
+CAMERA_REF_MAX_AGE_S = 0.3
+
 
 class ObjectAggregatorNode(Node):
     def __init__(self):
@@ -122,6 +126,13 @@ class ObjectAggregatorNode(Node):
         # of a covariance that grows without limit while a track coasts -- so the reach is
         # bounded in metres here. Set it to inf to get the original unbounded behaviour back.
         self._merge_max_dist = float(self.declare_parameter("merge_max_dist", 2.5).value)
+        # Refuse a radar return that sits further from the track's RECENT camera range than the
+        # camera's own spread allows (3 sigma_along, inside RANGE_TRUST_MAX_M only). At 40-80 m
+        # radar was pulling vehicle tracks 3+ m too far: the LiDAR on that bearing shows the
+        # vehicle at the camera range and nothing at the radar range in 83% of those updates
+        # (multipath ghosts). On: 119 -> 27 such updates, at -0.6% radar updates overall. See
+        # tracker.camera_radar_range_cap. false restores the old behaviour.
+        self._radar_camera_gate = bool(self.declare_parameter("radar_camera_gate", True).value)
         # Outer bound on a sticky ByteTrack claim. Generous on purpose: the claim is meant to
         # survive the 14 m road-adoption jump that breaks a position-only associator, and only
         # to refuse a RECYCLED id that would teleport a track.
@@ -462,8 +473,16 @@ class ObjectAggregatorNode(Node):
         v_ego_s = R_sl @ v_lidar
         sweep = _Sweep(msg.detections)
 
+        camera_ref = None
+        if self._radar_camera_gate:
+            # The track's own camera range from the radar origin, if the camera saw it recently.
+            camera_ref = [float(np.hypot(*(R_sl @ tr.last_cam_xy + t_sl)))
+                          if (tr.last_cam_xy is not None and tr.last_camera_update is not None
+                              and t - tr.last_camera_update <= CAMERA_REF_MAX_AGE_S) else None
+                          for tr in self._store.tracks]
         pairs, _info = associate_radar(self._store.tracks, sweep, R_sl, t_sl, v_ego_s,
-                                       max_azimuth_err_deg=1.0, max_range_err=60.0)
+                                       max_azimuth_err_deg=1.0, max_range_err=60.0,
+                                       camera_ref=camera_ref)
         matched = {di for _, di in pairs}
         for ti, di in pairs:
             tr = self._store.tracks[ti]

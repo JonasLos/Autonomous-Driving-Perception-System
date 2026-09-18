@@ -24,7 +24,7 @@ _FLOAT = {"ego_yaw_correction_deg", "ego_z_offset", "measurement_lag", "sigma_lo
 _BOOL = {"enable_radar_only_birth", "enable_extent_estimation", "use_sim_time",
          "enable_centroid_correction", "enable_camera_only_fallback",
          "publish_debug_clouds", "segmentation_empty_fallback", "enable_depth_gate",
-         "enable_class_vote", "ground_levelling"}
+         "enable_class_vote", "ground_levelling", "radar_camera_gate"}
 _INT = {"min_update_count", "ground_min_points"}
 
 _ARGS = {
@@ -84,6 +84,7 @@ _ARGS = {
     "camera_height_m": "1.5275",
     "assoc_max_dist": "6.0",
     "merge_max_dist": "2.5",
+    "radar_camera_gate": "true",
     "sticky_sanity_dist": "20.0",
 }
 
@@ -136,6 +137,6 @@ def generate_launch_description():
              parameters=_params("use_sim_time", "publish_mode", "enable_radar_only_birth",
                                 "ego_yaw_correction_deg", "measurement_lag", "sigma_long",
                                 "sigma_lat", "output_timeout", "odom_topic",
-                                "assoc_max_dist", "merge_max_dist",
+                                "assoc_max_dist", "merge_max_dist", "radar_camera_gate",
                                 "sticky_sanity_dist")),
     ])

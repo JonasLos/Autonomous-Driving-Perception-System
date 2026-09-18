@@ -106,7 +106,8 @@ def associate_radar(tracks, sweep, R_sl, t_sl, v_ego_s, *,
                     chi2_gate=CHI2_3DOF_999,
                     max_azimuth_err_deg=1.0,
                     max_range_err=60.0,
-                    radar_R=None):
+                    radar_R=None,
+                    camera_ref=None):
     """Associate radar detections to predicted tracks, in the radar's own polar space.
 
     ``tracks`` is a sequence with ``.x`` (4,) and ``.P`` (4,4). ``sweep`` exposes ``range``,
@@ -124,6 +125,11 @@ def associate_radar(tracks, sweep, R_sl, t_sl, v_ego_s, *,
 
     Keeping hard caps alongside the statistical gate is necessary, not belt-and-braces: a
     diverged track has a huge S, and a purely statistical gate would admit anything.
+
+    ``camera_ref``: optional per-track sequence of the track's RECENT camera range, expressed from
+    the radar origin (None where there is none). Where given and inside the camera's range-trust
+    bound, a return further from it than ``tracker.camera_radar_range_cap`` is refused -- see that
+    function for the measurement behind it.
     """
     from object_fusion.tracker import radar_h_and_H, radar_R as default_radar_R
 
@@ -141,6 +147,8 @@ def associate_radar(tracks, sweep, R_sl, t_sl, v_ego_s, *,
     resid_r = np.zeros((n, m))
     resid_a = np.zeros((n, m))
 
+    from object_fusion.tracker import camera_radar_range_cap
+
     for i, tr in enumerate(tracks):
         z_pred, H = radar_h_and_H(tr.x, R_sl, t_sl, v_ego_s)
         S = H @ np.asarray(tr.P, dtype=np.float64) @ H.T + R_meas
@@ -155,6 +163,10 @@ def associate_radar(tracks, sweep, R_sl, t_sl, v_ego_s, *,
         allowed[i] = ((d2 <= chi2_gate)
                       & (np.abs(y[:, 2]) <= max_azimuth_err_deg)
                       & (np.abs(y[:, 0]) <= max_range_err))
+        if camera_ref is not None and camera_ref[i] is not None:
+            cap = camera_radar_range_cap(camera_ref[i])
+            if cap is not None:
+                allowed[i] &= np.abs(rng - float(camera_ref[i])) <= cap
         cost[i] = d2
 
     pairs = solve_assignment(cost, allowed)

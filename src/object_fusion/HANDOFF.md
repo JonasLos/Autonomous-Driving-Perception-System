@@ -45,7 +45,8 @@ reinstall host Patchwork++ per "Run it" before any offline harness.
 **Live by default (all measured, all with a rollback parameter):** Patchwork++ ground flags
 (`--ground`), empty-box drop (`segmentation_empty_fallback:=true` reverts), depth-jump gate
 (`enable_depth_gate`), class vote (`enable_class_vote`), near-field odometry levelling
-(`ground_levelling`), merge distance bound (`MERGE_MAX_DIST=inf` reverts). **`publish_mode` is `filtered`** (the user's decision, 2026-09-17; `--passthrough` or
+(`ground_levelling`), merge distance bound (`MERGE_MAX_DIST=inf` reverts), camera-referenced
+radar range gate (`RADAR_CAMERA_GATE=false` reverts). **`publish_mode` is `filtered`** (the user's decision, 2026-09-17; `--passthrough` or
 `PUBLISH_MODE=passthrough` is the rollback). Extent estimation off (user's choice).
 
 **This version is the one the user watched and called good** (2026-09-16, on
@@ -79,6 +80,7 @@ scripts/lever_arm_ab.py       lever arm vs radial bias vs ego-yaw, from static t
 scripts/read_insconfig.py     the receiver's own configured lever arms, out of a bag
 scripts/radar_false_alarm_ab.py  item 8: would radar-only birth publish false alarms?
 scripts/lidar_cluster_ab.py   item 7: would 360-deg LiDAR clusters keep departing tracks alive?
+scripts/radar_vehicle_truth.py  item 12: radar vs camera on a vehicle -- what does the LiDAR see?
 docker/Dockerfile.object_fusion      layered on perception-transform:latest (+ pypatchworkpp 1.4.1)
 docker-compose.fusion.yml + .replay.yml
 ```
@@ -898,13 +900,40 @@ Two things tried and dropped:
   return, the next returns agree with the TRACK. Removed from production code, not shipped.
 - The class split above, which is what killed the cone idea.
 
-**Open question, and it is not the one this item started with:** for a vehicle at 40-80 m, is the
-radar wrong (another object further down the bearing) or the camera+LiDAR (the nearest-depth
-cluster catching something in front of the car)? The held-out result -- the filter beats raw on
-average -- leans toward radar being right. Settle it with a third opinion independent of both:
-the LiDAR cluster of the whole vehicle (`object_fusion.lidar_clusters`, now available). If the
-cluster agrees with radar, the pulls are corrections and nothing needs fixing; if it agrees with the
-camera, vehicle tracks need a class-aware radar gate.
+**Settled the same day, and the radar was WRONG** (`scripts/radar_vehicle_truth.py`). For each of
+the 119 vehicle updates at 40-80 m with radar > 3 m behind the camera, the non-ground LiDAR points
+within +-1.5 deg of the radar's bearing were split into range segments:
+
+    the vehicle at the CAMERA range, nothing at the radar range (radar ghost)   99   83.2%
+    separate objects at both ranges (radar on something BEHIND the target)      15   12.6%
+    nothing at the camera range (the camera was wrong, radar correcting it)      2    1.7%
+    one object spanning both (radar ranging deeper into a bus)                   1    0.8%
+
+So radar was pulling vehicle tracks 3+ m too far away, mostly on multipath ghosts. **FIXED, live
+by default: `radar_camera_gate`.** A radar return is refused when it sits further from the track's
+RECENT camera range (within 0.3 s) than 3 sigma_along -- only inside RANGE_TRUST_MAX_M, so past
+80 m radar still owns range (`tracker.camera_radar_range_cap`, `associate_radar(camera_ref=...)`).
+The earlier cap against the TRACK's predicted range did nothing because radar had already pulled
+the track; referencing the camera breaks that loop.
+
+    offline, reference drive          LIVE (no gate)     radar_camera_gate
+    radar > 3 m behind, 40-60 m          14.8%               0.0%
+    track pulled > 3 m off camera, 40-60 m   16.0%            0.4%
+    vehicles 40-80 m pulled > 3 m        39.2%              12.7%
+    LiDAR-confirmed bad updates           119                 27   (25 ghosts inside 3 sigma at 60-80 m)
+    radar updates applied               29239              29056   (-0.6%, none lost under 25 m)
+
+Cost: the 2 genuine corrections are blocked too -- 2 lost to stop ~92 wrong pulls. 3 sigma was
+kept, not tuned down to the 27 leftovers. Rollback: restart with `RADAR_CAMERA_GATE=false` (it is
+read at start-up, so `ros2 param set` does not change it live).
+
+Live check, one full loop with the gate on (`~/fusion_data/recordings/loopD`) against loopC
+(identical settings, gate off): the node runs normally and nothing got worse. The MEDIAN offset of
+radar-touched tracks barely moves (+0.87 -> +0.84 m) -- expected, since the gate acts on the
+40-80 m tail and the median is dominated by near objects. Orphans 9.3% -> 7.9% and true duplicates
+3.0% -> 2.6% also improved, but detector run-to-run variation is of that size, so they are not
+credited to the gate. The evidence for it is the offline table above, which runs the production
+association code.
 
 ### 13. LiDAR position relative to the odometry output point  (user decision pending)
 The planner bridge's `lidar_offset` ships at (2.393, 0.206) m -- the value `tracker.py` has always

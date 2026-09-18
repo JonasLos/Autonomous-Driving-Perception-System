@@ -46,7 +46,7 @@ __all__ = [
     "sigma_along", "sigma_cross", "range_is_trustworthy",
     "process_noise", "predict", "kalman_update", "wrap_deg",
     "radar_h_and_H", "lidar_measurement", "init_from_radar",
-    "compensated_range_rate",
+    "compensated_range_rate", "camera_radar_range_cap",
 ]
 
 # --------------------------------------------------------------------------- radar noise
@@ -492,6 +492,25 @@ def init_from_radar(rho, az_deg, range_rate, v_ego_s, R_ls, t_ls,
     P[:2, :2] = R_ls @ C_p_s @ R_ls.T
     P[2:, 2:] = R_ls @ C_v_s @ R_ls.T
     return x, 0.5 * (P + P.T)
+
+
+def camera_radar_range_cap(camera_range_m, k=3.0, floor_m=3.0):
+    """How far a radar return may sit from the SAME track's recent camera range, or None.
+
+    k * sigma_along(r), floored at 3 m, inside RANGE_TRUST_MAX_M; None beyond, where the camera
+    range is biased and radar must stay free to own it.
+
+    Why against the CAMERA and not the track: at 40-80 m, 38.9% of radar updates on vehicle tracks
+    put the object more than 3 m behind its camera range, and the LiDAR on that bearing
+    (scripts/radar_vehicle_truth.py) shows the vehicle at the CAMERA range with nothing at the
+    radar range in 83% of them -- a multipath ghost -- and a different object behind it in 12.6%.
+    A cap against the track's own predicted range does nothing (tried: 29239 -> 29227 updates),
+    because once radar has pulled the track back, the next ghost agrees with the track.
+    """
+    r = float(camera_range_m)
+    if r >= RANGE_TRUST_MAX_M:
+        return None
+    return max(float(floor_m), float(k) * float(sigma_along(r)))
 
 
 def compensated_range_rate(range_rate, azimuth_deg, v_ego_s):

@@ -241,7 +241,7 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
         radar_holdout=0, lever=True, radar_range_gate=60.0, collect_speed=False,
         merge=True, count_objects=False, merge_range_gap=20.0, merge_bearing_deg=1.5,
         radar_birth=True, assoc_max_dist=6.0, sigma_cross_scale=1.0, merge_chi2=9.21,
-        merge_max_dist=2.5):
+        merge_max_dist=2.5, radar_camera_gate=False):
     """One arm. Returns a dict of diagnostics.
 
     ``collect_ab`` scores the RAW camera measurement (what publish_mode=passthrough publishes)
@@ -387,9 +387,16 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                           holdout=radar_holdout)
         else:
             sweep = meas.payload
+            cref = None
+            if radar_camera_gate:
+                cref = []
+                for tr_ in store.tracks:
+                    seen_ = cam_seen.get(tr_.id)
+                    cref.append(float(np.hypot(*(R_sl @ seen_[1] + t_sl)))
+                                if seen_ is not None and t - seen_[0] <= 0.3 else None)
             pairs, _info = associate_radar(store.tracks, sweep, R_sl, t_sl, v_ego_s,
                                            max_azimuth_err_deg=1.0,
-                                           max_range_err=radar_range_gate)
+                                           max_range_err=radar_range_gate, camera_ref=cref)
             matched_det = {di for _, di in pairs}
             for ti, di in pairs:
                 tr = store.tracks[ti]
@@ -421,6 +428,9 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                              # how far the update left the track from its own camera range
                              float(np.hypot(*tr.x[:2]) - np.hypot(*seen[1])),
                              1.0 if "cone" in (tr.class_name() or "") else 0.0))
+                        counts.setdefault("radar_vs_cam_events", []).append(
+                            (t, float(sweep.range[di]), float(sweep.azimuth[di]),
+                             seen[1].copy(), tr.class_name() or ""))
                     if collect_nis:
                         nis["radar"].append(n_)
                         band = int(min(sweep.range[di], 170) // 20) * 20
@@ -1130,9 +1140,11 @@ def main():
         # A per-track "trusted range cap" (3 sigma_along under 80 m) was tried here and REMOVED:
         # 29239 -> 29227 radar updates, 60-80 m unchanged. The disagreement sits within 3 sigma,
         # and once a track has been pulled toward a return, later returns agree with the TRACK.
-        for label in ("LIVE",):
+        for label, gate in (("LIVE", False),
+                            ("camera-referenced radar gate (3 sigma_along under 80 m)", True)):
             d = run(fused, radar, odom, R_sl, t_sl, ego_yaw_deg=-5.35,
-                    max_frames=args.max_frames, radar_birth=False, cam_gate=CAMERA_GATE_CHI2)
+                    max_frames=args.max_frames, radar_birth=False, cam_gate=CAMERA_GATE_CHI2,
+                    radar_camera_gate=gate)
             rows = np.array(d["counts"].get("radar_vs_cam", []))
             print(f"  {label}   (radar updates applied: {d['counts']['radar_updates']})")
             print(f"  {'camera range':>13s} {'updates':>8s} {'|diff|>max(3m,10%)':>19s}"
