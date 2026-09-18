@@ -285,6 +285,7 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
     static_speeds, all_speeds = [], []
     static_radial, static_rr_innov = [], []
     counts = {"cam_updates": 0, "radar_updates": 0, "births": 0, "gated_out": 0}
+    cam_seen = {}      # track id -> (t, lidar xy) of its latest camera measurement
 
     for meas in q.drain():
         t = meas.stamp
@@ -380,6 +381,7 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                         nis_banded.setdefault(("camera_lidar", band), []).append(n_)
                 # passthrough publishes this measurement whether or not the gate applied it
                 tr.last_cam_xy = np.asarray(p, dtype=float).copy()
+                cam_seen[tr.id] = (t, tr.last_cam_xy)
             if collect_ab and ab_rts.size:
                 _score_ab(store, t, radar, ab_rts, R_sl, t_sl, ab, ab_prev,
                           holdout=radar_holdout)
@@ -408,6 +410,17 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                     tr.moving_hits += 1
                 if applied:
                     counts["radar_updates"] += 1
+                    # Item 12: does the radar return agree in RANGE with this track's own camera
+                    # measurement from the same moment? A return from a different object behind
+                    # the target shows up as a large positive difference.
+                    seen = cam_seen.get(tr.id)
+                    if seen is not None and t - seen[0] <= 0.3:
+                        ps = R_sl @ seen[1] + t_sl
+                        counts.setdefault("radar_vs_cam", []).append(
+                            (float(np.hypot(*ps)), float(sweep.range[di] - np.hypot(*ps)),
+                             # how far the update left the track from its own camera range
+                             float(np.hypot(*tr.x[:2]) - np.hypot(*seen[1])),
+                             1.0 if "cone" in (tr.class_name() or "") else 0.0))
                     if collect_nis:
                         nis["radar"].append(n_)
                         band = int(min(sweep.range[di], 170) // 20) * 20
@@ -931,6 +944,9 @@ def main():
                          "drive are static, so anything far from 0 is the filter's own error")
     ap.add_argument("--radar-holdout", type=int, default=0,
                     help="--full-ab: hold radar out of one track in N and score only those")
+    ap.add_argument("--radar-assoc", action="store_true",
+                    help="item 12: do applied radar updates agree in range with the same track's "
+                         "camera measurement? Large disagreement = a different object on the bearing")
     ap.add_argument("--q-sweep", action="store_true",
                     help="can ANY process noise make the filter beat the raw measurement?")
     ap.add_argument("--runs", action="store_true",
@@ -1105,6 +1121,39 @@ def main():
                     v = np.asarray(ab["banded"].get((key, b), []))
                     cells.append(f"{np.median(v):5.2f}({v.size:4d})" if v.size >= 10 else "    -    ")
                 print(f"      {lab} " + " ".join(cells))
+
+    if args.radar_assoc:
+        print("\n=== RADAR ASSOCIATION: applied radar range minus the same track's camera range ===")
+        print("  Only updates with a camera measurement from the same track within 0.3 s. Under")
+        print("  80 m the camera range is trusted, so a big difference there is a wrong association;")
+        print("  past 80 m the camera range is biased and the difference is expected.\n")
+        # A per-track "trusted range cap" (3 sigma_along under 80 m) was tried here and REMOVED:
+        # 29239 -> 29227 radar updates, 60-80 m unchanged. The disagreement sits within 3 sigma,
+        # and once a track has been pulled toward a return, later returns agree with the TRACK.
+        for label in ("LIVE",):
+            d = run(fused, radar, odom, R_sl, t_sl, ego_yaw_deg=-5.35,
+                    max_frames=args.max_frames, radar_birth=False, cam_gate=CAMERA_GATE_CHI2)
+            rows = np.array(d["counts"].get("radar_vs_cam", []))
+            print(f"  {label}   (radar updates applied: {d['counts']['radar_updates']})")
+            print(f"  {'camera range':>13s} {'updates':>8s} {'|diff|>max(3m,10%)':>19s}"
+                  f" {'radar BEHIND >3m':>17s} {'track pulled >3m off camera':>28s}")
+            for lo, hi in ((0, 25), (25, 40), (40, 60), (60, 80), (80, 120), (120, 200)):
+                m = (rows[:, 0] >= lo) & (rows[:, 0] < hi) if rows.size else np.array([], bool)
+                if m.sum() < 10:
+                    continue
+                r, dd, pull = rows[m, 0], rows[m, 1], rows[m, 2]
+                bad = np.abs(dd) > np.maximum(3.0, 0.1 * r)
+                print(f"  {lo:5d}-{hi:<5d}   {m.sum():8d} {100 * bad.mean():18.1f}%"
+                      f" {100 * np.mean(dd > 3.0):16.1f}% {100 * np.mean(np.abs(pull) > 3.0):27.1f}%")
+            if rows.size and rows.shape[1] > 3:
+                inb = (rows[:, 0] >= 40) & (rows[:, 0] < 80)
+                for lab, sel in (("cones", inb & (rows[:, 3] > 0.5)),
+                                 ("everything else", inb & (rows[:, 3] < 0.5))):
+                    if sel.sum():
+                        print(f"    40-80 m {lab:16s} updates {sel.sum():4d}   radar BEHIND >3 m "
+                              f"{100 * np.mean(rows[sel, 1] > 3.0):5.1f}%   track pulled >3 m off "
+                              f"its camera {100 * np.mean(np.abs(rows[sel, 2]) > 3.0):5.1f}%")
+            print()
 
     if args.q_sweep:
         print("\n=== PROCESS-NOISE SWEEP ===")

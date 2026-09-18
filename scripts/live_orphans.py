@@ -22,6 +22,14 @@ PUB = "/perception/objects_markers"
 # 6.5 m of cross-offset at 70 m, which reads as a 98.8% orphan rate in the far bands.
 EGO_YAW_DEG = 5.35
 
+# Past object_fusion's RANGE_TRUST_MAX_M the filter deliberately stops taking the camera's range
+# (it is biased -7.6 m at 80-100 m and worse beyond), so there the track and the measurement are
+# SUPPOSED to disagree along the ray. A plain 3 m test counts that intended divergence as a lost
+# object -- it read 30.5% "orphaned" past 80 m. Out there a measurement is covered when a track
+# sits on its BEARING (within 3 m across the ray) at any plausible range.
+RANGE_TRUST_MAX_M = 80.0
+FAR_ALONG_FRAC = 0.35
+
 
 def centres(msg):
     out = []
@@ -78,7 +86,16 @@ def main(path):
             d = [math.hypot(x - qx, y - qy) for (qx, qy) in tracks]
             k = int(np.argmin(d))
             dists.append(d[k])
-            bands[band(r)].append(1.0 if d[k] >= 3.0 else 0.0)
+            covered = d[k] < 3.0
+            if not covered and r >= RANGE_TRUST_MAX_M:
+                ux, uy = x / r, y / r
+                for (qx, qy) in tracks:
+                    a_ = (qx - x) * ux + (qy - y) * uy
+                    c_ = -(qx - x) * uy + (qy - y) * ux
+                    if abs(c_) < 3.0 and abs(a_) < FAR_ALONG_FRAC * r:
+                        covered = True
+                        break
+            bands[band(r)].append(0.0 if covered else 1.0)
             if d[k] < 3.0:
                 claimed[k] += 1
                 qx, qy = tracks[k]
@@ -108,7 +125,9 @@ def main(path):
     d = np.asarray(dists)
     n = d.size
     print(f"  measurements matched {n}")
-    print(f"  ORPHANED (no track within 3 m): {100 * np.mean(d >= 3.0):.1f}%")
+    aware = np.concatenate([np.asarray(v) for v in bands.values()])
+    print(f"  ORPHANED: {100 * aware.mean():.1f}%  (range-aware: past {RANGE_TRUST_MAX_M:.0f} m a "
+          f"track on the bearing counts)   naive 3 m test: {100 * np.mean(d >= 3.0):.1f}%")
     print("  nearest published track:  "
           + "  ".join(f"<{c} m {100 * np.mean(d < c):5.1f}%" for c in (1, 2, 3, 5, 8))
           + f"   none at all {100 * np.mean(~np.isfinite(d)):.1f}%")

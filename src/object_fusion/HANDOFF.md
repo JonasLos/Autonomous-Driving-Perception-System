@@ -866,21 +866,45 @@ tracker inflation/noise. Most are tunable with NIS or shadow logs once item 2 ru
 ### 11. ~~Cones still dropped by the aggregator~~ -- DONE 2026-09-16, see the section above
 The Mahalanobis merge clause did not bound a distance; `merge_max_dist = 2.5` bounds it. Live over
 a full replay loop, orphaned measurements 15.7% -> 10.5% for 1.7 points of duplicate boxes.
-WHAT IS LEFT: **80-200 m reads 30.5% orphaned**, against 7-11% in every band under 80 m -- but see
-item 6: past 80 m the track and the camera measurement are SUPPOSED to disagree, because the filter
-drops the camera's range there and the raw measurement sits 2.97 m from radar where the filtered
-state sits 0.10 m. Most of that 30.5% is the 3 m threshold counting the intended divergence. Fix
-the metric (a range-aware threshold) before reading it as lost objects.
+~~80-200 m reads 30.5% orphaned~~ -- a METRIC artefact, fixed 2026-09-18. Past 80 m the filter
+drops the camera's range, so the track and the camera measurement are supposed to disagree along
+the ray; the 3 m test counted that. `live_orphans.py` now counts a far measurement as covered when a
+track sits on its bearing (within 3 m across the ray, 35% of range along it). Re-read on loopC:
+
+    80-200 m    30.5% -> 12.7%   (in line with 7-11% in every nearer band)
+    overall     10.5% ->  9.3%
+
+Nothing left here that is not item 6's (a far-field drive).
 
 ### 12. ~~Aggregator positional accuracy~~ -- ATTRIBUTED 2026-09-16, see the section above
 It is the radar, not the filter. A track with no radar return on its bearing sits 0.12 m from its
 camera measurement; one the radar has touched sits 0.91 m behind it, and the radar itself is 0.32 m
 behind it, with 51% of tracks between the two sensors.
-WHAT IS LEFT: the tail, not the median. 19% of radar-updated tracks sit BEYOND the radar return,
-and the p75 camera-radar gap is +6.5 m -- on those the bearing-matched return is a different object
-behind the target. That is a radar ASSOCIATION question (`associate_radar`'s gate), not a filter
-one, and it is worth measuring the same way a false-alarm rate would be: count radar updates whose
-range disagrees with the camera by more than the range-trust bound, by band.
+WHAT IS LEFT, measured 2026-09-18 (`scripts/object_ab.py --radar-assoc`): every APPLIED radar
+update, compared with the same track's camera range from the same moment.
+
+    camera range   updates   radar BEHIND the camera by > 3 m   track left > 3 m off its camera
+       0-40 m        931          0.0%                               0.5%
+      40-60 m        583         14.8%                              16.0%
+      60-80 m        380         17.6%                              34.2%
+
+    40-80 m, by class:   cones 5.2% radar-behind      everything else (vehicles) 38.9%
+
+So association is clean under 40 m, and the 40-80 m disagreement is VEHICLES, not cones -- the
+obvious hypothesis (a weak-reflecting cone picking up the strong object behind it) is REFUTED.
+Two things tried and dropped:
+- A per-track range cap of 3 sigma_along under 80 m: 29239 -> 29227 radar updates, 60-80 m
+  unchanged. The disagreement sits inside 3 sigma, and once a track has been pulled toward a
+  return, the next returns agree with the TRACK. Removed from production code, not shipped.
+- The class split above, which is what killed the cone idea.
+
+**Open question, and it is not the one this item started with:** for a vehicle at 40-80 m, is the
+radar wrong (another object further down the bearing) or the camera+LiDAR (the nearest-depth
+cluster catching something in front of the car)? The held-out result -- the filter beats raw on
+average -- leans toward radar being right. Settle it with a third opinion independent of both:
+the LiDAR cluster of the whole vehicle (`object_fusion.lidar_clusters`, now available). If the
+cluster agrees with radar, the pulls are corrections and nothing needs fixing; if it agrees with the
+camera, vehicle tracks need a class-aware radar gate.
 
 ### 13. LiDAR position relative to the odometry output point  (user decision pending)
 The planner bridge's `lidar_offset` ships at (2.393, 0.206) m -- the value `tracker.py` has always
