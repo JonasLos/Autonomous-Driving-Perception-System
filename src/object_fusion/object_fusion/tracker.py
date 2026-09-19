@@ -251,8 +251,9 @@ def process_noise(dt, sigma_long, sigma_lat, heading=None):
     ``None`` for an isotropic Q, which is what an unclassified or slow track gets -- a heading
     taken from a near-zero velocity is noise.
 
-    sigma_long 2.0 and sigma_lat 1.0 m/s^2 (covering ~0.2 g braking and a 3 s lane change) are
-    INVENTED. They have an objective tuning target: NIS.
+    sigma_long 2.0 and sigma_lat 1.0 m/s^2 (covering ~0.2 g braking and a 3 s lane change) started
+    INVENTED and are now MEASURED -- see below, and HANDOFF item 2: they are what keeps lag near
+    zero, and also why the camera NIS reads low (the track's P dominates the innovation).
 
     MEASURED, and the result is not what this model hoped for. Sweeping Q against radar range
     on the reference replay, |range error| improves MONOTONICALLY as Q grows:

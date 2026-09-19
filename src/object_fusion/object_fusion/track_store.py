@@ -69,8 +69,14 @@ RADAR_ONLY_CONFIRM_LOGODDS = 3.0
 P_PUBLISH_RADAR_ONLY = 0.7
 P_DELETE = 0.2
 
-#: Coast budgets by evidence. All INVENTED; measure the distribution of re-acquired gap
-#: lengths in ByteTrack id continuity and ESR slot continuity and take the 95th percentile.
+#: Coast budgets by evidence. MEASURED 2026-09-18, and the method this comment used to prescribe
+#: ("take the 95th percentile of re-acquisition gaps") is WRONG. Those gaps are real -- p95 0.7-1.7 s
+#: for the camera across four drives, and 13-28% of re-acquisitions arrive after 0.5 s
+#: (scripts/coast_budget_ab.py) -- but covering them makes things worse: at 1.5 s orphaned
+#: measurements rise 10.6% -> 13.3% and the held-out range error 1.07 -> 1.58 m, because a stale
+#: coasting track drifts far enough to lose the detection it was kept alive for
+#: (scripts/coast_sweep_ab.py). 1.0 s is within noise of 0.5 s on every metric, so 0.5 s stays.
+#: "radar" and "both" were not swept separately beyond the 1.5/2.0 s arms.
 MAX_COAST_S = {"both": 1.0, "camera": 0.5, "radar": 0.3}
 
 #: A diverged track must die, not linger with a confident-looking pose. INVENTED.

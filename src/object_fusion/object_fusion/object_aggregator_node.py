@@ -111,9 +111,10 @@ class ObjectAggregatorNode(Node):
         self._sigma_long = float(self.declare_parameter("sigma_long", 2.0).value)
         self._sigma_lat = float(self.declare_parameter("sigma_lat", 1.0).value)
         self._output_timeout = float(self.declare_parameter("output_timeout", 0.5).value)
-        # Widest Euclidean gap at which a camera detection may claim an existing track.
-        # INVENTED; it is the one association bound here that is not in a sensor's native
-        # space, and it exists only to stop a birth-per-frame in a crowded scene.
+        # Widest Euclidean gap at which a camera detection may claim an existing track. It is
+        # the one association bound here that is not in a sensor's native space, and it exists
+        # only to stop a birth-per-frame in a crowded scene. MEASURED 2026-09-16 (it started
+        # invented): 6 m against 4 m over a full replay loop, below.
         #
         # Narrowing it to 4 m was measured and REJECTED. It does recover objects -- orphaned
         # measurements 10.5% -> 9.0% over a full replay loop -- but it pays for them with

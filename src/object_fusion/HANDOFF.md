@@ -81,6 +81,9 @@ scripts/read_insconfig.py     the receiver's own configured lever arms, out of a
 scripts/radar_false_alarm_ab.py  item 8: would radar-only birth publish false alarms?
 scripts/lidar_cluster_ab.py   item 7: would 360-deg LiDAR clusters keep departing tracks alive?
 scripts/radar_vehicle_truth.py  item 12: radar vs camera on a vehicle -- what does the LiDAR see?
+scripts/filter_scale_ab.py    item 2: does scaling the camera sigma change held-out accuracy? (no)
+scripts/coast_budget_ab.py    item 10: re-acquisition gaps per sensor vs the coast budgets
+scripts/coast_sweep_ab.py     item 10: what a longer coast budget costs (orphans, held-out error)
 docker/Dockerfile.object_fusion      layered on perception-transform:latest (+ pypatchworkpp 1.4.1)
 docker-compose.fusion.yml + .replay.yml
 ```
@@ -690,9 +693,22 @@ Also done: `sigma_cross` bracketed by measurement and set to 0.10 + 0.004 r, whi
 60-80 m band (filtered 5.91 -> 0.89 m vs raw 1.98) and the tail (p90 27.19 -> 21.12 vs raw 22.45).
 ~~(a) show the user filtered live~~ -- done 2026-09-16; it exposed the three motion bugs above, and
 after fixing them the user called the result good, and on 2026-09-17 made `filtered` the default.
-Remaining: (b) camera NIS median is still 0.29 vs a target of 2 and near-field gating rejects 19.5%,
-both entangled with item 3; (c) 80-100 m is worse than raw when radar is absent, by design
-(RANGE_TRUST_MAX_M).
+~~(b) camera NIS median 0.29 vs a target of 2~~ -- EXPLAINED 2026-09-18, not a defect to fix.
+Re-measured on the current stack: camera NIS median 0.18 (a consistent 2-DOF filter shows 1.39)
+but mean 9.0 (target 2) -- a heavy-tailed mixture, as on record. `scripts/filter_scale_ab.py`
+scaled the camera's sigma_along by 1.0/0.7/0.5/0.35 with radar held out:
+
+    median 1.07-1.12 m, p90 14.03 m, jumps 3.2-3.3%, in EVERY arm; lag +0.08 -> +0.01 m
+    camera NIS median 0.063 -> 0.064 even at x0.35
+
+The NIS does not respond to the camera's R because the innovation covariance is dominated by the
+TRACK's own P, which the deliberately generous process noise (sigma_long 2 / sigma_lat 1,
+chosen for near-zero lag) keeps wide. Making NIS consistent means shrinking Q, which the Q sweep
+already showed trades lag (+0.23 m at 0.5/0.25) for a small median gain. Consequence to know: the
+PUBLISHED covariance overstates uncertainty in the typical case -- conservative, and nothing
+downstream (the planner's ObjectList) reads it today. Tightening sigma_cross (x0.7) made jumps
+worse (3.2% -> 4.6%), so leave both scales at 1.0.
+(c) 80-100 m is worse than raw when radar is absent, by design (RANGE_TRUST_MAX_M) -- see item 6.
 OLD PLAN, kept for context:
 Why: `--filter-ab` found the filter worse than its input (median 3.52 vs 3.05 m vs radar), but it was
 fed the OLD `/fused_bbox` positions. The measurements are now much cleaner (spikes 8.2% -> 1.5%), and
@@ -744,10 +760,20 @@ production `DepthJumpGate` directly; `DepthGate` remains for the Dhold arms, whi
 different rule (they may switch cluster). This is why the assert never fired on the reference
 drive and fired on the first new one.
 
-**adps_2026-08-25_14-13-42 did NOT score** and is unexplained: the replay recorded 3.4 MB of
-/fused_bbox, but the harness paired only **5 sweeps over 4 s** of a 122 s bag (the A25 self-check
-passed on those 5, so the pairing that did happen is sound). Look at the source/replay stamp
-overlap for that bag before trusting any number from it.
+**adps_2026-08-25_14-13-42 is simply EMPTY, not broken** (settled 2026-09-18): stamps line up
+across the full 122 s (1218 sweeps, 1209 /fused_bbox), but only 5 /fused_bbox messages contain any
+detection at all -- 4 people and a bench. Nothing to score.
+
+The last two unscored drives, 2026-09-18 (baselines `~/fusion_data/replays/adps_{115215,120223}`):
+
+    spikes > 2 m        A25 (old rule)   DropNF (live)
+    adps 11-52-15 (53 s)     15.6%            2.8%
+    adps 12-02-23 (34 s)      9.7%            7.1%     <- 2898 detections in 34 s
+
+So the adopted rules hold on every adps drive with content (11-50-45, 11-55-43, 11-58-32, 11-52-15,
+12-02-23). 12-02-23 is the exception worth a look: a dense scene (~85 detections a second) where the
+depth gate recovers much less (9.7% -> 7.1% against 6.1% -> 2.6% elsewhere). Break its spikes down
+by class and range before assuming the gate is the right tool for crowds.
 
 Remaining: a drive with many CURVES and cones (levelling still rests on 232 + 15 curve sweeps),
 and the -3 to -6 m at 25-60 m on 11-50-45.
@@ -860,10 +886,21 @@ term does not absorb it (fits separately at +0.692 +/- 0.018 deg). lx is stable 
 and matches the surveyed 3.573. `lever_arm_xy` stays zero; resolving ly needs a reference that
 separates sideslip from geometry (a stationary yaw test, or the INS sideslip estimate).
 
-### 10. Constants still marked INVENTED  (ongoing)
-`grep -rn INVENTED src/object_fusion/object_fusion` (17 hits): shape-fit min points, velocity-yaw
-speed, extent decay/clamp, camera sigma_px, odom hold, track_store increments and coast budgets,
-tracker inflation/noise. Most are tunable with NIS or shadow logs once item 2 runs.
+### 10. Constants still marked INVENTED  -- the LIVE ones are now measured (2026-09-18)
+Measured and relabelled:
+- **Coast budgets** (`MAX_COAST_S`). The re-acquisition gaps are real -- 13-28% of camera
+  re-acquisitions arrive after the 0.5 s budget, p95 0.7-1.7 s across four drives
+  (`scripts/coast_budget_ab.py`) -- but the comment's own method, "take the 95th percentile", is
+  WRONG: `scripts/coast_sweep_ab.py` shows 1.5 s raising orphans 10.6% -> 13.3% and the held-out
+  range error 1.07 -> 1.58 m, because the stale coasting track drifts off the detection it was kept
+  for. 1.0 s is within noise of 0.5 s on every metric. **Kept at 0.5 s.**
+- `assoc_max_dist` (6 m vs 4 m, full-loop A/B, item 11) and the process noise Q (swept, item 2).
+What is still INVENTED belongs almost entirely to features that are OFF, so it is inert today:
+shape-fit min points / velocity-yaw speed / extent decay (extent estimation), camera sigma_px
+(camera-only fill-in), the track_store log-odds increments (tuned for radar-only birth). Left:
+`MAX_POSITION_TRACE` (a divergence guard that rarely fires), `SIGMA_ALONG_FLOOR` (below the table's
+20 m first row), the radar azimuth inflation (radar NIS median 0.55 against 2.37 for 3 DOF says R is
+generous; not measured further), and the odometry hold.
 
 ### 11. ~~Cones still dropped by the aggregator~~ -- DONE 2026-09-16, see the section above
 The Mahalanobis merge clause did not bound a distance; `merge_max_dist = 2.5` bounds it. Live over
