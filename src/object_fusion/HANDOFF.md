@@ -772,8 +772,13 @@ The last two unscored drives, 2026-09-18 (baselines `~/fusion_data/replays/adps_
 
 So the adopted rules hold on every adps drive with content (11-50-45, 11-55-43, 11-58-32, 11-52-15,
 12-02-23). 12-02-23 is the exception worth a look: a dense scene (~85 detections a second) where the
-depth gate recovers much less (9.7% -> 7.1% against 6.1% -> 2.6% elsewhere). Break its spikes down
-by class and range before assuming the gate is the right tool for crowds.
+depth gate recovers much less (9.7% -> 7.1% against 6.1% -> 2.6% elsewhere). Broken down
+2026-09-18: it is a car park (2365 cars, 533 trucks); 100% of its remaining spikes are ALONG the ray
+and they concentrate on cars at 40-60 m (11%) and 60+ m (30%) -- OCCLUSION: a nearer parked car
+overlaps the target's 2D box and the nearest-depth-cluster rule ranges the occluder. The depth gate
+withholds one frame, but the occlusion persists, so the second disagreement is accepted. Same
+occlusion is why the radar gate costs more there (item 12). An occlusion flag from the detector
+(several depth clusters in one box) would serve both.
 
 Remaining: a drive with many CURVES and cones (levelling still rests on 232 + 15 curve sweeps),
 and the -3 to -6 m at 25-60 m on 11-50-45.
@@ -963,6 +968,18 @@ the track; referencing the camera breaks that loop.
 Cost: the 2 genuine corrections are blocked too -- 2 lost to stop ~92 wrong pulls. 3 sigma was
 kept, not tuned down to the 27 leftovers. Rollback: restart with `RADAR_CAMERA_GATE=false` (it is
 read at start-up, so `ros2 param set` does not change it live).
+
+**Its cost is scene-dependent -- measured on a dense car park (adps 12-02-23, all cars), where the
+nearest-depth-cluster rule often ranges an OCCLUDING car:**
+
+    126 disagreements at 40-80 m     radar ghost 50 | radar on a car behind 38 | CAMERA WRONG 20 | neither 18
+    with the gate                    3 left
+
+So there it blocks 88 bad updates and 20 GOOD ones (the radar correcting an occluder-ranged camera):
+4.4 : 1, against ~46 : 1 on the reference drive. Still net positive, so it stays on, but in crowds
+it is not free. The refinement that would keep those 20: the detector knows when a box holds more
+than one depth cluster (occlusion); flag such measurements and do not use them as the gate's
+reference. Not built -- it touches the detector-to-aggregator message.
 
 Live check, one full loop with the gate on (`~/fusion_data/recordings/loopD`) against loopC
 (identical settings, gate off): the node runs normally and nothing got worse. The MEDIAN offset of
