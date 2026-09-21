@@ -850,14 +850,36 @@ the MIRRORED position as a chance control.
     cost: 37.8 ms/sweep for Patchwork++ + clustering (the clustering alone is ~20-25 ms, since
           ground_projection already runs Patchwork++); 41 clusters/sweep, 39 outside the camera
 
-So the effect is real (0% chance) but small: a quarter of departing tracks live ~0.7 s longer.
-The likely ceiling is physical: this drive is mostly 0.45 m cones, and the roof LiDAR's lowest
-beam cannot see one closer than ~4 m, which is exactly where a passed cone goes. Cars alongside
-are the case the path is FOR, and this drive barely has any.
-**Do not build the node on this evidence.** Re-run `lidar_cluster_ab.py` on a drive with traffic
-alongside (a multi-lane road); if vehicles leaving the view are held for seconds rather than 0.7 s,
-build `lidar_cluster_detector_node` gated off, and an aggregator path that only UPDATES existing
-tracks (the track store already reserves a `lidar` sensor: LOGODDS_HIT 0.40, its own counters).
+**That first reading was PESSIMISTIC, and the reason is instructive (re-measured 2026-09-21).**
+It required CONSECUTIVE sweeps from the moment of death -- and an object that leaves the camera
+dies in the SIDE sector, which is the worst-covered place around the car. `--coverage` follows each
+static object for 10 s past its last publication and asks where a cluster actually is:
+
+    sector                 2.5-15 m    15-40 m    40-60 m     (mirror = chance)
+    ahead  |bearing| < 30    62.7%      58.8%      52.7%       0.0 / 4.2 / 30.9%
+    side   30-150            40.7%      22.0%      69.0%       0.2 / 11.0 / 0.0%
+    behind > 150             52.7%      64.7%      69.5%       0.0 / 1.0 / 0.7%
+
+The REAR sector is the best covered of all. The side sector is the roof LiDAR's blind zone, and a
+passed object crosses it on its way to the rear. Tolerating that gap (`--max-miss 5`, half a
+second) changes the answer:
+
+    departing tracks held   25.0% -> 45.1%      (chance 0.0 -> 1.1%)
+    for how long            0.7 s -> 4.3 s median, p90 5.4 s   (10 s window, none reach it)
+
+**But only for STATIC objects. Moving ones sit at chance (5.1% vs 5.1%).** Read that with its
+caveat: this harness PROPAGATES a dead track at constant velocity and never updates it from the
+clusters, which is accurate for a static object (ego motion is known) and drifts within a second
+for a moving one -- so it understates what a real implementation, which would lock onto the
+cluster each sweep, can do. Only a filter-in-the-loop test settles moving objects.
+
+**Where that leaves the decision.** The measured, defensible gain is: a static object the car has
+just passed stays alive for a median 4.3 s behind and beside the car, where the camera has nothing.
+Whether that is worth a node depends on a question outside this repo -- whether the planner needs
+objects it has already passed (lane changes, reversing) or only what is ahead on its route. ASK
+before building. If yes: `lidar_cluster_detector_node` gated off, publishing Detection3DArray, and
+an aggregator path that only UPDATES existing tracks (the track store already reserves a `lidar`
+sensor: LOGODDS_HIT 0.40, its own counters), with a coast rule that tolerates the side-sector gap.
 
 ### 8. Phase 4: radar-only track birth  -- MEASURED 2026-09-18: blocked on traffic, keep it OFF
 `scripts/radar_false_alarm_ab.py` follows each ESR object by track_id (split on gaps and on range
