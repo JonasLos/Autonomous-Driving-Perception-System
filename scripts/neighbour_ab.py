@@ -61,6 +61,7 @@ import ground_ab as G                                                       # no
 
 from mcap_ros2.reader import read_ros2_messages                              # noqa: E402
 from perception_common.utils import crop_pointcloud                          # noqa: E402
+from object_fusion import frames                                            # noqa: E402
 from object_fusion.detection_geometry import nearest_depth_cluster           # noqa: E402
 from object_fusion.ground_segmentation import (                               # noqa: E402
     GroundSegmenter, LevelledGroundSegmenter, levelling_rotation, quaternion_roll_pitch_deg,
@@ -204,6 +205,32 @@ def cluster_arms(row, Q, qu, qv, bu, bv, oid, last_out):
         row["multi"] = bool(np.linalg.norm(cs[:, None] - cs[None], axis=2).max() > 2.0)
 
 
+def deskew_sweep(raw, stamp_s, odom):
+    """Undo the ego motion WITHIN one sweep: every point to the frame at the sweep's own stamp.
+
+    The VLP-32C spins for 100 ms per sweep and its `time` field says when each point was really
+    captured (-0.0995..0 s here), so the cloud as published mixes 100 ms of vehicle motion. While
+    turning that is a bearing-dependent position error: at 0.2 rad/s a sweep smears 1.15 deg,
+    0.6 m at 30 m, and an object's share of it changes as its bearing changes -- read as motion by
+    anything differencing consecutive frames.
+
+    A static point seen at t_pt sits, in the frame at t_ref, at R(dpsi)^T (p - d): the same
+    convention as tracker.predict, with dpsi and d the frame's motion from t_pt to t_ref.
+    """
+    xyz = raw[:, :3].copy()
+    dt = -raw[:, 3]                                   # seconds BEFORE the sweep stamp
+    vx = float(np.interp(stamp_s, odom[:, 0], odom[:, 3]))
+    vy = float(np.interp(stamp_s, odom[:, 0], odom[:, 4]))
+    w = float(np.interp(stamp_s, odom[:, 0], odom[:, 5]))
+    v_l = frames.ego_to_lidar([np.array([vx, vy])], correction_deg=-5.35)[0]
+    dpsi = w * dt
+    c, s_ = np.cos(dpsi), np.sin(dpsi)
+    px, py = xyz[:, 0] - v_l[0] * dt, xyz[:, 1] - v_l[1] * dt
+    xyz[:, 0] = c * px + s_ * py
+    xyz[:, 1] = -s_ * px + c * py
+    return xyz
+
+
 def run(args):
     t0 = time.perf_counter()
     fused, radar = G.load_boxes_and_radar()
@@ -213,14 +240,18 @@ def run(args):
     hybrid = LevelledGroundSegmenter(backend="patchworkpp", max_range=120.0,
                                      near_range=args.near_range)            # PRODUCTION class
     odom = None
-    if args.level in ("odom", "odom-nomount", "odom-near"):
+    if args.level in ("odom", "odom-nomount", "odom-near") or args.deskew:
         rows = []
         for f in sorted(glob.glob(os.path.join(G.SOURCE, "*.mcap"))):
             for m in read_ros2_messages(f, topics=["/novatel/oem7/odom"]):
                 q = m.ros_msg.pose.pose.orientation
-                rows.append((G.stamp(m.ros_msg.header), *quaternion_roll_pitch_deg(q.x, q.y, q.z, q.w)))
+                tw = m.ros_msg.twist.twist
+                rows.append((G.stamp(m.ros_msg.header),
+                             *quaternion_roll_pitch_deg(q.x, q.y, q.z, q.w),
+                             tw.linear.x, tw.linear.y, tw.angular.z))
         odom = np.array(rows)
-        print(f"[level] odometry levelling from {len(odom)} odom messages")
+        print(f"[level] odometry from {len(odom)} odom messages"
+              + (" (also driving --deskew)" if args.deskew else ""))
 
     last_out, dprev_hist = {}, {}
     ref = {"Dhold": DepthGate(), "DholdNF": DepthGate()}
@@ -240,8 +271,12 @@ def run(args):
             dets = fused.get(key)
             if dets is None:
                 continue
-            xyz = G.decode(m.ros_msg).astype(np.float64)
-            xyz = xyz[np.isfinite(xyz).all(axis=1)]
+            if args.deskew:
+                raw = G.decode(m.ros_msg, names=("x", "y", "z", "time")).astype(np.float64)
+                xyz = deskew_sweep(raw[np.isfinite(raw).all(axis=1)], key, odom)
+            else:
+                xyz = G.decode(m.ros_msg).astype(np.float64)
+                xyz = xyz[np.isfinite(xyz).all(axis=1)]
             level = roll = pitch = None
             if odom is not None:
                 roll = float(np.interp(key, odom[:, 0], odom[:, 1]))
@@ -364,7 +399,14 @@ def run(args):
     ok = n_self > 0 and worst_self <= G.SELF_CHECK_TOL
     print(f"[self-check] A25 vs published /fused_bbox over {n_self}: worst {worst_self:.2e} m -> "
           f"{'PASS' if ok else 'FAIL'}")
-    if not ok:
+    if not ok and args.deskew:
+        # EXPECTED here, and only here. The check exists to prove the harness reproduces the node
+        # on the SAME input; --deskew deliberately changes the input points, so /fused_bbox (which
+        # was recorded without it) is no longer the right reference. Every other arm still has to
+        # pass. Compare a deskewed dump against a non-deskewed one, never against the replay.
+        print("[self-check] ignored because --deskew changes the input cloud on purpose; this "
+              "dump is only comparable with another dump, not with the recorded /fused_bbox")
+    elif not ok:
         sys.exit("self-check failed: not scoring arms whose baseline does not reproduce the node")
     print("[self-check] the DropNF arm calls the production DepthJumpGate directly")
     if args.dump:
@@ -513,6 +555,10 @@ def main():
                     help="level the sweep by odometry attitude before segmenting")
     ap.add_argument("--near-range", type=float, default=25.0,
                     help="odom-near: levelled labels inside this range, unlevelled beyond")
+    ap.add_argument("--deskew", action="store_true",
+                    help="undo ego motion WITHIN each sweep from the per-point `time` field before "
+                         "segmenting and projecting -- the candidate cause of the yaw-rate-scaled "
+                         "measurement jitter (scripts/velocity_truth_ab.py)")
     G.add_bag_args(ap)
     args = ap.parse_args()
     G.use_bags(args)

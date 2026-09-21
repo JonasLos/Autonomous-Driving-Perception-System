@@ -155,6 +155,10 @@ def load(bag):
     return fused, radar, odom, R_lr.T, -R_lr.T @ t_lr
 
 
+#: One camera frame, the interval over which a sweeping bearing changes which returns land in
+#: an object's 2D box.
+CAMERA_PERIOD_S = 0.1
+
 #: Object width by class, metres, for the azimuth match gate (radar_ros/config/class_averages).
 _CLASS_WIDTH = {"car": 1.8, "truck": 1.9, "bus": 2.5, "train": 3.2, "cone": 0.5,
                 "person": 0.6, "stop sign": 0.75, "fire hydrant": 0.5, "bench": 1.5}
@@ -174,7 +178,7 @@ def match_range_window(range_m):
     return 3.0 + 0.5 * float(range_m)
 
 
-def _odom_feeder(odom):
+def _odom_feeder(odom, offset=0.0):
     """A TwistBuffer plus a `feed(t)` that adds odometry up to t, as the live node receives it.
 
     Pre-loading a whole drive into an 8 s buffer keeps only its LAST 8 s, and every earlier query
@@ -183,7 +187,9 @@ def _odom_feeder(odom):
     harness. Feeding it in stamp order reproduces the node and keeps the buffer small.
     """
     buf = TwistBuffer(duration=8.0)
-    rows = sorted(odom)
+    # `offset` shifts the ODOMETRY stamps, to test a timing error between odometry and the
+    # sensors: a mis-set offset aliases yaw rate into apparent object motion during turns.
+    rows = sorted((t + float(offset), vx, vy, w) for t, vx, vy, w in odom)
     idx = {"i": 0}
 
     def feed(t):
@@ -241,7 +247,8 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
         radar_holdout=0, lever=True, radar_range_gate=60.0, collect_speed=False,
         merge=True, count_objects=False, merge_range_gap=20.0, merge_bearing_deg=1.5,
         radar_birth=True, assoc_max_dist=6.0, sigma_cross_scale=1.0, merge_chi2=9.21,
-        merge_max_dist=2.5, radar_camera_gate=False):
+        merge_max_dist=2.5, radar_camera_gate=False, pred_lever=(0.0, 0.0), odom_offset=0.0,
+        turn_sigma_k=0.0):
     """One arm. Returns a dict of diagnostics.
 
     ``collect_ab`` scores the RAW camera measurement (what publish_mode=passthrough publishes)
@@ -253,7 +260,7 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
     receives a radar update, and only those tracks are scored. Without it the filtered state has
     been fitted to the very radar ranges it is compared against, and "wins" by construction.
     """
-    tw, feed_odom = _odom_feeder(odom)
+    tw, feed_odom = _odom_feeder(odom, offset=odom_offset)
 
     q = MeasurementQueue(lag=lag)
     for i, (t, xy, ids, names) in enumerate(fused):
@@ -294,7 +301,9 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
             last_t = t
         dt = t - last_t
         if dt > 0:
-            inc = tw.increment(last_t, t)
+            # pred_lever: the state lives in lidar_tc but the twist is reported at the IMU, so
+            # the sensor's own velocity carries omega x r. Live passes nothing, i.e. (0, 0).
+            inc = tw.increment(last_t, t, pred_lever)
             if inc is None:
                 last_t = t
                 continue
@@ -362,6 +371,15 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                 _trust = range_trust if range_trust is not None else 80.0
                 _sa = None if sigma_along_scale == 1.0 else _sigma_along(r) * sigma_along_scale
                 _sc = None if sigma_cross_scale == 1.0 else sigma_cross(r) * sigma_cross_scale
+                if turn_sigma_k and twist_now is not None:
+                    # While the vehicle yaws, an object's bearing sweeps and the set of LiDAR
+                    # returns inside its 2D box changes between frames, so the measured position
+                    # moves ACROSS the ray by about r * omega * (frame period). Measured on the
+                    # static drive, that jitter goes 0.77 -> 3.0 m/s from straight to turning and
+                    # is mostly cross-ray. Tell the filter, instead of letting it read velocity.
+                    base = sigma_cross(r) if _sc is None else _sc
+                    turn = turn_sigma_k * abs(float(twist_now.omega)) * r * CAMERA_PERIOD_S
+                    _sc = float(np.hypot(base, turn))
                 y, H, R = lidar_measurement(tr.x[:2], p, sigma_a=_sa, sigma_c=_sc,
                                             drop_range=not range_is_trustworthy(r, _trust))
                 tr.x, tr.P, n_, applied = kalman_update(tr.x, tr.P, y, H, R,
@@ -471,7 +489,9 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                     # the track is drifting the way we are driving, which is what an
                     # under-compensated ego motion looks like on a static object.
                     cos = float(v @ v_lidar / (sp * ego_sp)) if sp > 1e-3 and ego_sp > 1e-3 else 0.0
-                    speed_log.setdefault("all", []).append((sp, ego_sp, cos))
+                    speed_log.setdefault("all", []).append(
+                        (sp, ego_sp, cos, abs(float(twist_now.omega)),
+                         float(np.hypot(tr.x[0], tr.x[1]))))
         store.prune(t)
         if merge:
             store.merge_pass(chi2=merge_chi2, max_merge_dist=merge_max_dist,
@@ -1089,7 +1109,9 @@ def main():
         for label, kw in arms:
             d = run(fused, radar, odom, R_sl, t_sl, ego_yaw_deg=-5.35,
                     max_frames=args.max_frames, collect_speed=True, **kw)
-            v = np.concatenate([np.asarray(x) for x in d["speed"].values()]) if d["speed"] else np.zeros(0)
+            rows_ = np.concatenate([np.asarray(x) for x in d["speed"].values()]) \
+                if d["speed"] else np.zeros((0, 5))
+            v = rows_[:, 0] if rows_.size else rows_        # column 0 is the track speed
             if v.size:
                 print(f"  {label:44s} {v.size:6d} {np.median(v):7.2f}  {np.percentile(v,90):6.2f}"
                       f" {100*np.mean(v>2):7.0f}%")

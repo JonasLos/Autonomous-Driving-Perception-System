@@ -91,6 +91,7 @@ scripts/filter_scale_ab.py    item 2: does scaling the camera sigma change held-
 scripts/coast_budget_ab.py    item 10: re-acquisition gaps per sensor vs the coast budgets
 scripts/coast_sweep_ab.py     item 10: what a longer coast budget costs (orphans, held-out error)
 scripts/cluster_sustain_ab.py item 7: cluster path on vs off -- lifetime, rear survival, ghosts
+scripts/velocity_truth_ab.py  false velocity: apparent speed of STATIC objects by ego yaw rate
 docker/Dockerfile.object_fusion      layered on perception-transform:latest (+ pypatchworkpp 1.4.1)
 docker-compose.fusion.yml + .replay.yml
 ```
@@ -567,6 +568,59 @@ running when another was launched. The two interleaved camera/LiDAR/radar from p
 and both published `/clock`: 90% of the bridge's messages found no odometry, and a ROS-time timer
 fired every 10 ms. `pgrep -fa 'bin/ros2 bag play'` before starting one, and when the bridge's
 `no_pose` count climbs, suspect this first.
+
+## False velocity arrows: the turning error (2026-09-21, IN PROGRESS)
+
+The user saw more velocity arrows once the cluster path was on. Measured on two full-loop
+recordings of the selfcal drive, where every object is static so **every arrow is false**:
+
+    ego yaw rate      arrows (> 1 m/s)  clusters OFF / ON
+    < 0.02 rad/s            6.0% / 4.0%      correlation of apparent speed with yaw rate +0.36
+    0.05-0.10              33.9% / 28.3%                                with ego speed   -0.07
+    > 0.10                 40.6% / 33.9%
+
+**The clusters are not the cause** -- they lower the rate in every bin. They raise the COUNT of
+arrows because tracks now survive beside and behind the car (side sector 416 -> 1427 published
+objects, rear 0 -> 1460), which is exactly where turning puts a passed object. The side sector was
+always the worst place for this: 47.1% arrows before clusters existed.
+
+**Where the error is: the MEASUREMENT, not the filter.** Ego-compensate consecutive detections of
+the same ByteTrack id (production `TwistBuffer.increment`) and the residual scales with yaw rate:
+
+    median apparent speed between frames   straight 0.77 m/s   turning 2.99 m/s
+    split                                  along ray 0.34 -> 1.50, across ray 0.56 -> 1.92
+
+Across-ray dominates, which is what a BEARING error predicts: while the vehicle yaws, an object's
+bearing sweeps and the set of LiDAR returns inside its 2D box changes between frames, so the
+nearest-depth-cluster median moves. The filter then reads that as velocity, faithfully.
+
+**Four candidate causes measured and REFUTED** (`scripts/velocity_truth_ab.py`, which runs the
+production filter over the same measurements with one thing changed):
+
+1. Missing IMU->LiDAR lever arm in the prediction (the aggregator passes none): turning bin
+   26.8% -> 27.4%, and x2/x4 arms are worse. Not it.
+2. Odometry timing offset: swept +-80 ms against the measurement jitter directly -- turning stays
+   3.25-3.56 m/s with no minimum. Not it.
+3. Un-deskewed LiDAR sweep. The cloud is NOT deskewed (`time` field spans -0.0995..0 s), and
+   `scripts/neighbour_ab.py --deskew` undoes it properly, but the gain is small: turning jitter
+   2.99 -> 2.83 m/s, though the yaw-rate correlation halves (+0.115 -> +0.048). Real but minor;
+   keep the flag, do not adopt on this evidence alone.
+4. Widening the cross-ray sigma with bearing rate (k * omega * r * frame period) is the WRONG
+   lever and is non-monotonic: k=0.5 gives 22.5% but k=1 gives 40.3%. Wider R also widens the
+   chi-square gate, so outliers that were rejected get admitted and move the state further.
+
+**Where this leaves it.** The measurement genuinely cannot support a velocity while the bearing is
+sweeping, so the fix is to stop claiming one:
+- make `velocity_valid` mean "supported" instead of "filtered mode and odometry exists"
+  (`object_aggregator_node.py:631`). Measured trade on today's data -- static drive (all false)
+  against the truck bag (real motion above 5 m/s): trace < 4 keeps 97.5% of real motion but 54.5%
+  of false arrows; trace < 2 AND camera/radar within 0.3 s keeps 59.3% / 27.7%. Neither is good
+  enough yet, which is why the covariance has to reflect the turn first;
+- inflate the VELOCITY process noise with yaw rate, so the filter's own velocity covariance grows
+  while turning, and then gate `velocity_valid` on that covariance. Not yet measured;
+- cluster updates should not inject velocity at all (position-only update in
+  `_apply_lidar_clusters`): a cluster centroid sits at the footprint centre while the camera
+  measures the near face, and the association can switch between neighbouring clusters.
 
 ## Radar matching in the harnesses, fixed (2026-09-15) -- to-do item 3
 
