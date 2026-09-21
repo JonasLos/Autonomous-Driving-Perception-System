@@ -104,6 +104,20 @@ Visualization Manager:
         Value: /perception/objects_markers
       Namespaces: {}
       Value: false
+    # 360-degree LiDAR clusters: candidates, not detections. Most are kerbs, bushes and walls,
+    # so they are faint cyan and OFF by default -- turn them on to see what the side and rear
+    # path has to work with. Only published with ENABLE_LIDAR_CLUSTERS=true.
+    - Class: rviz_default_plugins/MarkerArray
+      Name: LiDAR clusters (360, candidates)
+      Enabled: false
+      Topic:
+        Depth: 2
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /perception/measurements/lidar_markers
+      Namespaces: {}
+      Value: false
     - Class: rviz_default_plugins/Image
       Name: Camera (YOLO)
       Enabled: true

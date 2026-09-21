@@ -37,6 +37,7 @@ from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2
+from visualization_msgs.msg import Marker, MarkerArray
 
 from fusion_msgs.msg import Detection3D, Detection3DArray
 
@@ -64,6 +65,7 @@ class LidarClusterDetectorNode(Node):
             min_height=float(p("cluster_min_height", ClusterParams.min_height).value),
         )
         self._pub = self.create_publisher(Detection3DArray, self._out, 5)
+        self._markers = self.create_publisher(MarkerArray, self._out + "_markers", 2)
         self.create_subscription(PointCloud2, self._in, self._cb, 5)
         self._n = self._clusters = 0
         self._ms = []
@@ -106,6 +108,38 @@ class LidarClusterDetectorNode(Node):
             d.point_count = int(c.n_points)
             out.detections.append(d)
         self._pub.publish(out)
+        self._publish_markers(msg.header, clusters)
+
+    def _publish_markers(self, header, clusters):
+        """One wireframe box per cluster, so what the 360-degree path sees is visible in RViz.
+
+        Deliberately NOT the same colour as an object: a cluster is a candidate, not a detection,
+        and most of them are kerbs, bushes and walls. Cyan, thin, and cleared every sweep.
+        """
+        arr = MarkerArray()
+        wipe = Marker()
+        wipe.header = header
+        wipe.ns = "lidar_clusters"
+        wipe.action = Marker.DELETEALL
+        arr.markers.append(wipe)
+        for i, c in enumerate(clusters):
+            m = Marker()
+            m.header = header
+            m.ns = "lidar_clusters"
+            m.id = i
+            m.type = Marker.CUBE
+            m.action = Marker.ADD
+            m.pose.position.x, m.pose.position.y = float(c.x), float(c.y)
+            m.pose.position.z = -1.0
+            m.pose.orientation.z = float(np.sin(c.yaw / 2.0))
+            m.pose.orientation.w = float(np.cos(c.yaw / 2.0))
+            m.scale.x = max(float(c.length), 0.2)
+            m.scale.y = max(float(c.width), 0.2)
+            m.scale.z = max(float(c.height), 0.2)
+            m.color.r, m.color.g, m.color.b, m.color.a = 0.0, 0.9, 0.9, 0.25
+            m.lifetime.sec = 1
+            arr.markers.append(m)
+        self._markers.publish(arr)
 
     def _log(self):
         if not self._n:

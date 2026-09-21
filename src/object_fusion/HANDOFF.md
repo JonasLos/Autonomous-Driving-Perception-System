@@ -90,6 +90,7 @@ scripts/radar_vehicle_truth.py  item 12: radar vs camera on a vehicle -- what do
 scripts/filter_scale_ab.py    item 2: does scaling the camera sigma change held-out accuracy? (no)
 scripts/coast_budget_ab.py    item 10: re-acquisition gaps per sensor vs the coast budgets
 scripts/coast_sweep_ab.py     item 10: what a longer coast budget costs (orphans, held-out error)
+scripts/cluster_sustain_ab.py item 7: cluster path on vs off -- lifetime, rear survival, ghosts
 docker/Dockerfile.object_fusion      layered on perception-transform:latest (+ pypatchworkpp 1.4.1)
 docker-compose.fusion.yml + .replay.yml
 ```
@@ -898,11 +899,34 @@ First live A/B, adps_2026-08-25_11-58-32, same bag and settings apart from the p
     tracks 20 -> 21 (no ghost inflation)   lifetime p90 and max 4.89 s -> 7.79 s
     cost: 81 clusters/sweep, 29-31 ms (p90 45), on top of ground_projection's existing Patchwork++
 
-The longest-lived tracks nearly doubled and the count barely moved -- consistent with sustaining
-rather than inventing -- but ~20 tracks is supporting evidence, not proof. **Still to do: the
-full-loop A/B on selfcal (172 track deaths) measuring lifetime by sector, and a look on the
-vehicle.** Moving objects are still unproven (HANDOFF's earlier harness propagated without
-updating); this node updates every sweep, so re-measure them here.
+The longest-lived tracks nearly doubled and the count barely moved -- but ~20 tracks is
+supporting evidence, not proof.
+
+**Full-loop A/B on selfcal, 2026-09-21** (`scripts/cluster_sustain_ab.py`, two recordings of
+/perception/objects from the same drive, same build):
+
+    clusters OFF   tracks 337 | lifetime median 0.31 s p90 4.56 | past 90 deg   0 | tail p90 0.92 s
+    clusters ON    tracks 308 | lifetime median 0.31 s p90 4.96 | past 90 deg   6, median life
+                                                                   9.75 s | tail p90 1.30 s, one > 10 s
+
+Six objects the car had passed stayed tracked for ~10 s into the side and rear sectors, where
+NONE survived before. Fewer tracks overall, and the ghost tail (time published after the camera
+last saw the object) stays around a second.
+
+**Two bugs found by this A/B, both worth remembering:**
+
+1. **Charging an existence MISS for a missing cluster is wrong** and was removed. The coverage
+   measurement says a cluster is found on an object that is certainly there only 40-70% of the
+   time, so "no cluster" is not evidence of absence. At -0.2 log-odds per sweep it is -2.0 a
+   second, which killed tracks wholesale and made the camera re-birth them.
+2. **The metric nearly rejected a working feature.** `cluster_sustain_ab.py` first required >= 5
+   observations per track. Sustaining a weak track PAST that threshold adds it to the sample as a
+   short-lived one, so the count rose (194 -> 294) and the median lifetime fell (2.07 -> 0.31 s)
+   while the truth was the opposite. Count every track, and read count and lifetime together.
+
+Watch items for the vehicle: the one track with a cluster-only tail over 10 s, and a p99
+per-message step of 3.3 m with clusters on (1.4 m without) -- a track occasionally jerks onto a
+cluster. Moving objects are still unmeasured here (the cone drive has none).
 
 ### 8. Phase 4: radar-only track birth  -- MEASURED 2026-09-18: blocked on traffic, keep it OFF
 `scripts/radar_false_alarm_ab.py` follows each ESR object by track_id (split on gaps and on range

@@ -43,7 +43,7 @@ from perception_common.stamp_sync import apply_bounded_parameters
 
 from object_fusion import frames
 from object_fusion.association import apply_sticky_ids, associate_radar, solve_assignment
-from object_fusion.lidar_clusters import ClusterParams, associate_clusters
+from object_fusion.lidar_clusters import associate_clusters
 from object_fusion.ego_motion import EgoTwist, TwistBuffer
 from object_fusion.measurement_queue import DEFAULT_LAG_S, Measurement, MeasurementQueue
 from object_fusion.tracker import (
@@ -85,8 +85,6 @@ CAMERA_REF_MAX_AGE_S = 0.3
 #: across the ray than along it. INVENTED; the cluster A/B's ~1 m association gate is the evidence
 #: that this is the right order of magnitude, nothing finer.
 CLUSTER_SIGMA_M = 0.5
-CLUSTER_MIN_RANGE = ClusterParams.min_range
-CLUSTER_MAX_RANGE = ClusterParams.max_range
 
 
 class ObjectAggregatorNode(Node):
@@ -412,14 +410,13 @@ class ObjectAggregatorNode(Node):
                 tr.sensors_ever |= SENSOR_LIDAR
                 tr.sensors_this_cycle |= SENSOR_LIDAR
                 self._accrue(tr, "lidar", True, True, t)
-        matched = {ti for ti, _ in pairs}
-        for i, tr in enumerate(tracks):
-            if i not in matched:
-                # A cluster is expected only where this path can see: inside its range band, and
-                # never in the roof LiDAR's close blind zone. Charging a miss outside that is how
-                # existence logic kills real objects for being invisible.
-                r = float(np.hypot(tr.x[0], tr.x[1]))
-                self._accrue(tr, "lidar", False, CLUSTER_MIN_RANGE <= r <= CLUSTER_MAX_RANGE, t)
+        # NO MISS IS CHARGED. A cluster is evidence of PRESENCE only: the coverage measurement
+        # (scripts/lidar_cluster_ab.py --coverage) finds a cluster on an object that is certainly
+        # there only 40-70% of the time, depending on sector and range, so "no cluster" says
+        # almost nothing about absence. Charging it cost -0.2 log-odds per sweep, -2.0 a second at
+        # 10 Hz, and measured on a full replay loop it killed tracks wholesale: median lifetime
+        # 2.07 -> 0.31 s and the track count 194 -> 313, because the camera then re-births what
+        # the existence decay had just deleted.
 
     def _apply_camera(self, msg: Detection3DArray, t):
         """Associate, update and birth from one camera+LiDAR measurement array.
