@@ -43,6 +43,7 @@ export ENABLE_CAMERA_ONLY_FALLBACK="${ENABLE_CAMERA_ONLY_FALLBACK:-false}"
 export ASSOC_MAX_DIST="${ASSOC_MAX_DIST:-6.0}"
 export MERGE_MAX_DIST="${MERGE_MAX_DIST:-2.5}"
 export RADAR_CAMERA_GATE="${RADAR_CAMERA_GATE:-true}"
+export ENABLE_LIDAR_CLUSTERS="${ENABLE_LIDAR_CLUSTERS:-false}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -55,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --no-levelling) GROUND_LEVELLING="false"; shift ;;
     --no-depth-gate) ENABLE_DEPTH_GATE="false"; shift ;;
     --no-class-vote) ENABLE_CLASS_VOTE="false"; shift ;;
+    --clusters) ENABLE_LIDAR_CLUSTERS="true"; shift ;;
     --down) ACTION="down"; shift ;;
     --logs) ACTION="logs"; shift ;;
     --status) ACTION="status"; shift ;;

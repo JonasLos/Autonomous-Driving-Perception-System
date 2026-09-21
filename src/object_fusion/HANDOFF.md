@@ -46,7 +46,13 @@ reinstall host Patchwork++ per "Run it" before any offline harness.
 (`--ground`), empty-box drop (`segmentation_empty_fallback:=true` reverts), depth-jump gate
 (`enable_depth_gate`), class vote (`enable_class_vote`), near-field odometry levelling
 (`ground_levelling`), merge distance bound (`MERGE_MAX_DIST=inf` reverts), camera-referenced
-radar range gate (`RADAR_CAMERA_GATE=false` reverts). **`publish_mode` is `filtered`** (the user's decision, 2026-09-17; `--passthrough` or
+radar range gate (`RADAR_CAMERA_GATE=false` reverts). OFF by default: the 360-degree cluster path
+(`ENABLE_LIDAR_CLUSTERS=true` / `--clusters` turns it on).
+
+**Dockerfile bug, fixed 2026-09-21:** two CMD lines ended with a DOUBLE backslash, so every env var
+after `merge_max_dist` was silently dropped -- `RADAR_CAMERA_GATE=false` did nothing and the launch
+default merely made it look right. Both rollbacks are now verified end to end by reading the
+parameter back from the running node. Check that way after adding any new env var. **`publish_mode` is `filtered`** (the user's decision, 2026-09-17; `--passthrough` or
 `PUBLISH_MODE=passthrough` is the rollback). Extent estimation off (user's choice).
 
 **This version is the one the user watched and called good** (2026-09-16, on
@@ -873,13 +879,30 @@ clusters, which is accurate for a static object (ego motion is known) and drifts
 for a moving one -- so it understates what a real implementation, which would lock onto the
 cluster each sweep, can do. Only a filter-in-the-loop test settles moving objects.
 
-**Where that leaves the decision.** The measured, defensible gain is: a static object the car has
-just passed stays alive for a median 4.3 s behind and beside the car, where the camera has nothing.
-Whether that is worth a node depends on a question outside this repo -- whether the planner needs
-objects it has already passed (lane changes, reversing) or only what is ahead on its route. ASK
-before building. If yes: `lidar_cluster_detector_node` gated off, publishing Detection3DArray, and
-an aggregator path that only UPDATES existing tracks (the track store already reserves a `lidar`
-sensor: LOGODDS_HIT 0.40, its own counters), with a coast rule that tolerates the side-sector gap.
+**BUILT 2026-09-21**, after the user confirmed the planner needs side and rear objects for
+avoidance and lane changes ("once we pass an object it will drop out of the tracker otherwise").
+
+    /perception/nonground            ground_projection, publish_nonground:=true -- the full-sweep
+                                     non-ground cloud, segmented BEFORE transform.py's crop
+      -> lidar_cluster_detector_node -> /perception/measurements/lidar (Detection3DArray, SENSOR_LIDAR)
+      -> object_aggregator._apply_lidar_clusters   SUSTAIN ONLY, never birth
+
+One flag turns the whole chain on: `ENABLE_LIDAR_CLUSTERS=true` (`scripts/run_fusion.sh --clusters`),
+default OFF until it has been watched on the vehicle. The association is
+`lidar_clusters.associate_clusters`: gate 1.0 + 0.02 r, exclusive assignment (one cluster cannot
+feed two tracks, which is how a duplicate becomes self-sustaining), and a miss is only charged where
+a cluster could have been seen (2.5-60 m).
+
+First live A/B, adps_2026-08-25_11-58-32, same bag and settings apart from the path:
+
+    tracks 20 -> 21 (no ghost inflation)   lifetime p90 and max 4.89 s -> 7.79 s
+    cost: 81 clusters/sweep, 29-31 ms (p90 45), on top of ground_projection's existing Patchwork++
+
+The longest-lived tracks nearly doubled and the count barely moved -- consistent with sustaining
+rather than inventing -- but ~20 tracks is supporting evidence, not proof. **Still to do: the
+full-loop A/B on selfcal (172 track deaths) measuring lifetime by sector, and a look on the
+vehicle.** Moving objects are still unproven (HANDOFF's earlier harness propagated without
+updating); this node updates every sweep, so re-measure them here.
 
 ### 8. Phase 4: radar-only track birth  -- MEASURED 2026-09-18: blocked on traffic, keep it OFF
 `scripts/radar_false_alarm_ab.py` follows each ESR object by track_id (split on gaps and on range

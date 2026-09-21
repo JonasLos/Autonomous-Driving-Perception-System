@@ -25,7 +25,15 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
-__all__ = ["ClusterParams", "Cluster", "cluster_nonground"]
+__all__ = ["ClusterParams", "Cluster", "cluster_nonground", "associate_clusters",
+           "CLUSTER_GATE_BASE_M", "CLUSTER_GATE_PER_M"]
+
+#: Gate for calling a cluster the same object as a track: gate = base + per_m * range. Measured
+#: as the presence test in scripts/lidar_cluster_ab.py, where a mirrored-position control found a
+#: cluster only 0-1% of the time behind the car, so this width is not loose enough to latch onto
+#: whatever is nearby.
+CLUSTER_GATE_BASE_M = 1.0
+CLUSTER_GATE_PER_M = 0.02
 
 
 @dataclass(frozen=True)
@@ -124,3 +132,23 @@ def cluster_nonground(xyz, params: ClusterParams = ClusterParams()):
                            height=height, yaw=float(np.arctan2(major[1], major[0])),
                            n_points=int(counts[m].sum()), range=float(np.hypot(*c))))
     return out
+
+
+def associate_clusters(track_xy, cluster_xy, gate_base=CLUSTER_GATE_BASE_M,
+                       gate_per_m=CLUSTER_GATE_PER_M):
+    """Pair existing tracks with clusters. Returns ``[(track_index, cluster_index), ...]``.
+
+    Clusters may only SUSTAIN a track, never birth one, so this never reports an unmatched
+    cluster: without a semantic check a cluster is as likely a bush or a kerb as an object.
+    One cluster serves at most one track (the assignment is exclusive), because two tracks
+    feeding on one cluster is how a duplicate becomes self-sustaining.
+    """
+    from object_fusion.association import solve_assignment
+
+    t = np.asarray(track_xy, dtype=np.float64).reshape(-1, 2)
+    c = np.asarray(cluster_xy, dtype=np.float64).reshape(-1, 2)
+    if t.shape[0] == 0 or c.shape[0] == 0:
+        return []
+    d = np.linalg.norm(t[:, None, :] - c[None, :, :], axis=2)
+    gate = gate_base + gate_per_m * np.linalg.norm(t, axis=1)
+    return solve_assignment(d, d <= gate[:, None])

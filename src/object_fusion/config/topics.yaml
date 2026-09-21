@@ -12,6 +12,9 @@ topics:
     # Ground points are FLAGGED, not removed, so the detector can fall back when segmentation
     # would empty a box.
     projection_ground_flagged: "/perception/lidar_2d_projection_ground"
+    # The FULL-SWEEP non-ground cloud, published before transform.py's crop, so it carries the
+    # 360 degrees the camera never sees. Off unless publish_nonground is set.
+    nonground: "/perception/nonground"
   object_fusion:
     objects: "/perception/objects"
     markers: "/perception/objects_markers"

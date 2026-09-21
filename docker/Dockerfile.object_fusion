@@ -50,5 +50,6 @@ CMD ["/bin/bash", "-lc", \
         segmentation_empty_fallback:=${SEGMENTATION_EMPTY_FALLBACK:-false} \
         enable_camera_only_fallback:=${ENABLE_CAMERA_ONLY_FALLBACK:-false} \
         assoc_max_dist:=${ASSOC_MAX_DIST:-6.0} \
-        merge_max_dist:=${MERGE_MAX_DIST:-2.5} \\
-        radar_camera_gate:=${RADAR_CAMERA_GATE:-true}"]
+        merge_max_dist:=${MERGE_MAX_DIST:-2.5} \
+        radar_camera_gate:=${RADAR_CAMERA_GATE:-true} \
+        enable_lidar_clusters:=${ENABLE_LIDAR_CLUSTERS:-false}"]

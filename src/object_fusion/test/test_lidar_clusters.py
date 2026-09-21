@@ -57,3 +57,34 @@ def test_empty_and_out_of_band_inputs():
     assert cluster_nonground(np.empty((0, 3))) == []
     too_high = box(20, 0, 2, 2, z0=2.0, z1=3.0)          # an overhead sign
     assert cluster_nonground(too_high, ClusterParams()) == []
+
+
+# --------------------------------------------------- association (sustain, never birth)
+def test_a_cluster_sustains_the_track_it_lands_on():
+    from object_fusion.lidar_clusters import associate_clusters
+    tracks = [(30.0, 2.0), (45.0, -6.0)]
+    clusters = [(45.3, -6.2), (30.2, 1.9)]
+    assert sorted(associate_clusters(tracks, clusters)) == [(0, 1), (1, 0)]
+
+
+def test_a_cluster_far_from_every_track_is_dropped_not_born():
+    """Clusters carry no class: a bush and a car are the same shape. Birth is the camera's job."""
+    from object_fusion.lidar_clusters import associate_clusters
+    assert associate_clusters([(30.0, 0.0)], [(30.0, 12.0)]) == []
+    assert associate_clusters([], [(10.0, 0.0)]) == []
+
+
+def test_the_gate_widens_with_range_but_stays_tight():
+    from object_fusion.lidar_clusters import associate_clusters
+    # gate = 1.0 + 0.02 r: 1.2 m at 10 m, 2.0 m at 50 m.
+    assert associate_clusters([(10.0, 0.0)], [(11.1, 0.0)]) == [(0, 0)]    # 1.1 < 1.2
+    assert associate_clusters([(10.0, 0.0)], [(11.5, 0.0)]) == []          # 1.5 > 1.2
+    assert associate_clusters([(50.0, 0.0)], [(51.5, 0.0)]) == [(0, 0)]    # 1.5 < 2.0
+    assert associate_clusters([(50.0, 0.0)], [(53.0, 0.0)]) == []          # 3.0 > 2.0
+
+
+def test_one_cluster_cannot_feed_two_tracks():
+    """Two tracks living off one cluster is how a duplicate becomes self-sustaining."""
+    from object_fusion.lidar_clusters import associate_clusters
+    pairs = associate_clusters([(20.0, 0.0), (20.6, 0.0)], [(20.3, 0.0)])
+    assert len(pairs) == 1

@@ -20,6 +20,7 @@ setup(
             "camera_lidar_detector = object_fusion.camera_lidar_detector_node:main",
             "radar_detector = object_fusion.radar_detector_node:main",
             "ground_projection = object_fusion.ground_projection_node:main",
+            "lidar_cluster_detector = object_fusion.lidar_cluster_detector_node:main",
             "object_aggregator = object_fusion.object_aggregator_node:main",
         ],
     },

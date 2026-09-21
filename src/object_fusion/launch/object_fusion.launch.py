@@ -8,6 +8,7 @@ explicit value_type or the nodes reject them -- the same trap radar_fusion.launc
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -24,7 +25,8 @@ _FLOAT = {"ego_yaw_correction_deg", "ego_z_offset", "measurement_lag", "sigma_lo
 _BOOL = {"enable_radar_only_birth", "enable_extent_estimation", "use_sim_time",
          "enable_centroid_correction", "enable_camera_only_fallback",
          "publish_debug_clouds", "segmentation_empty_fallback", "enable_depth_gate",
-         "enable_class_vote", "ground_levelling", "radar_camera_gate"}
+         "enable_class_vote", "ground_levelling", "radar_camera_gate",
+         "enable_lidar_clusters"}
 _INT = {"min_update_count", "ground_min_points"}
 
 _ARGS = {
@@ -85,6 +87,10 @@ _ARGS = {
     "assoc_max_dist": "6.0",
     "merge_max_dist": "2.5",
     "radar_camera_gate": "true",
+    # The 360-degree LiDAR cluster path: ground_projection publishes the full-sweep non-ground
+    # cloud, lidar_cluster_detector clusters it, and the aggregator lets those clusters SUSTAIN
+    # existing tracks (never birth). One flag turns the whole chain on.
+    "enable_lidar_clusters": "false",
     "sticky_sanity_dist": "20.0",
 }
 
@@ -117,7 +123,13 @@ def generate_launch_description():
              name="ground_projection", output="screen",
              parameters=_params("use_sim_time", "ground_backend", "ground_max_range",
                                 "sensor_height", "publish_debug_clouds", "ground_levelling",
-                                "levelling_near_range", "max_odom_gap_s", "odom_topic")),
+                                "levelling_near_range", "max_odom_gap_s", "odom_topic")
+             + [{"publish_nonground": ParameterValue(
+                 LaunchConfiguration("enable_lidar_clusters"), value_type=bool)}]),
+        Node(package="object_fusion", executable="lidar_cluster_detector",
+             name="lidar_cluster_detector", output="screen",
+             condition=IfCondition(LaunchConfiguration("enable_lidar_clusters")),
+             parameters=_params("use_sim_time")),
         Node(package="object_fusion", executable="camera_lidar_detector",
              name="camera_lidar_detector", output="screen",
              parameters=_params("use_sim_time", "max_pairing_skew", "wait_for_newer",
@@ -138,5 +150,5 @@ def generate_launch_description():
                                 "ego_yaw_correction_deg", "measurement_lag", "sigma_long",
                                 "sigma_lat", "output_timeout", "odom_topic",
                                 "assoc_max_dist", "merge_max_dist", "radar_camera_gate",
-                                "sticky_sanity_dist")),
+                                "enable_lidar_clusters", "sticky_sanity_dist")),
     ])

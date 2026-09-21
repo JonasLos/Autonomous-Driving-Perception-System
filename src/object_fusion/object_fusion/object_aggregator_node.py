@@ -43,6 +43,7 @@ from perception_common.stamp_sync import apply_bounded_parameters
 
 from object_fusion import frames
 from object_fusion.association import apply_sticky_ids, associate_radar, solve_assignment
+from object_fusion.lidar_clusters import ClusterParams, associate_clusters
 from object_fusion.ego_motion import EgoTwist, TwistBuffer
 from object_fusion.measurement_queue import DEFAULT_LAG_S, Measurement, MeasurementQueue
 from object_fusion.tracker import (
@@ -52,7 +53,7 @@ from object_fusion.tracker import (
 )
 from object_fusion.detection_geometry import ExtentFilter
 from object_fusion.track_store import (
-    SENSOR_CAMERA, SENSOR_RADAR, Track, TrackStore, camera_expected,
+    SENSOR_CAMERA, SENSOR_LIDAR, SENSOR_RADAR, Track, TrackStore, camera_expected,
     radar_expected,
 )
 
@@ -78,6 +79,14 @@ REWIND_S = 1.0
 #: A camera measurement older than this is not a reference for the radar range gate: at 10 Hz it
 #: means the camera has missed the object for two frames, and an object can move.
 CAMERA_REF_MAX_AGE_S = 0.3
+
+#: Position sigma of a cluster centroid, both axes. A cluster is the whole object's footprint,
+#: not a face, so it is isotropic -- unlike the camera+LiDAR measurement, which is far better
+#: across the ray than along it. INVENTED; the cluster A/B's ~1 m association gate is the evidence
+#: that this is the right order of magnitude, nothing finer.
+CLUSTER_SIGMA_M = 0.5
+CLUSTER_MIN_RANGE = ClusterParams.min_range
+CLUSTER_MAX_RANGE = ClusterParams.max_range
 
 
 class ObjectAggregatorNode(Node):
@@ -134,6 +143,13 @@ class ObjectAggregatorNode(Node):
         # (multipath ghosts). On: 119 -> 27 such updates, at -0.6% radar updates overall. See
         # tracker.camera_radar_range_cap. false restores the old behaviour.
         self._radar_camera_gate = bool(self.declare_parameter("radar_camera_gate", True).value)
+        # 360-degree LiDAR clusters, which may only SUSTAIN a track the camera started. They are
+        # what keeps an object alive once the car has passed it: measured, the rear sector is the
+        # best covered of all (65-70% at 15-60 m against ~1% chance), and holding through the
+        # side-sector blind zone takes departing tracks from 25% to 45% held, median 0.7 -> 4.3 s.
+        # See lidar_cluster_detector_node. Off until it has been watched on the vehicle.
+        self._enable_lidar_clusters = bool(
+            self.declare_parameter("enable_lidar_clusters", False).value)
         # Outer bound on a sticky ByteTrack claim. Generous on purpose: the claim is meant to
         # survive the 14 m road-adoption jump that breaks a position-only associator, and only
         # to refuse a RECYCLED id that would teleport a track.
@@ -164,6 +180,7 @@ class ObjectAggregatorNode(Node):
         self._last_publish = None
         self._cam_rejected = 0
         self._cam_applied = 0
+        self._cluster_updates = 0
         self._cam_forced = 0
         self._skipped_no_odom = 0
         self._dt_stats, self._dt_nonpos = {}, {}
@@ -174,6 +191,8 @@ class ObjectAggregatorNode(Node):
         self._markers = self.create_publisher(MarkerArray, self._marker_topic, 10)
         self.create_subscription(Detection3DArray, m["camera_lidar"], self._cam_cb, 10)
         self.create_subscription(Detection3DArray, m["radar"], self._radar_cb, 10)
+        if self._enable_lidar_clusters:
+            self.create_subscription(Detection3DArray, m["lidar"], self._lidar_cb, 10)
         self.create_subscription(Odometry, odom_topic, self._odom_cb, 50)
         if pump > 0.0:
             self.create_timer(pump, self._pump)
@@ -270,6 +289,10 @@ class ObjectAggregatorNode(Node):
         self._queue.add(Measurement(self._stamp(msg.header), "radar", msg))
         self._pump()
 
+    def _lidar_cb(self, msg: Detection3DArray):
+        self._queue.add(Measurement(self._stamp(msg.header), "lidar", msg))
+        self._pump()
+
     def _pump(self):
         for meas in self._queue.release(self._now()):
             self._apply(meas)
@@ -353,6 +376,8 @@ class ObjectAggregatorNode(Node):
 
         if meas.sensor == "camera_lidar":
             self._apply_camera(meas.payload, t)
+        elif meas.sensor == "lidar":
+            self._apply_lidar_clusters(meas.payload, t)
         else:
             self._apply_radar(meas.payload, t)
 
@@ -360,6 +385,41 @@ class ObjectAggregatorNode(Node):
         self._store.merge_pass(max_merge_dist=self._merge_max_dist)
         self._store.promote()
         self._publish(meas.payload.header, t)
+
+    def _apply_lidar_clusters(self, msg: Detection3DArray, t):
+        """Sustain existing tracks from 360-degree clusters. NEVER births one.
+
+        A cluster has no class and no provenance: a bush, a kerb and a parked car are the same
+        shape to it. So the only thing it is trusted to do is say "something is still here", which
+        refreshes the track's coast budget and nudges its position. The gate is tight and the
+        assignment exclusive, so one cluster cannot feed two tracks.
+        """
+        tracks = self._store.tracks
+        if not msg.detections or not tracks:
+            return
+        cl = np.array([[d.pose.position.x, d.pose.position.y] for d in msg.detections])
+        pairs = associate_clusters(np.array([tr.x[:2] for tr in tracks]), cl)
+        for ti, di in pairs:
+            tr = tracks[ti]
+            y, H, R = lidar_measurement(tr.x[:2], cl[di],
+                                        sigma_a=CLUSTER_SIGMA_M, sigma_c=CLUSTER_SIGMA_M)
+            tr.x, tr.P, _, applied = kalman_update(tr.x, tr.P, y, H, R,
+                                                   gate_chi2=CAMERA_GATE_CHI2)
+            if applied:
+                self._cluster_updates += 1
+                tr.hits["lidar"] += 1
+                tr.last_update = t
+                tr.sensors_ever |= SENSOR_LIDAR
+                tr.sensors_this_cycle |= SENSOR_LIDAR
+                self._accrue(tr, "lidar", True, True, t)
+        matched = {ti for ti, _ in pairs}
+        for i, tr in enumerate(tracks):
+            if i not in matched:
+                # A cluster is expected only where this path can see: inside its range band, and
+                # never in the roof LiDAR's close blind zone. Charging a miss outside that is how
+                # existence logic kills real objects for being invisible.
+                r = float(np.hypot(tr.x[0], tr.x[1]))
+                self._accrue(tr, "lidar", False, CLUSTER_MIN_RANGE <= r <= CLUSTER_MAX_RANGE, t)
 
     def _apply_camera(self, msg: Detection3DArray, t):
         """Associate, update and birth from one camera+LiDAR measurement array.
@@ -659,6 +719,8 @@ class ObjectAggregatorNode(Node):
             f"forced={self._cam_forced} | "
             f"radar_only candidates={s['radar_only_candidates']} born={s['radar_only_born']} | "
             f"merged={s['merged']} confirmed={s['confirmed']} | "
+            + (f"cluster updates={self._cluster_updates} | " if self._enable_lidar_clusters else "")
+            + 
             f"queue={len(self._queue)} late={self._queue.late} "
             f"odom_held={self._twist.held} odom_starved={self._twist.starved} "
             f"skipped_no_odom={self._skipped_no_odom} rewinds={self._rewinds} | "

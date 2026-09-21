@@ -83,6 +83,10 @@ class GroundProjectionNode(Node):
         # Full-sweep ground / non-ground clouds for RViz. Off by default: two extra ~45k-point
         # clouds at 10 Hz are real bandwidth on a shared host.
         self._debug = bool(self.declare_parameter("publish_debug_clouds", False).value)
+        # The non-ground cloud for CONSUMERS (lidar_cluster_detector), as opposed to the debug
+        # pair. Segmentation runs on the whole sweep before transform.py's crop, so this carries
+        # the full 360 degrees -- the side and rear the camera never sees.
+        self._pub_ng_on = bool(self.declare_parameter("publish_nonground", False).value)
 
         # Odometry attitude levelling of the near field (see LevelledGroundSegmenter for numbers).
         self._levelling = bool(self.declare_parameter("ground_levelling", True).value)
@@ -97,6 +101,9 @@ class GroundProjectionNode(Node):
         self._wh = image_size_from_proj()
         self._have_ci = False
         self._pub = self.create_publisher(PointCloud2, self._out, 5)
+        if self._pub_ng_on:
+            self._pub_nonground = self.create_publisher(
+                PointCloud2, cfg["topics"]["measurements"]["nonground"], 5)
         if self._debug:
             self._pub_g = self.create_publisher(PointCloud2, "/perception/ground_debug/ground", 2)
             self._pub_ng = self.create_publisher(PointCloud2, "/perception/ground_debug/nonground", 2)
@@ -163,6 +170,9 @@ class GroundProjectionNode(Node):
         self._pts += xyz.shape[0]
         self._ground += int(ground.sum())
 
+        if self._pub_ng_on:
+            self._pub_nonground.publish(point_cloud2.create_cloud(
+                msg.header, _XYZ, xyz[~ground].astype(np.float32)))
         if self._debug:
             self._pub_g.publish(point_cloud2.create_cloud(
                 msg.header, _XYZ, xyz[ground].astype(np.float32)))
