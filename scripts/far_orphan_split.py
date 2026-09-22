@@ -1,4 +1,9 @@
-"""Among far (>80 m) orphans: is there no track at all, or one that is off the ray?"""
+"""Among far (>80 m) orphans: is there no track at all, or one that is off the ray?
+
+The 2026-09-22 numbers from this script ("nothing on the bearing" 22 -> 31-33 of 292) were
+measured before `live_orphans.load` matched frames correctly, and they are retracted: there
+is no far-band difference between the cluster arms. See HANDOFF item 7 and rule 4.
+"""
 import sys, math, bisect
 import numpy as np
 sys.path.insert(0, "scripts")
@@ -15,8 +20,10 @@ for path in sys.argv[1:]:
         if not cand:
             continue
         j = min(cand, key=lambda k: abs(pub_t[k] - t))
-        if abs(pub_t[j] - t) > 0.15:
+        if abs(pub_t[j] - t) > 0.05:
             continue
+        while j + 1 < len(pub) and pub_t[j + 1] == pub_t[j]:
+            j += 1                          # the last frame at a stamp; see live_orphans.py
         tracks = pub[j][1]
         for (x, y) in cs:
             r = math.hypot(x, y)

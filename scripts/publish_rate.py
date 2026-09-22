@@ -1,11 +1,20 @@
-"""Publish cadence and track count per published frame, per arm."""
+"""Publish cadence and track count per published frame, per arm.
+
+Deliberately reads RECORDING time, not header stamps: the question here is how often the node put
+a message on the wire, and several frames can carry the same capture stamp (the camera detections
+and the LiDAR clusters come from one sweep). Every OTHER script in this directory matches on
+stamps -- see live_orphans.py.
+"""
 import sys
 import numpy as np
+from mcap_ros2.reader import read_ros2_messages
 sys.path.insert(0, "scripts")
-from live_orphans import load
+from live_orphans import PUB, centres
 
 for path in sys.argv[1:]:
-    _, pub = load(path)
+    pub = [(m.log_time_ns * 1e-9, centres(m.ros_msg))
+           for m in read_ros2_messages(path, topics=[PUB])]
+    pub.sort(key=lambda r: r[0])
     t = np.asarray([p[0] for p in pub])
     n = np.asarray([len(p[1]) for p in pub])
     dt = np.diff(t)
