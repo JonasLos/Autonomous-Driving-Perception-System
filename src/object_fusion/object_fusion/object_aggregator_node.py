@@ -49,7 +49,7 @@ from object_fusion.measurement_queue import DEFAULT_LAG_S, Measurement, Measurem
 from object_fusion.tracker import (
     CAMERA_GATE_CHI2, RADAR_GATE_CHI2, gated_update, compensated_range_rate, init_from_radar, kalman_update,
     lidar_measurement, predict, process_noise, radar_R, radar_h_and_H, range_is_trustworthy,
-    turn_velocity_sigma, velocity_is_significant, wrap_deg,
+    TURN_VELOCITY_K, turn_velocity_sigma, velocity_is_significant, wrap_deg,
 )
 from object_fusion.detection_geometry import ExtentFilter
 from object_fusion.track_store import (
@@ -148,6 +148,16 @@ class ObjectAggregatorNode(Node):
         # See lidar_cluster_detector_node. Off until it has been watched on the vehicle.
         self._enable_lidar_clusters = bool(
             self.declare_parameter("enable_lidar_clusters", False).value)
+        # Velocity honesty (2026-09-22). While the vehicle yaws, an object's bearing sweeps and
+        # the LiDAR returns inside its 2D box change, so the measured position moves across the
+        # ray and the filter reads motion that is not there. k is the coefficient of the extra
+        # velocity sigma that produces, |omega| * range; 1.0 was measured (k=2 keeps only 58% of
+        # real motion, k=0.5 leaves 22.5% of the false arrows).
+        # ROLLBACK: turn_velocity_k:=0.0 restores the pre-2026-09-22 behaviour exactly -- no
+        # covariance inflation AND no significance test, so velocity_valid is true whenever the
+        # filter is running with odometry. Anything > 0 is the honest rule at that strength.
+        self._turn_velocity_k = float(
+            self.declare_parameter("turn_velocity_k", TURN_VELOCITY_K).value)
         # Outer bound on a sticky ByteTrack claim. Generous on purpose: the claim is meant to
         # survive the 14 m road-adoption jump that breaks a position-only associator, and only
         # to refuse a RECYCLED id that would teleport a track.
@@ -228,6 +238,7 @@ class ObjectAggregatorNode(Node):
             "output_timeout": (self, "_output_timeout"),
             "sigma_long": (self, "_sigma_long"),
             "sigma_lat": (self, "_sigma_lat"),
+            "turn_velocity_k": (self, "_turn_velocity_k"),
         })
         if not ok:
             return SetParametersResult(successful=False, reason=reason)
@@ -636,12 +647,15 @@ class ObjectAggregatorNode(Node):
             # static drive, between-frame jitter goes 0.77 -> 2.99 m/s from straight to turning.
             # Published covariance carries it, and velocity_valid means "distinguishable from
             # standing still", not "the filter is running".
-            extra = turn_velocity_sigma(omega_now, float(np.hypot(tr.x[0], tr.x[1])))
+            k = self._turn_velocity_k
+            extra = (turn_velocity_sigma(omega_now, float(np.hypot(tr.x[0], tr.x[1])), k)
+                     if k > 0.0 else 0.0)
             P_vv = np.asarray(tr.P)[2:, 2:] + np.eye(2) * extra ** 2
             o.velocity_covariance = [float(c) for c in P_vv.ravel()]
             o.velocity_valid = bool(
                 filtered and self._twist.newest() is not None
-                and velocity_is_significant(tr.x[2:], np.asarray(tr.P)[2:, 2:], extra))
+                and (k <= 0.0
+                     or velocity_is_significant(tr.x[2:], np.asarray(tr.P)[2:, 2:], extra)))
             o.existence_probability = float(tr.existence)
             o.track_status = tr.published_status()
             o.missed_updates = tr.missed_updates(t)

@@ -316,6 +316,26 @@ def test_turn_sigma_scales_with_yaw_rate_and_range():
     assert turn_velocity_sigma(0.2, 60.0) == 2 * turn_velocity_sigma(0.2, 30.0)
 
 
+def test_k_scales_the_sweep_sigma_and_zero_switches_the_rule_off():
+    """`turn_velocity_k` is the live rollback, so the k it is given has to reach the sigma.
+
+    The node reads 0 as "publish velocity the way it was published before 2026-09-22" and skips
+    the significance test entirely; what is pinned here is the half of that contract which lives
+    in the tracker -- k scales the sigma, and k = 0 removes it, which alone would make every
+    velocity look significant again.
+    """
+    from object_fusion.tracker import (TURN_VELOCITY_K, turn_velocity_sigma,
+                                       velocity_is_significant)
+    assert TURN_VELOCITY_K == 1.0
+    assert turn_velocity_sigma(0.2, 30.0, k=0.0) == 0.0
+    assert turn_velocity_sigma(0.2, 30.0, k=2.0) == pytest.approx(12.0)
+    assert turn_velocity_sigma(0.2, 30.0, k=0.5) == pytest.approx(3.0)
+
+    v, P_vv = np.array([3.0, 0.0]), np.eye(2) * 0.25      # 6 sigma on its own covariance
+    assert not velocity_is_significant(v, P_vv, turn_velocity_sigma(0.2, 30.0, k=1.0))
+    assert velocity_is_significant(v, P_vv, turn_velocity_sigma(0.2, 30.0, k=0.0))
+
+
 def test_a_position_only_update_moves_the_position_and_leaves_velocity_alone():
     """What a 360-degree cluster is allowed to do: a cluster sits at the footprint centroid while
     the camera measures the near face, so the difference between consecutive clusters is an

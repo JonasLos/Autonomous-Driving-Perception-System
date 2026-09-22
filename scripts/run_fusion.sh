@@ -44,6 +44,9 @@ export ASSOC_MAX_DIST="${ASSOC_MAX_DIST:-6.0}"
 export MERGE_MAX_DIST="${MERGE_MAX_DIST:-2.5}"
 export RADAR_CAMERA_GATE="${RADAR_CAMERA_GATE:-true}"
 export ENABLE_LIDAR_CLUSTERS="${ENABLE_LIDAR_CLUSTERS:-false}"
+# Velocity honesty. 0.0 is the rollback: no covariance inflation and no significance test,
+# so velocity_valid means what it meant before 2026-09-22.
+export TURN_VELOCITY_K="${TURN_VELOCITY_K:-1.0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -57,6 +60,7 @@ while [[ $# -gt 0 ]]; do
     --no-depth-gate) ENABLE_DEPTH_GATE="false"; shift ;;
     --no-class-vote) ENABLE_CLASS_VOTE="false"; shift ;;
     --clusters) ENABLE_LIDAR_CLUSTERS="true"; shift ;;
+    --loose-velocity) TURN_VELOCITY_K="0.0"; shift ;;   # rollback: publish velocity as before
     --down) ACTION="down"; shift ;;
     --logs) ACTION="logs"; shift ;;
     --status) ACTION="status"; shift ;;
@@ -123,6 +127,7 @@ echo "mode=$MODE  USE_SIM_TIME=$USE_SIM_TIME"
 echo "projection: $PROJECTION_TOPIC   debug clouds: $PUBLISH_DEBUG_CLOUDS"
 echo "live rules: levelling=$GROUND_LEVELLING depth_gate=$ENABLE_DEPTH_GATE "\
      "class_vote=$ENABLE_CLASS_VOTE empty_fallback=$SEGMENTATION_EMPTY_FALLBACK"
+echo "velocity: turn_velocity_k=$TURN_VELOCITY_K (0 = the pre-2026-09-22 always-valid rule)"
 echo "gates: publish_mode=$PUBLISH_MODE radar_only_birth=$ENABLE_RADAR_ONLY_BIRTH "\
      "extent=$ENABLE_EXTENT_ESTIMATION ego_yaw=$EGO_YAW_CORRECTION_DEG"
 echo

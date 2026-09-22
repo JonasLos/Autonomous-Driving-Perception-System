@@ -58,12 +58,13 @@ radar range gate (`RADAR_CAMERA_GATE=false` reverts). OFF by default: the 360-de
 (`ENABLE_LIDAR_CLUSTERS=true` / `--clusters` turns it on), though every session since 2026-09-21
 has run WITH it.
 
-**The one live rule with no env rollback** (2026-09-22): the velocity honesty -- published
-`velocity_covariance` inflated by `|omega| * range` and `velocity_valid` gated on the velocity
-being distinguishable from zero. Reverting it today means `publish_mode:=passthrough` (which
-removes velocity entirely) or reverting `4614ac4`. Giving it a `TURN_VELOCITY_K` env var, where
-`0` restores the old always-valid behaviour, is a 10-line job and the first thing to do if anyone
-wants to A/B it on the vehicle.
+**The velocity honesty has a rollback too** (added 2026-09-23): `TURN_VELOCITY_K` /
+`turn_velocity_k` / `run_fusion.sh --loose-velocity`. `0` is the pre-2026-09-22 behaviour exactly
+-- no covariance inflation and no significance test, so `velocity_valid` is true whenever the
+filter runs with odometry. Anything above 0 is the honest rule at that strength (the extra sigma
+is `k * |omega| * range`). It is settable at runtime, and a negative value is refused. Verified
+all three ways on the live stack: 45 s of the static drive gives `velocity_valid` on 0.4% of
+objects at k=1 and 100.0% at k=0.
 
 **Dockerfile bug, fixed 2026-09-21:** two CMD lines ended with a DOUBLE backslash, so every env var
 after `merge_max_dist` was silently dropped -- `RADAR_CAMERA_GATE=false` did nothing and the launch

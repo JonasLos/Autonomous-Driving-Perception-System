@@ -15,7 +15,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 _FLOAT = {"ego_yaw_correction_deg", "ego_z_offset", "measurement_lag", "sigma_long",
           "sensor_height", "camera_height_m", "assoc_max_dist", "merge_max_dist",
-          "sticky_sanity_dist",
+          "sticky_sanity_dist", "turn_velocity_k",
           "ground_max_range",
           "ground_rejection_min_range", "ground_margin",
           "depth_gate_min_m", "depth_gate_range_frac", "class_vote_window_s",
@@ -91,6 +91,10 @@ _ARGS = {
     # cloud, lidar_cluster_detector clusters it, and the aggregator lets those clusters SUSTAIN
     # existing tracks (never birth). One flag turns the whole chain on.
     "enable_lidar_clusters": "false",
+    # Velocity honesty: the extra velocity sigma from a sweeping bearing is k * |omega| * r,
+    # and velocity_valid means "distinguishable from standing still". 0.0 is the rollback --
+    # no inflation, no significance test, velocity_valid as it was before 2026-09-22.
+    "turn_velocity_k": "1.0",
     "sticky_sanity_dist": "20.0",
 }
 
@@ -150,5 +154,6 @@ def generate_launch_description():
                                 "ego_yaw_correction_deg", "measurement_lag", "sigma_long",
                                 "sigma_lat", "output_timeout", "odom_topic",
                                 "assoc_max_dist", "merge_max_dist", "radar_camera_gate",
-                                "enable_lidar_clusters", "sticky_sanity_dist")),
+                                "enable_lidar_clusters", "sticky_sanity_dist",
+                                "turn_velocity_k")),
     ])
