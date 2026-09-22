@@ -32,8 +32,15 @@ float64[16] covariance
 # velocity_covariance is what says how much of it is real: a track updated only by radar has
 # a rank-deficient covariance -- small along the ray, huge across it.
 geometry_msgs/Vector3 velocity
-float64[4] velocity_covariance     # row-major 2x2
-bool velocity_valid                # false when odometry was unavailable
+float64[4] velocity_covariance     # row-major 2x2, and it carries the uncertainty the filter
+                                   # cannot see: while the vehicle yaws, an object's bearing
+                                   # sweeps and its measured position moves across the ray.
+                                   # That adds turn_velocity_k * |omega| * range of sigma.
+bool velocity_valid                # true only when the velocity is distinguishable from
+                                   # STANDING STILL, given velocity_covariance below. False
+                                   # also when odometry was unavailable or the filter is in
+                                   # passthrough. Consumers: treat false as "no velocity",
+                                   # not as zero velocity measured.
 
 # ---- confidence and provenance ----
 float32 existence_probability      # [0,1]
