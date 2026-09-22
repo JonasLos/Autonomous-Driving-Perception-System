@@ -91,7 +91,12 @@ scripts/filter_scale_ab.py    item 2: does scaling the camera sigma change held-
 scripts/coast_budget_ab.py    item 10: re-acquisition gaps per sensor vs the coast budgets
 scripts/coast_sweep_ab.py     item 10: what a longer coast budget costs (orphans, held-out error)
 scripts/cluster_sustain_ab.py item 7: cluster path on vs off -- lifetime, rear survival, ghosts
+scripts/far_orphan_split.py   why a >80 m measurement has no track: none, off-bearing, or
+                              on the bearing but out of range
+scripts/publish_rate.py       publish cadence and tracks per published frame, per recording
 scripts/velocity_truth_ab.py  false velocity: apparent speed of STATIC objects by ego yaw rate
+                              --rule scores a velocity_valid rule: false arrows kept vs real
+                              motion kept (a static recording and the truck bag together)
 docker/Dockerfile.object_fusion      layered on perception-transform:latest (+ pypatchworkpp 1.4.1)
 docker-compose.fusion.yml + .replay.yml
 ```
@@ -112,6 +117,9 @@ python3 -m pytest src/object_fusion/test -q
 - `--ground` points the detector at `/perception/lidar_2d_projection_ground` (Patchwork++
   flags per point); without it the detector reads the existing `/lidar_2d_projection`.
 - `--debug-clouds` publishes `/perception/ground_debug/{ground,nonground}` for RViz.
+- `--clusters` turns on the 360-degree LiDAR cluster path (item 7; OFF by default). It adds
+  `/perception/measurements/lidar_markers` -- thin cyan boxes, one per cluster -- so what the
+  path sees beside and behind the car is visible next to the objects.
 - **Never replay with `--start-offset`.** `/tf_static` is only at the bag start; skip it and the
   radar frame never resolves (RViz shows the radar display red, the aggregator gets nothing).
 - RViz colours: grey non-ground, brown ground, green existing `/fused_bbox`, blue new
@@ -637,6 +645,17 @@ and the two things that had to survive did:
 k = 1.0 was chosen by measurement, not taste: k = 2 drops real motion to 58%, k = 0.5 leaves 22.5%
 of the turning arrows. The remaining 0.4% are straight-line measurement jumps, not turning.
 
+**Nothing else moved** (checked 2026-09-22, both ways it could have):
+
+- offline, `scripts/object_ab.py --full-ab --radar-holdout 4 --measurements rows_gate2.pkl` run on
+  this commit and on its parent is BYTE-IDENTICAL. That is the expected result and worth stating
+  plainly: the estimator never sees any of this. `kalman_update` still defaults to
+  `position_only=False`, and the covariance inflation and the significance test both happen in
+  `_publish`, after the state is final;
+- live, `scripts/live_orphans.py` over full loops of the shipped build: orphaned 7.8% / 9.0%,
+  TRUE DUP 2.6% / 2.5%. Those two numbers are the SAME build on two consecutive loops, so read the
+  1.2-point gap as the run-to-run spread of this metric before reading anything into a comparison.
+
 ## Radar matching in the harnesses, fixed (2026-09-15) -- to-do item 3
 
 Every "range error vs radar" number in these harnesses depends on deciding which radar return is
@@ -926,6 +945,10 @@ the MIRRORED position as a chance control.
     cost: 37.8 ms/sweep for Patchwork++ + clustering (the clustering alone is ~20-25 ms, since
           ground_projection already runs Patchwork++); 41 clusters/sweep, 39 outside the camera
 
+Live on the selfcal replay the node confirms it: 47 clusters/sweep, 22.3 ms mean, p90 27.4 ms
+against a 100 ms sweep budget. MEASURE THAT AT REST -- running one of these offline harnesses on
+the same machine triples the figure (70.9 ms, p90 96.0), which reads as a node that cannot keep up.
+
 **That first reading was PESSIMISTIC, and the reason is instructive (re-measured 2026-09-21).**
 It required CONSECUTIVE sweeps from the moment of death -- and an object that leaves the camera
 dies in the SIDE sector, which is the worst-covered place around the car. `--coverage` follows each
@@ -992,6 +1015,24 @@ last saw the object) stays around a second.
    observations per track. Sustaining a weak track PAST that threshold adds it to the sample as a
    short-lived one, so the count rose (194 -> 294) and the median lifetime fell (2.07 -> 0.31 s)
    while the truth was the opposite. Count every track, and read count and lifetime together.
+
+**What the path costs the rest of the stack, measured 2026-09-22** (`scripts/live_orphans.py`,
+three full loops, same build and same bag, only `ENABLE_LIDAR_CLUSTERS` differing):
+
+    arm                      orphaned   TRUE DUP   published   80-200 m band
+    clusters OFF               9.7%       3.0%      39.7 Hz       15.1%
+    clusters ON, loop 1        7.8%       2.6%      49.6 Hz       19.9%
+    clusters ON, loop 2        9.0%       2.5%      49.6 Hz       21.2%
+
+The path pays for itself where it works -- more tracks published (mean 1.45 per frame against
+1.23), fewer orphans, fewer true duplicates -- and it costs about 5 points in the 80-200 m band,
+which is 10-14 measurements a loop that end up with no track on their bearing at all
+(`scripts/far_orphan_split.py`: "nothing on the bearing" 22 -> 31-33 of 292).
+That is NOT the velocity fix (the same loops with clusters off read 15.1%, as does loopD from
+before either feature) and it is outside the 1.2-point run-to-run spread. It is unexplained:
+clusters stop at 60 m, so nothing out there is cluster-updated. Next thing to check is whether a
+cluster-sustained track is merging with, or stealing the association of, a far camera-only track
+(`merge_max_dist` 2.5 m, `assoc_max_dist` 6.0 m) -- run the arms above with merging off.
 
 Watch items for the vehicle: the one track with a cluster-only tail over 10 s, and a p99
 per-message step of 3.3 m with clusters on (1.4 m without) -- a track occasionally jerks onto a
@@ -1176,7 +1217,11 @@ and the bridge default is set to it.
   `scripts/install_host_fusion_msgs.sh` (install_host_custom_msgs.sh untouched).
 - ~~Expose the rollback parameters as env vars~~ -- DONE. `GROUND_LEVELLING`,
   `ENABLE_DEPTH_GATE`, `ENABLE_CLASS_VOTE`, `SEGMENTATION_EMPTY_FALLBACK`, and since 2026-09-16
-  `ASSOC_MAX_DIST` / `MERGE_MAX_DIST`, all A/B without a rebuild.
+  `ASSOC_MAX_DIST` / `MERGE_MAX_DIST`, since 2026-09-20 `RADAR_CAMERA_GATE` and since
+  2026-09-21 `ENABLE_LIDAR_CLUSTERS` (also the `--clusters` flag), all A/B without a rebuild.
+  Check a rollback took effect by reading the parameter back from the node, not by trusting
+  the command: a stray `\\` in the Dockerfile CMD once dropped every env var after
+  `merge_max_dist` silently, and the launch default hid it.
 - Low priority: why turning RNR off changes labels far from the returns it filters; unused imports
   cleanup; `detection_geometry.camera_only_range` is now dead (kept, marked invalid).
 
@@ -1189,7 +1234,14 @@ and the bridge default is set to it.
   the node logs it as `rewinds=`. Expect `skipped_no_odom` to track `rewinds` one-for-one (measured
   36 against 37): the first measurement after a rewind finds the odometry buffer empty and is
   skipped while it refills. Any larger ratio is a real odometry problem.
-- 10.5% of measurements have no published track within 3 m, and 3.0% of published tracks are a
-  second box on a measurement that already has one (item 11, measured live over a full loop).
+- 7.8-9.0% of measurements have no published track (range-aware test), and 2.5-2.6% of
+  published tracks are a second box on a measurement that already has one -- re-measured
+  2026-09-22 over two full loops of the shipped build. Two loops of the SAME build differ by
+  1.2 points, so read anything under that as noise. (The older 10.5% / 3.0% pair was item 11's
+  arm, before the radar-camera gate and the cluster path.)
+- Velocity is now WITHHELD unless it is distinguishable from standing still, so a genuinely
+  moving object reads static until the evidence accumulates -- on the truck bag 3.1% of
+  objects above 5 m/s. The planner bridge zeroes velocity for exactly those, which is the
+  intended behaviour but means the FSM sees them as static obstacles.
 - Levelling evidence in curves rests on 232 + 15 curve sweeps from two drives.
 - The 360 deg path (item 7) would add clutter with no semantic check outside the camera FOV.
