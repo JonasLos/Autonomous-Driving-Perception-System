@@ -1,9 +1,9 @@
 # object_fusion — handoff
 
-State as of 2026-09-15. Everything here is NEW; no pre-existing repository file was modified
-at any point. `git status` shows the same 12 pre-existing entries it did at the start.
+State as of 2026-09-22. Everything here is NEW; no pre-existing repository file was modified
+at any point.
 
-## RESUME HERE (updated 2026-09-16)
+## RESUME HERE (updated 2026-09-22, machine shut down clean)
 
 **Start with "TO DO" at the bottom of this file** -- it is the prioritised plan, each item with
 its steps and a done-when test.
@@ -14,10 +14,11 @@ Runtime `ros2 param set` is fine. Measure offline before changing behaviour and 
 numbers. sudo needs a password -- never ask for it; `systemctl --no-ask-password reboot` works,
 restarting system services (e.g. anydesk) does not.
 
-**The work is COMMITTED** on branch **`radar_integration_and_fusion`**: `e462094` (by the user,
-2026-09-16) which also carried the 12 pre-existing modifications that were already in the working
-tree, then `de9a28d` (the merge distance bound, items 11/12, and the replicability work). Neither
-is pushed. So the old isolation check -- "`git status` shows exactly 12 entries" -- no longer
+**The work is COMMITTED** on branch **`radar_integration_and_fusion`**, through `6ee6e6c`
+(2026-09-22). The trail: `e462094` (by the user, 2026-09-16) carried the 12 pre-existing
+modifications that were already in the working tree; `de9a28d` the merge distance bound and items
+11/12; then the radar-camera gate, the 360-degree cluster path, and `4614ac4` + `6ee6e6c` for the
+velocity honesty and its verification. NOTHING IS PUSHED -- the user pushes. So the old isolation check -- "`git status` shows exactly 12 entries" -- no longer
 applies; the tree is clean. Check isolation instead with
 `git diff --name-only e462094..HEAD` and confirm every path is new work
 (`src/object_fusion/`, `src/custom_msgs/fusion_msgs/`, `scripts/*_ab.py`, `scripts/run_fusion.sh`,
@@ -32,10 +33,17 @@ current as of 2026-09-17 (filtered default); rebuild only after code changes.
 
 ```bash
 scripts/run_radar.sh  --replay ~/selfcal_loc_2026-09-08_11-47-43 --obstacle-only     # existing stack
-scripts/run_fusion.sh --replay ~/selfcal_loc_2026-09-08_11-47-43 --ground --debug-clouds
+scripts/run_fusion.sh --replay ~/selfcal_loc_2026-09-08_11-47-43 --ground --clusters
 DISPLAY=:1 rviz2 -d src/object_fusion/config/object_fusion.rviz --ros-args -p use_sim_time:=true &
 scripts/play_rosbag.sh -l ~/selfcal_loc_2026-09-08_11-47-43      # from the START (tf_static)
 ```
+
+That is exactly what was running when the machine was shut down on 2026-09-22, except that the bag
+in the player was `adps_2026-08-25_11-58-32` (two vehicles pass -- the drive that shows whether a
+velocity arrow is real). Add `--debug-clouds` for the ground/non-ground clouds. **Exactly one bag
+player**: two of them interleave sensors from different points of the drive, both publish `/clock`,
+and the result looks like a broken tracker. `pkill -f "ros2 bag play"` kills the shell that runs
+it if that shell's own command line contains the pattern -- put the play command in a script file.
 
 Neither stack depends on the bag path, so switching bags = stop the player, start another
 (`adps_2026-08-25_11-58-32` and `_11-50-45` in the repo root were added by the user; the truck in
@@ -47,7 +55,15 @@ reinstall host Patchwork++ per "Run it" before any offline harness.
 (`enable_depth_gate`), class vote (`enable_class_vote`), near-field odometry levelling
 (`ground_levelling`), merge distance bound (`MERGE_MAX_DIST=inf` reverts), camera-referenced
 radar range gate (`RADAR_CAMERA_GATE=false` reverts). OFF by default: the 360-degree cluster path
-(`ENABLE_LIDAR_CLUSTERS=true` / `--clusters` turns it on).
+(`ENABLE_LIDAR_CLUSTERS=true` / `--clusters` turns it on), though every session since 2026-09-21
+has run WITH it.
+
+**The one live rule with no env rollback** (2026-09-22): the velocity honesty -- published
+`velocity_covariance` inflated by `|omega| * range` and `velocity_valid` gated on the velocity
+being distinguishable from zero. Reverting it today means `publish_mode:=passthrough` (which
+removes velocity entirely) or reverting `4614ac4`. Giving it a `TURN_VELOCITY_K` env var, where
+`0` restores the old always-valid behaviour, is a 10-line job and the first thing to do if anyone
+wants to A/B it on the vehicle.
 
 **Dockerfile bug, fixed 2026-09-21:** two CMD lines ended with a DOUBLE backslash, so every env var
 after `merge_max_dist` was silently dropped -- `RADAR_CAMERA_GATE=false` did nothing and the launch
@@ -62,13 +78,18 @@ line shows `rewinds=` and per-sensor `dt<=0 n/N med +Xms` -- if `dt<=0` is not ~
 not predicting, which is the failure that looked like "the boxes update slowly". In RViz, a white
 arrow on a track is one second of its velocity; in `passthrough` there are none by design.
 
-**Two things the user still wants looked at**, deliberately NOT chased yet (to-do items 11 and 12):
-cones still being dropped, and the aggregator's positional accuracy against the measurements.
+**Outstanding for the user** (nothing is blocked on me):
+1. **Item 13, a decision**: adopt the vendor IMU->LiDAR arm (0.67, -0.10) m or keep the 2.39 m in
+   use. The drive cannot measure it (condition number 39 752); see item 13.
+2. **The far-band cost of the cluster path**, measured 2026-09-22 and unexplained: 80-200 m reads
+   ~5 points more orphaned with clusters on. Next check named under item 7.
+3. Items 6, 8 and the vehicle checks are **blocked on new drives** with real traffic, far-field
+   objects and curves -- not on ideas.
 
 ## What exists
 
 ```
-src/object_fusion/            ROS-free modules + 6 nodes + launch + config (incl. RViz) + 149 tests
+src/object_fusion/            ROS-free modules + 6 nodes + launch + config (incl. RViz) + 172 tests
 src/custom_msgs/fusion_msgs/  Detection3D(Array), FusedObject(Array)
 scripts/object_ab.py          offline harness (imports production rules, never copies)
 scripts/ground_ab.py          ground-removal A/B (point selection vs radar range + jitter)
