@@ -18,12 +18,13 @@ the publish cadence, not of coverage -- the aggregator publishes on every input,
 triggered by another sensor can land between the measurement and the track being born from it.
 Read the orphan rate net of FLICKER before comparing two arms that publish at different rates.
 
-WHAT THIS FOUND (2026-09-23), kept so nobody re-runs it: merging was NOT the cause -- an arm with
-`MERGE_MAX_DIST=inf` left the far band unchanged and made every other band worse, and not one of
-the dead tracks had a merge neighbour in its last frame. The dead tracks were a median 0.1 s old,
-and FLICKER was 100% of them: the object was tracked, but `live_orphans.py` was matching each
-measurement to the nearest published frame rather than to the frame carrying its update, which
-lands `measurement_lag` later. `live_orphans.py --lag` now defaults to that lag.
+WHAT THIS FOUND (2026-09-23): there was no far-band coverage loss to explain. Every candidate
+mechanism was refuted -- merging (an arm with `MERGE_MAX_DIST=inf` left the far band where it was),
+and separately the track populations are identical with the cluster path and without (117 vs 105
+tracks born past 80 m, median life 0.25 vs 0.26 s). The whole effect was this audit and
+`live_orphans.py` matching frames wrongly: see rule 4 in HANDOFF.md. The FLICKER line below is
+what exposed it -- an "orphan" whose track sits in a frame milliseconds away is a matching
+failure, not a coverage failure, and it should be near zero.
 
     python3 scripts/far_band_identity.py RECORDING_DIR/*.mcap
 """
@@ -43,7 +44,20 @@ MEAS = "/perception/measurements/camera_lidar_markers"
 OBJECTS = "/perception/objects"
 LOOKBACK_S = 3.0
 MERGE_DIST = 2.5
-FLICKER_S = 0.25
+FLICKER_S = 0.10
+
+
+def _stamp(msg, fallback_ns):
+    """Capture time. The aggregator stamps a published frame with the capture time of the
+    measurement it just released, so a measurement and the frame carrying it share a stamp --
+    while their RECORDING times differ by the pipeline's wall-clock latency, which is not a
+    constant and is not the same in two arms."""
+    h = getattr(msg, "header", None)
+    if h is None:
+        h = msg.markers[0].header if getattr(msg, "markers", None) else None
+    if h is None:
+        return fallback_ns * 1e-9
+    return h.stamp.sec + h.stamp.nanosec * 1e-9
 
 
 def load(path):
@@ -52,7 +66,7 @@ def load(path):
     k = math.radians(EGO_YAW_DEG)
     co, si = math.cos(k), math.sin(k)
     for m in read_ros2_messages(path, topics=[MEAS, OBJECTS]):
-        t = m.log_time_ns * 1e-9
+        t = _stamp(m.ros_msg, m.log_time_ns)
         if m.channel.topic == MEAS:
             c = [(x * co - y * si, x * si + y * co) for (x, y) in centres(m.ros_msg)]
             meas.append((t, c))
@@ -60,7 +74,10 @@ def load(path):
             objs.append((t, [(int(o.track_id), o.pose.position.x, o.pose.position.y,
                               float(o.age), int(o.track_status), int(o.contributions_this_frame))
                              for o in m.ros_msg.objects]))
-    meas.sort(); objs.sort()
+    # Stable, by stamp only: frames sharing a stamp must keep their publication
+    # order, because the last one is the only one that has seen everything
+    # released at that instant (see live_orphans.py).
+    meas.sort(key=lambda r: r[0]); objs.sort(key=lambda r: r[0])
     return meas, objs
 
 
@@ -85,8 +102,12 @@ def main(path):
         if not cand:
             continue
         j = min(cand, key=lambda k: abs(obj_t[k] - t))
-        if abs(obj_t[j] - t) > 0.15:
+        if abs(obj_t[j] - t) > 0.05:
             continue
+        # The node publishes one frame per measurement released in a tick, all with the same
+        # release stamp, so the first frame at a stamp need not carry this measurement's update.
+        while j + 1 < len(objs) and obj_t[j + 1] == obj_t[j]:
+            j += 1
         here = objs[j][1]
         for (x, y) in cs:
             r = math.hypot(x, y)

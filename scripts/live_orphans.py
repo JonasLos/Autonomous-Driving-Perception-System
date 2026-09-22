@@ -30,19 +30,19 @@ EGO_YAW_DEG = 5.35
 RANGE_TRUST_MAX_M = 80.0
 FAR_ALONG_FRAC = 0.35
 
-# A measurement is applied by the aggregator's fixed-lag queue `measurement_lag` seconds after its
-# capture stamp, so the published frame that CARRIES it is that much later. Matching a measurement
-# to the nearest frame in time therefore reads a frame from before its own update landed. That is
-# invisible for a long-lived track (it is in every frame either way) and dominant for a short-lived
-# one, which is why it showed up as a far-band effect: at >80 m, 69% of "orphans" have their track
-# on the bearing within 25 ms, and 92% within 100 ms.
+# MATCH ON HEADER STAMPS, not on the time a message was recorded. The aggregator holds every
+# measurement in a fixed-lag queue and publishes the released state stamped with that
+# measurement's own CAPTURE time, so a measurement and the frame carrying it share a stamp to
+# within a millisecond -- while their recording times differ by the pipeline's wall-clock latency,
+# which is not a constant: it measured +78 ms with the cluster path running and +40 ms without.
 #
-# The default is the node's own `measurement_lag`, because that is the frame which answers the
-# question this script asks. Pass `--lag 0` to reproduce any orphan number recorded before
-# 2026-09-23 -- all of them were measured with the nearest-frame rule, and they are only
-# comparable with each other when both arms published at the same RATE. They did not: the cluster
-# path publishes at 49.6 Hz against 39.7, which is what made it look like a far-band regression.
-MATCH_LAG_S = 0.12
+# Matching on recording time therefore compares a measurement against a frame from before its
+# update landed, by an amount that DIFFERS PER ARM. That is invisible for a long-lived track and
+# decisive for a short-lived one, so it reads as a far-band effect, and it silently favours
+# whichever arm is faster. Every orphan number recorded before 2026-09-23 was measured that way;
+# `--log-time` reproduces them.
+STAMP_TOL_S = 0.05
+USE_LOG_TIME = False
 
 
 def centres(msg):
@@ -57,10 +57,18 @@ def centres(msg):
     return out
 
 
+def _stamp(msg, log_time_ns):
+    """Capture time from the header; the recording time only as a fallback (--log-time)."""
+    if USE_LOG_TIME or not msg.markers:
+        return log_time_ns * 1e-9
+    h = msg.markers[0].header.stamp
+    return h.sec + h.nanosec * 1e-9
+
+
 def load(path):
     meas, pub = [], []
     for m in read_ros2_messages(path, topics=[MEAS, PUB]):
-        t = m.log_time_ns * 1e-9
+        t = _stamp(m.ros_msg, m.log_time_ns)
         c = centres(m.ros_msg)
         if m.channel.topic == MEAS:
             k = math.radians(EGO_YAW_DEG)
@@ -69,7 +77,13 @@ def load(path):
             meas.append((t, c))
         else:
             pub.append((t, c))
-    meas.sort(); pub.sort()
+    # Sort by stamp ONLY, and stably: several frames can share a stamp (the
+    # camera detections and the LiDAR clusters are both stamped from the same
+    # sweep), and a plain sort() then orders those by their CONTENTS, which
+    # scrambles the one order that matters -- the order they were published in.
+    # The last frame at a stamp is the one that has seen everything released at
+    # that instant; picking any other reads a track out of existence.
+    meas.sort(key=lambda r: r[0]); pub.sort(key=lambda r: r[0])
     return meas, pub
 
 
@@ -82,15 +96,23 @@ def main(path):
 
     dists, bands, shares, dups, tdup = [], defaultdict(list), [], [], []
     along, cross = [], []
+    tol = 0.15 if USE_LOG_TIME else STAMP_TOL_S
     for t, cs in meas:
-        want = t + MATCH_LAG_S                      # the frame that CARRIES this measurement
-        i = bisect.bisect_left(pub_t, want)
+        i = bisect.bisect_left(pub_t, t)
         cand = [j for j in (i - 1, i) if 0 <= j < len(pub)]
         if not cand:
             continue
-        j = min(cand, key=lambda k: abs(pub_t[k] - want))
-        if abs(pub_t[j] - want) > 0.15:             # no published frame near this measurement
+        j = min(cand, key=lambda k: abs(pub_t[k] - t))
+        if abs(pub_t[j] - t) > tol:                 # no published frame at this instant
             continue
+        # The node can publish MORE THAN ONE frame at the same stamp -- with the cluster path on it
+        # publishes one per measurement released in a tick, and the cluster's frame carries the
+        # same release stamp as the camera's but not yet the camera's update. Take the LAST frame
+        # at this stamp, which is the one that has seen everything released at that instant.
+        # Reading the first instead cost 8 points of apparent far-band coverage, all of it
+        # attributed to the cluster path, twice.
+        while j + 1 < len(pub) and pub_t[j + 1] == pub_t[j]:
+            j += 1
         tracks = pub[j][1]
         claimed = defaultdict(int)
         for (x, y) in cs:
@@ -173,13 +195,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("recordings", nargs="+")
-    ap.add_argument("--lag", type=float, default=MATCH_LAG_S,
-                    help="seconds to look FORWARD for the frame carrying each measurement. "
-                         "Default is the node's measurement_lag; --lag 0 reproduces the "
-                         "nearest-frame rule every number before 2026-09-23 was measured with")
+    ap.add_argument("--log-time", action="store_true",
+                    help="match on RECORDING time instead of header stamps, which reproduces "
+                         "every orphan number measured before 2026-09-23 -- and their bias")
     args = ap.parse_args()
-    MATCH_LAG_S = args.lag
-    print(f"  matching each measurement to the frame at +{MATCH_LAG_S:.3f} s")
+    USE_LOG_TIME = args.log_time
+    print("  matching on " + ("RECORDING time (the pre-2026-09-23 rule, biased by pipeline "
+                              "latency)" if USE_LOG_TIME else "header stamps"))
     for p in args.recordings:
         main(p)
         print()

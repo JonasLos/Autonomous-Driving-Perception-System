@@ -11,13 +11,22 @@ where the track sits on the measurement->radar segment.
 Anything inside [0, 1] is the filter blending two disagreeing sensors, which is its job.
 Outside it is the filter being somewhere neither sensor put it.
 """
-import sys, math, bisect
+import sys, math, bisect, argparse
 import numpy as np
 from mcap_ros2.reader import read_ros2_messages
 
 MEAS = "/perception/measurements/camera_lidar_markers"
 PUB = "/perception/objects_markers"
 RAD = "/perception/measurements/radar_markers"
+
+# MATCH ON HEADER STAMPS (see live_orphans.py for the full account). The aggregator stamps each
+# published frame with the capture time of the measurement it just released, so a measurement and
+# the frame carrying it share a stamp -- while their RECORDING times differ by a pipeline latency
+# that is not constant and not equal between two arms. Two further rules come with it: sort by
+# stamp ONLY and stably, so frames sharing a stamp keep their publication order, and take the LAST
+# frame at a stamp, which is the one that has seen everything released at that instant.
+# `--log-time` reproduces the numbers recorded before 2026-09-23.
+USE_LOG_TIME = False
 
 EGO_YAW_DEG = 5.35                      # lidar_tc -> ego, for a POINT
 R_SL_YAW_DEG = 5.443                    # lidar_tc -> delphi_esr_radar, from the node's own log
@@ -46,10 +55,17 @@ def centres(msg, kind):
     return out
 
 
+def _stamp(msg, log_time_ns):
+    if USE_LOG_TIME or not msg.markers:
+        return log_time_ns * 1e-9
+    h = msg.markers[0].header.stamp
+    return h.sec + h.nanosec * 1e-9
+
+
 def load(path):
     meas, pub, rad = [], [], []
     for m in read_ros2_messages(path, topics=[MEAS, PUB, RAD]):
-        t = m.log_time_ns * 1e-9
+        t = _stamp(m.ros_msg, m.log_time_ns)
         if m.channel.topic == MEAS:
             c = [tuple(rot(EGO_YAW_DEG) @ np.array(p)) for p in centres(m.ros_msg, 1)]
             meas.append((t, c))
@@ -58,7 +74,7 @@ def load(path):
         else:
             rad.append((t, [tuple(radar_to_ego(p)) for p in centres(m.ros_msg, 2)]))
     for a in (meas, pub, rad):
-        a.sort()
+        a.sort(key=lambda r: r[0])          # stable, by stamp only: ties keep publication order
     return meas, pub, rad
 
 
@@ -68,7 +84,11 @@ def nearest_frame(stamps, arr, t, tol):
     if not cand:
         return None
     j = min(cand, key=lambda k: abs(stamps[k] - t))
-    return arr[j][1] if abs(stamps[j] - t) <= tol else None
+    if abs(stamps[j] - t) > tol:
+        return None
+    while j + 1 < len(arr) and stamps[j + 1] == stamps[j]:
+        j += 1                              # the last frame at this stamp has seen everything
+    return arr[j][1]
 
 
 def main(path):
@@ -79,8 +99,9 @@ def main(path):
 
     fracs, gaps, cam_only, alongs = [], [], [], []
     for t, cs in meas:
-        tracks = nearest_frame(pt, pub, t, 0.15)
-        returns = nearest_frame(rt, rad, t, 0.15)
+        tol = 0.15 if USE_LOG_TIME else 0.05
+        tracks = nearest_frame(pt, pub, t, tol)
+        returns = nearest_frame(rt, rad, t, tol)
         if not tracks:
             continue
         for (mx, my) in cs:
@@ -132,6 +153,16 @@ def main(path):
 
 
 if __name__ == "__main__":
-    for p in sys.argv[1:]:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("recordings", nargs="+")
+    ap.add_argument("--log-time", action="store_true",
+                    help="match on RECORDING time instead of header stamps, reproducing the "
+                         "numbers recorded before 2026-09-23 and their bias")
+    args = ap.parse_args()
+    USE_LOG_TIME = args.log_time
+    print("  matching on " + ("RECORDING time (pre-2026-09-23)" if USE_LOG_TIME
+                              else "header stamps"))
+    for p in args.recordings:
         main(p)
         print()

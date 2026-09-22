@@ -187,12 +187,20 @@ wrong answers:
    markers. Unrotated, the aggregator is charged 6.5 m of cross-offset at 70 m: 84% "orphans".
 3. **Hold radar out** (`--radar-holdout 4`) when scoring the filter against radar, or the state is
    fitted to the very reference it is graded against.
-4. **Match a measurement to the frame that CARRIES it**, not to the nearest frame in time: the
-   aggregator applies it `measurement_lag` = 0.12 s after its stamp. The nearest-frame rule cost
-   5 points of apparent far-band coverage and invented a 0.75 m along-ray offset that was only
-   the track being one lag behind. Corollary: never compare orphan rates between two arms that
-   PUBLISH at different rates unless the match is lag-aware -- the cluster path publishes at
-   49.6 Hz against 39.7 and that alone moved the number.
+4. **Match a measurement to the frame that CARRIES it.** Three parts, and every one of them cost
+   a wrong answer on 2026-09-22/23:
+   (a) match on HEADER STAMPS, not on recording time. The aggregator stamps a published frame
+       with the capture time of the measurement it just released, so the two share a stamp, while
+       their recording times differ by a pipeline latency that is not constant and not the same in
+       two arms (+78 ms with the cluster path, +40 ms without);
+   (b) sort by stamp ONLY, and stably. Several frames share a stamp -- the camera detections and
+       the LiDAR clusters are stamped from the same sweep -- and a plain `sort()` on `(stamp,
+       contents)` then orders those by their CONTENTS, scrambling publication order;
+   (c) take the LAST frame at that stamp; it is the only one that has seen everything released at
+       that instant.
+   Getting (b) wrong alone reads tracks out of existence: it invented an 8-point far-band coverage
+   loss, which was attributed to the cluster path TWICE before the frames were dumped side by side
+   and the missing track was found in a same-stamp frame published 3 ms later.
 
 `ros2 bag record` ignores SIGINT off a terminal — always `timeout -s TERM`, or it runs forever and
 leaves a 0-byte mcap.
@@ -554,16 +562,22 @@ bound costs nothing measurable: median range error 1.10 -> 1.07 m, p90 15.06 -> 
 `scripts/radar_pull.py` splits the published tracks by whether a radar return exists on the same
 bearing, and asks where the track sits on the camera -> radar segment.
 
-    tracks with NO radar return   |along-ray offset| median 0.12 m   <- the filter on its own
-    tracks WITH a radar return    track sits +0.91 m behind the camera measurement
-                                  the radar itself sits +0.32 m behind it
-                                  51% of tracks lie BETWEEN the two sensors
+Re-measured 2026-09-23 on the corrected frame match (see "Three rules", rule 4); the numbers the
+nearest-frame rule gave are in brackets, and the conclusion is the same but cleaner:
 
-So the filter is not adding error of its own: left alone it sits 12 cm from its measurement. The
-offset the user sees is the radar disagreeing with the camera about where the object is, and the
-filter splitting the difference -- which is its job. The tail is the real risk: the p75 of the
-camera-radar gap is +6.5 m, i.e. the return on that bearing is sometimes a DIFFERENT object behind
-the target, and 19% of tracks sit beyond the radar rather than between the two.
+    tracks with NO radar return   |along-ray offset| median 0.03 m  [0.12]  <- filter on its own
+    tracks WITH a radar return    track sits +0.45 m beyond its camera measurement  [+0.91]
+                                  the radar itself sits +1.28 m beyond it          [+0.32]
+                                  72.7% of tracks lie BETWEEN the two sensors      [51%]
+                                  13.9% sit beyond the radar, 13.5% behind the camera [19% / 34%]
+
+So the filter adds no error of its own: left alone it sits 3 cm from its measurement. The offset
+is the radar disagreeing with the camera about where the object is, and the filter splitting the
+difference -- which is its job. Under the old match a third of tracks appeared to sit BEHIND the
+camera measurement, which was never real: that was the track being compared against a frame
+published before its own update landed. The tail is the real risk: the p75 of the camera-radar gap
+is +7.5 m, i.e. the return on that bearing is sometimes a DIFFERENT object behind the target, and
+13.9% of tracks sit beyond the radar rather than between the two.
 
 Pick the radar return by BEARING, never by nearest range: picking the return closest in range to
 the camera measurement forces the measured gap to zero and answers the question with its own
@@ -680,10 +694,10 @@ of the turning arrows. The remaining 0.4% are straight-line measurement jumps, n
   plainly: the estimator never sees any of this. `kalman_update` still defaults to
   `position_only=False`, and the covariance inflation and the significance test both happen in
   `_publish`, after the state is final;
-- live, `scripts/live_orphans.py` over full loops of the shipped build: orphaned 3.4% / 4.0% /
-  4.0%, TRUE DUP 2.3% / 2.2% / 1.8% (7.8% / 9.0% and 2.6% / 2.5% as first reported, under the
-  nearest-frame rule that 2026-09-23 replaced). Three loops of the SAME build, so read the 0.6
-  points between them as this metric's run-to-run spread before reading anything into a
+- live, `scripts/live_orphans.py` over full loops of the shipped build: orphaned 2.3% / 2.7% /
+  5.7%, TRUE DUP 2.0% / 2.4% / 2.6% (stamp-matched; 7.8% / 9.0% as first reported, on the
+  recording-time match that 2026-09-23 replaced). Three loops of the SAME build, and they differ
+  by 3.4 points -- read that as this metric's run-to-run spread before reading anything into a
   comparison.
 
 ## Radar matching in the harnesses, fixed (2026-09-15) -- to-do item 3
@@ -1046,34 +1060,40 @@ last saw the object) stays around a second.
    short-lived one, so the count rose (194 -> 294) and the median lifetime fell (2.07 -> 0.31 s)
    while the truth was the opposite. Count every track, and read count and lifetime together.
 
-**What the path costs the rest of the stack, measured 2026-09-22 and RE-MEASURED 2026-09-23**
+**What the path costs the rest of the stack -- SETTLED 2026-09-23, and the answer is nothing**
 (`scripts/live_orphans.py`, full loops, same build and bag, only the named setting differing):
 
-    arm                        orphaned   TRUE DUP   published   80-200 m band
-    clusters OFF                 5.5%       2.8%      39.7 Hz        8.9%
-    clusters ON  (3 loops)    3.4/4.0/4.0%  1.8-2.3%  49.6 Hz     8.1/8.2/8.2%
-    clusters ON, merging off     8.1%       0.8%      49.6 Hz       10.6%
+    arm                          orphaned        TRUE DUP   published   80-200 m band
+    clusters OFF (2 loops)       3.9 / 4.0%      2.5-2.8%   39.7 Hz     1.6 / 1.7%
+    clusters ON  (3 loops)       2.3 / 2.7 / 5.7%  2.0-2.6% 49.6 Hz     1.4 / 1.7 / 2.4%
+    clusters ON, merge unbounded 7.1%            1.0%       49.6 Hz     4.5%
 
-The path pays for itself: more tracks published (mean 1.45 per frame against 1.23), fewer
-orphans, fewer true duplicates, and no far-band cost.
+The path costs nothing measurable: the far band is the same with it and without, and the spread
+BETWEEN loops of the same build (2.3-5.7%) is now larger than any difference between arms, which
+is the honest headline. (The third arm is `MERGE_MAX_DIST=inf`, which does not disable merging --
+it removes the distance BOUND and merges more, item 11's original behaviour. It is worse
+everywhere, which is item 11 reproduced.)
 
-**The "5-point far-band cost" reported on 2026-09-22 was the METRIC, and this is how it was
-found.** The first suspicion, merging, was tested and refuted: `MERGE_MAX_DIST=inf` left the far
-band where it was (21.6% against 20.5% under the old rule) while making every other band worse.
-`scripts/far_band_identity.py` then classified each far orphan and the answer was not a coverage
-failure at all -- the track that "vanished" was a median 0.1 s old, no merge neighbour anywhere,
-and 69% of the orphans had a track on their bearing within 25 ms, 92% within 100 ms. The cause is
-the match: `live_orphans.py` paired each measurement with the NEAREST published frame, and the
-aggregator applies a measurement `measurement_lag` = 0.12 s after its capture stamp, so the test
-was reading a frame from before the measurement's own update landed. That is invisible for a
-long-lived track and decisive for a short-lived one -- which is why it looked like a far-band
-effect -- and the cluster path made it worse only by publishing MORE often (49.6 Hz against
-39.7), so the nearest frame is more often one that predates the update.
+**Two wrong answers were published here first, and the reason is worth more than the result.**
+On 2026-09-22 this section reported a ~5-point far-band cost and blamed the cluster path; on
+2026-09-23 the first correction blamed the fixed-lag queue and "fixed" it by looking 0.12 s
+forward. Both were the AUDIT, not the stack:
 
-`--lag` now defaults to the node's `measurement_lag`; `--lag 0` reproduces the old rule. Under the
-correct match everything reads better and the far-band gap inverts: nearest track within 1 m goes
-48.8% -> 72.0%, the along-ray offset of the matched track 0.75 -> 0.39 m (the track was simply one
-lag behind), orphans 9.0% -> 4.0%.
+- the first, because `live_orphans.py` matched on recording time, and the pipeline's wall-clock
+  latency is 78 ms with the cluster path against 40 ms without -- so the faster arm was compared
+  against fresher frames;
+- the second, because `sort()` on `(stamp, contents)` scrambles the order of frames that SHARE a
+  stamp, and the camera detections and the clusters are stamped from the same sweep. The frame
+  holding the newborn far track was published 3 ms later but sorted earlier, so the audit read it
+  out of existence.
+
+What settled it was dumping the frames around three individual orphans and reading them (the
+missing track sat in the very next frame, same stamp, 3 ms later in wall time). Two rounds of
+plausible mechanism-hunting -- merging, sticky ids, covariance growth from extra prediction steps,
+all tested, all refuted -- did not. The track statistics said so all along and were not believed
+soon enough: tracks born past 80 m numbered 117 with clusters and 105 without, median life 0.25
+against 0.26 s, existence at death 0.29 against 0.28. Identical populations cannot have different
+coverage; when an audit says they do, suspect the audit.
 
 Watch items for the vehicle: the one track with a cluster-only tail over 10 s, and a p99
 per-message step of 3.3 m with clusters on (1.4 m without) -- a track occasionally jerks onto a
@@ -1275,12 +1295,12 @@ and the bridge default is set to it.
   the node logs it as `rewinds=`. Expect `skipped_no_odom` to track `rewinds` one-for-one (measured
   36 against 37): the first measurement after a rewind finds the odometry buffer empty and is
   skipped while it refills. Any larger ratio is a real odometry problem.
-- 3.4-4.0% of measurements have no published track (range-aware test, `--lag` at the node's
-  measurement_lag), and 1.8-2.3% of published tracks are a second box on a measurement that
-  already has one -- three full loops of the shipped build, 2026-09-22/23, spread 0.6 points.
-  Under the pre-2026-09-23 nearest-frame rule the same loops read 7.8-9.0% and 2.2-2.6%; older
-  numbers in this file (10.5% / 3.0%, 15.7%) are all on that rule and only comparable with each
-  other, and only when both arms published at the same rate.
+- 2.3-5.7% of measurements have no published track (range-aware test, stamp-matched), and
+  2.0-2.6% of published tracks are a second box on a measurement that already has one -- three
+  full loops of the shipped build, 2026-09-22/23. The 3.4-point spread BETWEEN loops of the same
+  build is the number to remember: it is larger than any arm difference measured here.
+  Older numbers in this file (10.5% / 3.0%, 15.7%, and the 7.8-9.0% reported on 2026-09-22) were
+  measured on the recording-time match; `--log-time` reproduces them.
 - Velocity is now WITHHELD unless it is distinguishable from standing still, so a genuinely
   moving object reads static until the evidence accumulates -- on the truck bag 3.1% of
   objects above 5 m/s. The planner bridge zeroes velocity for exactly those, which is the
