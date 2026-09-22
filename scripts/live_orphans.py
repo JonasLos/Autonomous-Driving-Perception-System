@@ -8,7 +8,7 @@ Every measurement is matched to the NEAREST published track at the closest publi
 so "orphan" here means no track within 3 m, and the distance histogram separates a dropped
 object (no track anywhere) from a displaced one (a track 3-8 m away).
 """
-import sys, math, bisect
+import sys, math, bisect, argparse
 from collections import defaultdict
 import numpy as np
 from mcap_ros2.reader import read_ros2_messages
@@ -29,6 +29,20 @@ EGO_YAW_DEG = 5.35
 # sits on its BEARING (within 3 m across the ray) at any plausible range.
 RANGE_TRUST_MAX_M = 80.0
 FAR_ALONG_FRAC = 0.35
+
+# A measurement is applied by the aggregator's fixed-lag queue `measurement_lag` seconds after its
+# capture stamp, so the published frame that CARRIES it is that much later. Matching a measurement
+# to the nearest frame in time therefore reads a frame from before its own update landed. That is
+# invisible for a long-lived track (it is in every frame either way) and dominant for a short-lived
+# one, which is why it showed up as a far-band effect: at >80 m, 69% of "orphans" have their track
+# on the bearing within 25 ms, and 92% within 100 ms.
+#
+# The default is the node's own `measurement_lag`, because that is the frame which answers the
+# question this script asks. Pass `--lag 0` to reproduce any orphan number recorded before
+# 2026-09-23 -- all of them were measured with the nearest-frame rule, and they are only
+# comparable with each other when both arms published at the same RATE. They did not: the cluster
+# path publishes at 49.6 Hz against 39.7, which is what made it look like a far-band regression.
+MATCH_LAG_S = 0.12
 
 
 def centres(msg):
@@ -69,12 +83,13 @@ def main(path):
     dists, bands, shares, dups, tdup = [], defaultdict(list), [], [], []
     along, cross = [], []
     for t, cs in meas:
-        i = bisect.bisect_left(pub_t, t)
+        want = t + MATCH_LAG_S                      # the frame that CARRIES this measurement
+        i = bisect.bisect_left(pub_t, want)
         cand = [j for j in (i - 1, i) if 0 <= j < len(pub)]
         if not cand:
             continue
-        j = min(cand, key=lambda k: abs(pub_t[k] - t))
-        if abs(pub_t[j] - t) > 0.15:                # no published frame near this measurement
+        j = min(cand, key=lambda k: abs(pub_t[k] - want))
+        if abs(pub_t[j] - want) > 0.15:             # no published frame near this measurement
             continue
         tracks = pub[j][1]
         claimed = defaultdict(int)
@@ -155,6 +170,16 @@ def band(r):
 
 
 if __name__ == "__main__":
-    for p in sys.argv[1:]:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("recordings", nargs="+")
+    ap.add_argument("--lag", type=float, default=MATCH_LAG_S,
+                    help="seconds to look FORWARD for the frame carrying each measurement. "
+                         "Default is the node's measurement_lag; --lag 0 reproduces the "
+                         "nearest-frame rule every number before 2026-09-23 was measured with")
+    args = ap.parse_args()
+    MATCH_LAG_S = args.lag
+    print(f"  matching each measurement to the frame at +{MATCH_LAG_S:.3f} s")
+    for p in args.recordings:
         main(p)
         print()

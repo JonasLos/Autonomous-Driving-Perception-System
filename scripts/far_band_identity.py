@@ -12,7 +12,18 @@ of three classes:
              report says so
   DISPLACED  a track on the bearing is still published but has moved off it
 
-Run the same drive with `MERGE_MAX_DIST=inf` to test the merge suspicion directly.
+and separately reports FLICKER: an orphan that DOES have a track on its bearing in some published
+frame within +-0.25 s, just not in the one frame the test matched it to. Those are a property of
+the publish cadence, not of coverage -- the aggregator publishes on every input, so a frame
+triggered by another sensor can land between the measurement and the track being born from it.
+Read the orphan rate net of FLICKER before comparing two arms that publish at different rates.
+
+WHAT THIS FOUND (2026-09-23), kept so nobody re-runs it: merging was NOT the cause -- an arm with
+`MERGE_MAX_DIST=inf` left the far band unchanged and made every other band worse, and not one of
+the dead tracks had a merge neighbour in its last frame. The dead tracks were a median 0.1 s old,
+and FLICKER was 100% of them: the object was tracked, but `live_orphans.py` was matching each
+measurement to the nearest published frame rather than to the frame carrying its update, which
+lands `measurement_lag` later. `live_orphans.py --lag` now defaults to that lag.
 
     python3 scripts/far_band_identity.py RECORDING_DIR/*.mcap
 """
@@ -32,6 +43,7 @@ MEAS = "/perception/measurements/camera_lidar_markers"
 OBJECTS = "/perception/objects"
 LOOKBACK_S = 3.0
 MERGE_DIST = 2.5
+FLICKER_S = 0.25
 
 
 def load(path):
@@ -60,6 +72,7 @@ def on_bearing(x, y, qx, qy, r):
 
 
 def main(path):
+    global FLICKER_S
     meas, objs = load(path)
     obj_t = [t for t, _ in objs]
     counts = defaultdict(int)
@@ -85,7 +98,19 @@ def main(path):
                 counts["covered"] += 1
                 continue
 
-            # It is orphaned. Walk back and see whether a track was ever on this bearing.
+            # Orphaned. First: is this the matched FRAME's fault? The aggregator publishes on
+            # every input, so a frame from another sensor can fall between the measurement and
+            # the track born from it.
+            flicker = False
+            for jj in range(len(objs)):
+                if abs(obj_t[jj] - t) > FLICKER_S:
+                    continue
+                if any(on_bearing(x, y, q[1], q[2], r) for q in objs[jj][1]):
+                    flicker = True
+                    break
+            counts["flicker"] += flicker
+
+            # Walk back and see whether a track was ever on this bearing.
             was, last_frame = None, None
             for jj in range(j - 1, -1, -1):
                 if obj_t[j] - obj_t[jj] > LOOKBACK_S:
@@ -113,8 +138,16 @@ def main(path):
           f"(a neighbour within {MERGE_DIST} m in its last frame: {merge_suspect:3d}"
           + (f", age median {np.median(ages):4.1f} s" if ages else "") + ")"
           f" | DISPLACED {counts['DISPLACED']:3d}")
+    f = counts["flicker"]
+    print(f"{'':22s}         of those, FLICKER {f:3d}: a track IS on the bearing within "
+          f"+-{FLICKER_S:.2f} s, just not in the matched frame -> "
+          f"{100*(orph-f)/max(n,1):4.1f}% net of the cadence")
 
 
 if __name__ == "__main__":
-    for p in sys.argv[1:]:
+    args = [a for a in sys.argv[1:] if not a.startswith("--flicker-s=")]
+    for a in sys.argv[1:]:
+        if a.startswith("--flicker-s="):
+            FLICKER_S = float(a.split("=", 1)[1])          # noqa: F841 - rebinds the module global
+    for p in args:
         main(p)
