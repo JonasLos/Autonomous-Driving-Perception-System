@@ -46,12 +46,35 @@ def summarise(label, rows):
           + f"  {np.median(sp):6.2f} {corr:+7.3f}")
 
 
+def evaluate_rule(rows, k, chi2, label, arrow_speed=1.0):
+    """Share of would-be arrows that survive `velocity_is_significant`, by yaw-rate bin."""
+    from object_fusion.tracker import turn_velocity_sigma, velocity_is_significant
+    sp, omega, rng, trace = rows[:, 0], rows[:, 3], rows[:, 4], rows[:, 5]
+    drawn = sp > arrow_speed
+    keep = np.zeros(len(rows), dtype=bool)
+    for i in np.flatnonzero(drawn):
+        # isotropic stand-in for P_vv: the harness logs its trace, which is what the published
+        # velocity_covariance carries anyway
+        P = np.eye(2) * (trace[i] / 2.0)
+        keep[i] = velocity_is_significant([sp[i], 0.0], P,
+                                          turn_velocity_sigma(omega[i], rng[i], k), chi2)
+    cells = []
+    for lo, hi, _ in BINS:
+        m = drawn & (omega >= lo) & (omega < hi)
+        cells.append(f"{100 * np.mean(keep[m]):5.1f}%" if m.sum() > 20 else "    -  ")
+    print(f"  {label:46s} {int(drawn.sum()):6d} " + " ".join(cells)
+          + f"  {100 * np.mean(keep[drawn]):6.1f}%")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--replay", default="/home/avalocal/fused_replay_selfcal_2026-09-08")
     ap.add_argument("--measurements",
                     default=os.path.expanduser("~/fusion_data/measurements/rows_gate2.pkl"))
+    ap.add_argument("--rule", action="store_true",
+                    help="instead of the cause sweep, evaluate velocity_is_significant: what "
+                         "share of the arrows each (k, chi2) still draws")
     args = ap.parse_args()
 
     fused, radar, odom, R_sl, t_sl = oa.load(args.replay)
@@ -71,6 +94,18 @@ def main():
     # turning, mostly cross-ray). Widen the cross-ray sigma by k * omega * r * frame period.
     arms += [(f"turn-aware cross-ray sigma, k={k:g}", dict(turn_sigma_k=k))
              for k in (0.5, 1.0, 2.0)]
+
+    if args.rule:
+        d = oa.run(fused, radar, odom, R_sl, t_sl, **base)
+        rows = np.concatenate([np.asarray(x) for x in d["speed"].values()])
+        print(f"\n  arrows KEPT by the rule, by ego yaw rate -- on a static drive every one is "
+              f"false, so lower is better everywhere\n")
+        print(f"  {'rule':46s} {'arrows':>6s} " + " ".join(f"{lo:.2f}-{hi:.2f}" for lo, hi, _ in BINS)
+              + f"  {'all':>6s}")
+        for k in (0.0, 0.5, 1.0, 2.0):
+            for chi2 in (9.21,):
+                evaluate_rule(rows, k, chi2, f"significance, turn k={k:g}, chi2={chi2:g}")
+        return
 
     print(f"\n  every object on this drive is STATIC: any speed is error, any arrow is false\n")
     print(f"  {'arm':46s} {'n':>6s} " + " ".join(f"{lo:.2f}-{hi:.2f}" for lo, hi, _ in BINS)

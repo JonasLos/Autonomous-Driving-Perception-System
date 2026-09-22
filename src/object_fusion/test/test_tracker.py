@@ -286,3 +286,57 @@ def test_the_forced_update_inflates_covariance_so_it_can_reconverge():
     x_esc, _, _, _, _ = gated_update(x, P, y, H, R, gate_chi2=9.21,
                                      consecutive_rejects=MAX_CONSECUTIVE_REJECTS)
     assert x_esc[0] > x_no[0], "the escape must pull harder than a plain ungated update"
+
+
+# ------------------------------------------------- velocity honesty (the false arrows)
+def test_velocity_is_not_significant_while_the_bearing_sweeps():
+    """The measured failure: on a static drive 34-41% of objects carried a velocity arrow while
+    turning, against 4-6% driving straight, because an object's bearing sweeps and the LiDAR
+    returns inside its 2D box change. The filter cannot see that, so it is added at publish."""
+    from object_fusion.tracker import turn_velocity_sigma, velocity_is_significant
+    v = np.array([2.0, 0.0])                       # two metres per second of "motion"
+    P_vv = np.eye(2) * 0.25                        # the filter is confident (sigma 0.5 m/s)
+    assert velocity_is_significant(v, P_vv), "driving straight, 4 sigma reads as real"
+    extra = turn_velocity_sigma(omega=0.2, range_m=30.0)      # 6 m/s of bearing-sweep uncertainty
+    assert not velocity_is_significant(v, P_vv, extra), "while turning, it is not distinguishable"
+
+
+def test_a_genuinely_fast_object_survives_the_turn_term():
+    """A truck at 11 m/s must keep its velocity even in a turn: 95.2% of real motion on
+    adps_2026-08-25_11-58-32 survives this rule."""
+    from object_fusion.tracker import turn_velocity_sigma, velocity_is_significant
+    extra = turn_velocity_sigma(omega=0.1, range_m=20.0)
+    assert velocity_is_significant(np.array([11.0, 0.0]), np.eye(2) * 0.25, extra)
+
+
+def test_turn_sigma_scales_with_yaw_rate_and_range():
+    from object_fusion.tracker import turn_velocity_sigma
+    assert turn_velocity_sigma(0.0, 50.0) == 0.0
+    assert turn_velocity_sigma(0.2, 30.0) == pytest.approx(6.0)
+    assert turn_velocity_sigma(0.2, 60.0) == 2 * turn_velocity_sigma(0.2, 30.0)
+
+
+def test_a_position_only_update_moves_the_position_and_leaves_velocity_alone():
+    """What a 360-degree cluster is allowed to do: a cluster sits at the footprint centroid while
+    the camera measures the near face, so the difference between consecutive clusters is an
+    offset, not motion."""
+    from object_fusion.tracker import kalman_update
+    x = np.array([30.0, 0.0, 0.0, 0.0])
+    # position and velocity MUST be correlated or a position update cannot move velocity at all,
+    # which is exactly what prediction produces: P[0,2] grows as dt * P[2,2].
+    P = np.array([[1.0, 0.0, 0.5, 0.0],
+                  [0.0, 1.0, 0.0, 0.5],
+                  [0.5, 0.0, 4.0, 0.0],
+                  [0.0, 0.5, 0.0, 4.0]])
+    H = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+    y = np.array([0.8, 0.0])                        # the cluster sits 0.8 m beyond the track
+    R = np.eye(2) * 0.25
+    x_free, P_free, _, _ = kalman_update(x, P, y, H, R)
+    x_pos, P_pos, _, applied = kalman_update(x, P, y, H, R, position_only=True)
+    assert applied
+    assert x_pos[0] > x[0], "the position still moves toward the cluster"
+    assert x_pos[0] == pytest.approx(x_free[0])
+    assert np.allclose(x_pos[2:], 0.0), "but no velocity is invented"
+    assert not np.allclose(x_free[2:], 0.0), "the premise: a free update does invent some"
+    assert np.allclose(P_pos[2:, 2:], P[2:, 2:]), "and the velocity covariance is untouched"
+    assert np.allclose(P_pos, P_pos.T)

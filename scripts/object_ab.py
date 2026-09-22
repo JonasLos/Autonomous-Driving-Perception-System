@@ -491,7 +491,8 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                     cos = float(v @ v_lidar / (sp * ego_sp)) if sp > 1e-3 and ego_sp > 1e-3 else 0.0
                     speed_log.setdefault("all", []).append(
                         (sp, ego_sp, cos, abs(float(twist_now.omega)),
-                         float(np.hypot(tr.x[0], tr.x[1]))))
+                         float(np.hypot(tr.x[0], tr.x[1])),
+                         float(tr.P[2, 2] + tr.P[3, 3])))     # the filter's own velocity variance
         store.prune(t)
         if merge:
             store.merge_pass(chi2=merge_chi2, max_merge_dist=merge_max_dist,

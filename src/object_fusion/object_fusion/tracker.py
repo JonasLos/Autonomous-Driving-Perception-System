@@ -47,6 +47,7 @@ __all__ = [
     "process_noise", "predict", "kalman_update", "wrap_deg",
     "radar_h_and_H", "lidar_measurement", "init_from_radar",
     "compensated_range_rate", "camera_radar_range_cap",
+    "turn_velocity_sigma", "velocity_is_significant", "TURN_VELOCITY_K",
 ]
 
 # --------------------------------------------------------------------------- radar noise
@@ -323,7 +324,7 @@ def predict(x, P, dt, dpsi, d_xy, Q):
     return x_out, 0.5 * (P_out + P_out.T)
 
 
-def kalman_update(x, P, y, H, R, gate_chi2=None):
+def kalman_update(x, P, y, H, R, gate_chi2=None, position_only=False):
     """Joseph-form update. Returns ``(x, P, nis, applied)``.
 
     ``y`` is the innovation ``z - h(x)``, already angle-wrapped by the caller where relevant.
@@ -335,6 +336,13 @@ def kalman_update(x, P, y, H, R, gate_chi2=None):
     ``gate_chi2`` rejects rather than clamps: a measurement outside the gate is not applied at
     all and ``applied`` comes back False, so the caller can count it. Clamping a wild
     measurement into the gate would let a persistent bias walk the state.
+
+    ``position_only`` zeroes the VELOCITY rows of the gain, so the measurement moves the position
+    and leaves the velocity and its covariance untouched. That is for a sensor whose offset from
+    the object's true centre is unknown and changes -- a 360-degree LiDAR cluster sits at the
+    footprint centroid while the camera measures the near face, and the association can switch
+    between neighbouring clusters, so the difference between consecutive clusters is an offset,
+    not motion. Joseph form keeps the result symmetric with the masked gain.
     """
     x = np.asarray(x, dtype=np.float64).reshape(-1)
     P = np.asarray(P, dtype=np.float64)
@@ -348,6 +356,9 @@ def kalman_update(x, P, y, H, R, gate_chi2=None):
     if gate_chi2 is not None and nis > float(gate_chi2):
         return x, P, nis, False
     K = P @ H.T @ Sinv
+    if position_only:
+        K = K.copy()
+        K[2:, :] = 0.0
     x_out = x + K @ y
     I_KH = np.eye(x.size) - K @ H
     P_out = I_KH @ P @ I_KH.T + K @ R @ K.T
@@ -512,6 +523,38 @@ def camera_radar_range_cap(camera_range_m, k=3.0, floor_m=3.0):
     if r >= RANGE_TRUST_MAX_M:
         return None
     return max(float(floor_m), float(k) * float(sigma_along(r)))
+
+
+#: Velocity uncertainty a sweeping bearing adds, per rad/s of yaw rate per metre of range.
+#: While the vehicle yaws, an object's bearing sweeps, the LiDAR returns inside its 2D box change
+#: between frames, and the measured position moves ACROSS the ray by about r * omega * frame
+#: period -- so the apparent velocity error is about r * omega. Measured on the static reference
+#: drive: between-frame jitter 0.77 m/s driving straight against 2.99 m/s turning, mostly
+#: cross-ray. The filter cannot see this (the measurement is self-consistent frame to frame), so
+#: it is added where the velocity is PUBLISHED, not inside the estimator.
+TURN_VELOCITY_K = 1.0
+
+
+def turn_velocity_sigma(omega, range_m, k=TURN_VELOCITY_K):
+    """Extra velocity sigma [m/s] from a sweeping bearing: k * |omega| * range."""
+    return float(k) * abs(float(omega)) * float(range_m)
+
+
+def velocity_is_significant(v_xy, P_vv, extra_sigma=0.0, chi2=CAMERA_GATE_CHI2):
+    """Is this velocity distinguishable from standing still?
+
+    Mahalanobis distance of the velocity from zero against its own covariance, widened by
+    ``extra_sigma`` (see :func:`turn_velocity_sigma`). This is what ``velocity_valid`` should
+    mean: not "the filter is running" but "there is evidence this object is moving". On the
+    static reference drive every non-zero velocity is an error, and most of them arrive while
+    turning, exactly when ``extra_sigma`` is large.
+    """
+    v = np.asarray(v_xy, dtype=np.float64).reshape(2)
+    S = np.asarray(P_vv, dtype=np.float64).reshape(2, 2) + np.eye(2) * float(extra_sigma) ** 2
+    try:
+        return float(v @ np.linalg.solve(S, v)) > float(chi2)
+    except np.linalg.LinAlgError:
+        return False
 
 
 def compensated_range_rate(range_rate, azimuth_deg, v_ego_s):

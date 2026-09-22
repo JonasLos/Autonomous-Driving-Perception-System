@@ -49,7 +49,7 @@ from object_fusion.measurement_queue import DEFAULT_LAG_S, Measurement, Measurem
 from object_fusion.tracker import (
     CAMERA_GATE_CHI2, RADAR_GATE_CHI2, gated_update, compensated_range_rate, init_from_radar, kalman_update,
     lidar_measurement, predict, process_noise, radar_R, radar_h_and_H, range_is_trustworthy,
-    wrap_deg,
+    turn_velocity_sigma, velocity_is_significant, wrap_deg,
 )
 from object_fusion.detection_geometry import ExtentFilter
 from object_fusion.track_store import (
@@ -402,7 +402,8 @@ class ObjectAggregatorNode(Node):
             y, H, R = lidar_measurement(tr.x[:2], cl[di],
                                         sigma_a=CLUSTER_SIGMA_M, sigma_c=CLUSTER_SIGMA_M)
             tr.x, tr.P, _, applied = kalman_update(tr.x, tr.P, y, H, R,
-                                                   gate_chi2=CAMERA_GATE_CHI2)
+                                                   gate_chi2=CAMERA_GATE_CHI2,
+                                                   position_only=True)
             if applied:
                 self._cluster_updates += 1
                 tr.hits["lidar"] += 1
@@ -594,6 +595,8 @@ class ObjectAggregatorNode(Node):
 
     # ------------------------------------------------------------------------ output
     def _publish(self, header, t):
+        tw_now = self._twist.at(t)
+        omega_now = abs(float(tw_now.omega)) if tw_now is not None else 0.0
         out = FusedObjectArray()
         out.header.stamp = header.stamp
         out.header.frame_id = self._ego_frame
@@ -627,8 +630,18 @@ class ObjectAggregatorNode(Node):
                             if filtered else [NAN] * 16)
             o.velocity.x, o.velocity.y = ((float(vxy[0]), float(vxy[1])) if filtered
                                           else (0.0, 0.0))
-            o.velocity_covariance = [float(c) for c in np.asarray(tr.P)[2:, 2:].ravel()]
-            o.velocity_valid = filtered and self._twist.newest() is not None
+            # Velocity uncertainty the filter cannot see: while the vehicle yaws, an object's
+            # bearing sweeps and the LiDAR returns inside its 2D box change, so the measured
+            # position moves across the ray and the filter reads it as motion. Measured on a
+            # static drive, between-frame jitter goes 0.77 -> 2.99 m/s from straight to turning.
+            # Published covariance carries it, and velocity_valid means "distinguishable from
+            # standing still", not "the filter is running".
+            extra = turn_velocity_sigma(omega_now, float(np.hypot(tr.x[0], tr.x[1])))
+            P_vv = np.asarray(tr.P)[2:, 2:] + np.eye(2) * extra ** 2
+            o.velocity_covariance = [float(c) for c in P_vv.ravel()]
+            o.velocity_valid = bool(
+                filtered and self._twist.newest() is not None
+                and velocity_is_significant(tr.x[2:], np.asarray(tr.P)[2:, 2:], extra))
             o.existence_probability = float(tr.existence)
             o.track_status = tr.published_status()
             o.missed_updates = tr.missed_updates(t)

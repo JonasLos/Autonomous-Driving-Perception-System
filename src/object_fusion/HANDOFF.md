@@ -609,18 +609,33 @@ production filter over the same measurements with one thing changed):
    lever and is non-monotonic: k=0.5 gives 22.5% but k=1 gives 40.3%. Wider R also widens the
    chi-square gate, so outliers that were rejected get admitted and move the state further.
 
-**Where this leaves it.** The measurement genuinely cannot support a velocity while the bearing is
-sweeping, so the fix is to stop claiming one:
-- make `velocity_valid` mean "supported" instead of "filtered mode and odometry exists"
-  (`object_aggregator_node.py:631`). Measured trade on today's data -- static drive (all false)
-  against the truck bag (real motion above 5 m/s): trace < 4 keeps 97.5% of real motion but 54.5%
-  of false arrows; trace < 2 AND camera/radar within 0.3 s keeps 59.3% / 27.7%. Neither is good
-  enough yet, which is why the covariance has to reflect the turn first;
-- inflate the VELOCITY process noise with yaw rate, so the filter's own velocity covariance grows
-  while turning, and then gate `velocity_valid` on that covariance. Not yet measured;
-- cluster updates should not inject velocity at all (position-only update in
-  `_apply_lidar_clusters`): a cluster centroid sits at the footprint centre while the camera
-  measures the near face, and the association can switch between neighbouring clusters.
+**FIXED 2026-09-22, live by default.** The measurement cannot support a velocity while the bearing
+sweeps, so the stack no longer claims one. Nothing in the ESTIMATOR changed -- the uncertainty the
+filter cannot see is added where velocity is PUBLISHED:
+
+- `tracker.turn_velocity_sigma(omega, range)` = `|omega| * range` (k = 1.0), the velocity error a
+  sweeping bearing produces, added to the published `velocity_covariance`;
+- `tracker.velocity_is_significant(v, P_vv, extra)` is a chi-square test of the velocity against
+  ZERO, and `velocity_valid` now means "distinguishable from standing still" rather than "the
+  filter is running and odometry exists";
+- cluster updates are position-only (`kalman_update(..., position_only=True)`, which zeroes the
+  velocity rows of the gain): a cluster sits at the footprint centroid while the camera measures
+  the near face, so the difference between consecutive clusters is an offset, not motion.
+
+Measured live over a full loop of the static drive, where every arrow is false:
+
+    arrows drawn, by ego yaw rate      straight  0.02-0.05  0.05-0.10   turning    ALL
+    before, clusters off                 6.0%      14.7%      33.9%      40.6%    13.1%
+    before, clusters on                  4.0%       9.7%      28.3%      33.9%    10.1%
+    AFTER                                0.4%       1.3%       0.0%       0.0%     0.4%
+
+and the two things that had to survive did:
+
+    real motion (truck bag, objects > 5 m/s, velocity_valid)   100% -> 96.9%
+    cluster sustain (tracks past 90 deg, median life)          6 @ 9.75 s -> 5 @ 10.1 s
+
+k = 1.0 was chosen by measurement, not taste: k = 2 drops real motion to 58%, k = 0.5 leaves 22.5%
+of the turning arrows. The remaining 0.4% are straight-line measurement jumps, not turning.
 
 ## Radar matching in the harnesses, fixed (2026-09-15) -- to-do item 3
 
