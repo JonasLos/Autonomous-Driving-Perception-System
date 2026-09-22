@@ -164,8 +164,11 @@ def should_merge(a, b, *, chi2=9.21, max_merge_dist=2.5, max_range_gap=20.0,
     Measured over a full replay loop of selfcal_loc_2026-09-08, live, `scripts/live_orphans.py`:
 
         arm                          orphaned   two boxes on one measurement
-        unbounded (as first shipped)   15.7%              1.3%
-        bounded at 2.5 m               10.5%              3.0%
+        unbounded (as first shipped)   10.3%              1.2%
+        bounded at 2.5 m                4.1%              3.0%
+
+    (Re-measured 2026-09-23; the same recordings read 15.7% and 10.5% before the audit's frame
+    matching was fixed. The comparison is unaffected, both arms published at the same rate.)
     """
     xa = np.asarray(a.x, dtype=np.float64)
     xb = np.asarray(b.x, dtype=np.float64)

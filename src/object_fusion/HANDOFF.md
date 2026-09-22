@@ -530,9 +530,13 @@ restores the old behaviour). The two cases it has to separate are a duplicate (u
 usually well under) and the next cone up the line (5 m and more on this drive).
 
     full loop, live            orphaned   two boxes on ONE measurement
-    unbounded (as shipped)       15.7%              1.3%
-    bounded at 2.5 m             10.5%              3.0%     <- ADOPTED
-    bounded + assoc 6 -> 4 m      9.0%              5.6%     <- measured, REJECTED
+    unbounded (as shipped)       10.3%              1.2%
+    bounded at 2.5 m              4.1%              3.0%     <- ADOPTED
+    bounded + assoc 6 -> 4 m      3.0%              4.9%     <- measured, REJECTED
+
+(Re-measured 2026-09-23 on the corrected frame match, rule 4; the same three recordings read
+15.7 / 10.5 / 9.0% and 1.3 / 3.0 / 5.6% on the old one. All three arms published at the same rate,
+so the DECISION never depended on the defect -- only the absolute numbers did.)
 
 Read the third row before repeating it: narrowing `assoc_max_dist` buys 1.5 more points of objects
 and pays 2.6 points of duplicate boxes, because a detection that cannot reach its coasting track
