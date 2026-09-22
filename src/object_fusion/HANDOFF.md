@@ -113,6 +113,7 @@ scripts/filter_scale_ab.py    item 2: does scaling the camera sigma change held-
 scripts/coast_budget_ab.py    item 10: re-acquisition gaps per sensor vs the coast budgets
 scripts/coast_sweep_ab.py     item 10: what a longer coast budget costs (orphans, held-out error)
 scripts/cluster_sustain_ab.py item 7: cluster path on vs off -- lifetime, rear survival, ghosts
+scripts/occlusion_ab.py       does a box with several depth clusters range the occluder?
 scripts/far_orphan_split.py   why a >80 m measurement has no track: none, off-bearing, or
                               on the bearing but out of range
 scripts/publish_rate.py       publish cadence and tracks per published frame, per recording
@@ -923,8 +924,38 @@ withholds one frame, but the occlusion persists, so the second disagreement is a
 occlusion is why the radar gate costs more there (item 12). An occlusion flag from the detector
 (several depth clusters in one box) would serve both.
 
+**The occlusion flag, started 2026-09-23 and BLOCKED on the drive it needs.** The idea is above:
+several depth clusters in one box means the nearest-cluster rule may be ranging an occluder.
+`neighbour_ab.py --dump` now records what each box contained (`n_clusters`, `fg_frac`, `bg_gap`,
+`bg_frac`, and every cluster's depth, size and position), and `scripts/occlusion_ab.py` scores a
+candidate flag against radar range. What the reachable drive (11-50-45) says:
+
+- **"more than one cluster" is not a flag.** `nearest_depth_cluster` cuts at the first gap wider
+  than 5 cm, so essentially every box holds several clusters and the kept one holds a median 3%
+  of the box's points (the harness's `sliver` flag fires on 87% of detections here).
+- **this drive's error is not a cluster-choice problem at all.** It is class-correlated -- cars
+  -7.4 m, trucks -1.4 m, buses -0.6 m against radar -- and it survives EVERY choice rule:
+  nearest -7.4, track-consistent (`Dprev`) -6.3, held (`Dhold`) -6.2, and the median of ALL the
+  box's points -5.4 m for cars. A rule that ignores the clustering entirely cannot be blamed on
+  the clustering.
+- **and its radar reference is crowded**, which is the likely explanation of the -3 to -6 m
+  recorded above for this drive: one distinct radar return serves 1.33 detections (p90 2.0)
+  against 1.00 (p90 1.4) on selfcal, with double the bearing offset (0.87 deg against 0.41).
+  Treat 11-50-45 range numbers as suspect until that is settled.
+- picking "whichever cluster matches radar best" looks spectacular (72.7% of car detections have
+  one better by >2 m, median gain 8.0 m) and is worthless: that cluster holds 2% of the box, and
+  with the box cut into dozens of slivers some cluster always lands near the answer. It is the
+  same trap as matching radar by nearest range instead of bearing (item 3).
+
+**To finish this, the car-park drive `adps_2026-08-25_12-02-23` must be reachable** -- that is
+where the effect was characterised (100% of its remaining spikes along the ray, 11% of cars at
+40-60 m and 30% past 60 m). Its dump is in `~/fusion_data/measurements/rows_adps120223.pkl` but a
+dump carries no point cloud, so the flag cannot be computed from it. The bag lives on the external
+disk `/media/avalocal/1.0 TB Disk/perception_eval_debug/`, which is not mounted.
+
 Remaining: a drive with many CURVES and cones (levelling still rests on 232 + 15 curve sweeps),
-and the -3 to -6 m at 25-60 m on 11-50-45.
+and the -3 to -6 m at 25-60 m on 11-50-45 (see the crowding note just above -- suspect the
+reference before the rule).
 OLD PLAN:
 Why: everything is scored on selfcal 09-08 (+ 09-03 for levelling). 09-03 has only 15 curve sweeps;
 the user's adps bags are unscored.

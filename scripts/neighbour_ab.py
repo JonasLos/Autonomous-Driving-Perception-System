@@ -300,6 +300,9 @@ def run(args):
 
             for (bu, bv, bw, bh, oid, pubx, puby) in dets:
                 row = {a: None for a in PAIRED_ARMS + DROP_ARMS + list(sweep)}
+                row.update(n_clusters=0, fg_frac=None, bg_gap=None, bg_frac=None,
+                           bg_frac_all=None, cluster_depths=None, cluster_sizes=None,
+                           cluster_xy=None)
                 row.update(t=key, id=oid, multi=False, sliver=False, fallback=False,
                            box=(bu, bv, bw, bh), pub=(pubx, puby),
                            cls=classes.get((key, oid, round(bu, 3)), "?"))
@@ -339,6 +342,26 @@ def run(args):
                     cluster_arms(row, Q, qu, qv, bu, bv, oid, last_out)
 
                     groups = depth_clusters(Q[:, 0])
+                    # Occlusion evidence (item 4 / item 12 remainder). The production rule keeps
+                    # the NEAREST depth cluster, which is the right answer when the box holds one
+                    # object and the wrong one when a nearer object overlaps it in image space.
+                    # These record what the box actually contained, so the flag can be designed
+                    # from data instead of guessed: how many clusters, how much of the box the
+                    # kept one holds, and how far behind the next one sits.
+                    row["n_clusters"] = len(groups)
+                    # Every cluster's depth and support, so the question "is the object in a
+                    # LATER cluster?" can be asked of the data instead of assumed.
+                    row["cluster_depths"] = [float(np.median(Q[g, 0])) for g in groups]
+                    row["cluster_sizes"] = [int(g.size) for g in groups]
+                    row["cluster_xy"] = [(float(np.median(Q[g, 0])), float(np.median(Q[g, 1])))
+                                         for g in groups]
+                    row["fg_frac"] = float(groups[0].size) / float(Q.shape[0])
+                    if len(groups) > 1:
+                        d0 = float(np.median(Q[groups[0], 0]))
+                        d1 = float(np.median(Q[groups[1], 0]))
+                        row["bg_gap"] = d1 - d0
+                        row["bg_frac"] = float(groups[1].size) / float(Q.shape[0])
+                        row["bg_frac_all"] = 1.0 - row["fg_frac"]
                     pick = groups[0]
                     pred = predict(dprev_hist.get(oid), key) if oid else None
                     if pred is not None:
