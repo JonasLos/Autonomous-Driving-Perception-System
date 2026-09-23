@@ -20,7 +20,7 @@
 - **The 80+ m band and radar-only track birth are blocked on data, not ideas.** Every bag available is nearly empty past 80 m (6.8% of detections) and has almost no moving traffic, so neither question can be settled without a drive that has both.
 - **Near-field levelling rests on 232 + 15 curve sweeps** from two drives; a curve-rich and cone-rich drive would settle it.
 - **Where the LiDAR sits relative to the odometry output point is unmeasured.** The receiver reports no lever arms, so the INS position is the IMU centre and the vendor geometry gives (0.670, −0.097) m — adopted in the planner bridge on 2026-09-23 — but neither that nor the 2.393 m it replaced has been measured on this vehicle, and the drives available cannot measure it (condition number 39752).
-- **Two drives cannot referee range**: on `adps_2026-08-25_11-50-45` and `_12-02-23` one distinct radar return is matched to 1.3 detections, so a range error measured there is partly about the matching.
+- **The radar match was checked for double-counting and holds.** On the two vehicle-dense drives one radar return can be scored against ~1.3 detections; re-scoring with each return allowed only its nearest claimant moves no drive's median by more than 0.13 m. (An earlier version of this entry said those drives could not referee range. They can.) What remains unexplained is a real class-specific bias on `adps_2026-08-25_11-50-45`: cars read ~7 m short of radar at every range, under every point-selection rule tried.
 - Everything above was measured on replay. The isolation check, the cluster path's ghost risk (one track kept publishing for over 10 s after the camera last saw it) and the timing numbers all want repeating on the vehicle.
 
 ## 2026-09-09

@@ -80,13 +80,23 @@ line shows `rewinds=` and per-sensor `dt<=0 n/N med +Xms` -- if `dt<=0` is not ~
 not predicting, which is the failure that looked like "the boxes update slowly". In RViz, a white
 arrow on a track is one second of its velocity; in `passthrough` there are none by design.
 
-**Outstanding for the user** (nothing is blocked on me):
-1. **Item 13, a decision**: adopt the vendor IMU->LiDAR arm (0.67, -0.10) m or keep the 2.39 m in
-   use. The drive cannot measure it (condition number 39 752); see item 13.
-2. **The far-band cost of the cluster path**, measured 2026-09-22 and unexplained: 80-200 m reads
-   ~5 points more orphaned with clusters on. Next check named under item 7.
-3. Items 6, 8 and the vehicle checks are **blocked on new drives** with real traffic, far-field
-   objects and curves -- not on ideas.
+**Outstanding** (updated 2026-09-23; nothing here needs a decision from the user):
+1. **Blocked on a drive with traffic and far-field objects** -- the one the user has asked for
+   next: item 6 (the 80+ m band), item 8 (radar-only birth), and the cluster path on MOVING
+   objects, which has never been measured and is where its one known risk (a track publishing
+   >10 s after the camera lost it) would show. A curve-and-cone drive would close item 4, and a
+   close pass of static objects would measure item 13 instead of trusting the vendor.
+2. **On the vehicle**: the live isolation re-check (replay passed; the car never has), the planner
+   bridge's first run there (it now places obstacles 1.7 m differently, item 13), and timing
+   under real load (cluster 22-29 ms, ground projection 12-13 ms, both replay-only).
+3. **Small and open**: on 11-50-45 cars read ~7 m short of radar at every range, under every
+   point-selection rule and under strict radar matching -- real, class-specific, unexplained.
+   And the RNR label question (Housekeeping).
+
+Settled this session and no longer open: item 13 (decided, see its section), the far-band "cost"
+of the cluster path (an audit defect, item 7), the occlusion flag (refuted as a filter input and
+as a radar-gate refinement, items 4 and 12), and the radar-match crowding (checked, harmless to
+every median, item 4).
 
 ## What exists
 
@@ -114,8 +124,8 @@ scripts/filter_scale_ab.py    item 2: does scaling the camera sigma change held-
 scripts/coast_budget_ab.py    item 10: re-acquisition gaps per sensor vs the coast budgets
 scripts/coast_sweep_ab.py     item 10: what a longer coast budget costs (orphans, held-out error)
 scripts/cluster_sustain_ab.py item 7: cluster path on vs off -- lifetime, rear survival, ghosts
-scripts/drive_survey.py       every scored drive side by side: does the live rule hold, and
-                              can that drive referee range at all?
+scripts/drive_survey.py       every scored drive side by side: does the live rule hold, and is
+                              the radar match honest (a strict re-score beside the recorded one)?
 scripts/occlusion_ab.py       does a box with several depth clusters range the occluder?
 scripts/publish_rate.py       publish cadence and tracks per published frame, per recording
 scripts/velocity_truth_ab.py  false velocity: apparent speed of STATIC objects by ego yaw rate
@@ -984,9 +994,9 @@ for whoever picks that up.
 before anyone re-runs this: `nearest_depth_cluster` cuts at any gap over 5 cm, so nearly every box
 there holds several clusters and the kept one holds a median 3% of the box's points. That drive's
 error is class-correlated (cars -7.4 m, trucks -1.4, buses -0.6) and survives every choice rule
-including the median of ALL box points (-5.4 m for cars), so it is not about which cluster is kept;
-its radar reference is also crowded (one return serves 1.33 detections, p90 2.0, against 1.00 and
-1.4 on selfcal, at double the bearing offset). Suspect that reference before the rule.
+including the median of ALL box points (-5.4 m for cars), so it is not about which cluster is kept.
+It is not the radar matching either, though this line first said so: see "Is the radar match
+honest?" below. The cars' bias on this drive is real and still unexplained.
 
 One trap recorded for the next person: "pick whichever cluster matches radar best" improves 72.7%
 of car detections by a median 8.0 m and means NOTHING -- that cluster holds 2% of the box, and with
@@ -1011,13 +1021,31 @@ the ones recorded above for the same drives (11-55-43 read 2.6% for DropNF in 20
 1.4%): the arm has called the production `DepthJumpGate` directly since that date, so the older
 figures carry the duplicate-gate divergence and should not be quoted.
 
-Two columns are about whether a drive can be a REFEREE at all, and they matter more than the spike
-rates:
+**Is the radar match honest? -- yes, and a claim made here earlier was WRONG (2026-09-23).** The
+per-detection match lets two detections score against the same radar return; on the two
+vehicle-dense drives a return serves 1.33 and 1.29 detections against 1.00 elsewhere. This section
+said that made those two drives unable to referee range, and that it was the likely story behind
+the -3 to -6 m on 11-50-45. Both were measured and are false. `drive_survey.py` now carries a
+STRICT column -- each return scores only its nearest claimant, contested losers unscored:
 
-- **dets/return** -- detections sharing one distinct matched radar return. At 1.00 every detection
-  had its own; 11-50-45 (1.33) and 12-02-23 (1.29) are crowded, so a range number from those two
-  says as much about the matching as about the stack. That is the likely story behind the -3 to
-  -6 m recorded for 11-50-45, and it is why the occlusion work could not use that drive.
+    drive       recorded median / >2 m     strict median / >2 m
+    11-50-45    -1.80 m / 49.1%            -1.93 m / 49.6%
+    11-52-15    -1.37 m / 18.2%            -1.34 m / 10.2%    <- sharing inflated the TAIL here
+    11-55-43    -0.20 m / 21.7%            -0.20 m / 21.7%
+    11-58-32    -2.07 m / 50.9%            -2.07 m / 50.9%
+    12-02-23    -0.48 m / 29.8%            -0.53 m / 30.5%
+    selfcal     -1.12 m / 40.0%            -1.06 m / 37.2%
+
+Every median holds within 0.13 m, so the sharing never biased a headline number. The one real
+effect is the tail on the cone drive 11-52-15, where the contested pairs were the bad ones and
+forbidding them takes >2 m from 18.2% to 10.2%.
+
+A TRAP, found on the way: the first exclusive rule was greedy -- a contested loser fell through to
+its next candidate return. The range window is deliberately wide (+-43 m at 80 m), so that
+candidate is often a different object, and on 11-50-45 it moved the median from -1.80 m to
+-4.14 m, every metre of it manufactured by the matching. `neighbour_ab.py --exclusive-radar` is now
+the strict rule; the greedy one is gone.
+
 - **kept frac** -- how much of the box the kept depth cluster holds. 1.00 on the cone drives (one
   object per box) against 0.03 and 0.09 on the vehicle-dense ones, where boxes fragment into
   slivers. A rule that assumes "the nearest cluster is the object" is on very different ground in
@@ -1382,7 +1410,14 @@ radar-touched tracks barely moves (+0.87 -> +0.84 m) -- expected, since the gate
 credited to the gate. The evidence for it is the offline table above, which runs the production
 association code.
 
-### 13. LiDAR position relative to the odometry output point  (user decision pending)
+### 13. LiDAR position relative to the odometry output point  -- DECIDED 2026-09-23, still unmeasured
+**The user adopted the vendor value.** The planner bridge's default is now (0.670, -0.097) m (was
+(2.393, 0.206)), committed in the planner repo as `6eb9a14`. Because neither number has been
+measured on this vehicle, the bridge logs the value in force, its provenance and its distance from
+the legacy value as a WARNING on every startup; `lidar_offset_x` / `lidar_offset_y` restore the old
+value at runtime. What would retire the warning: the close-pass drive described at the end of this
+section. The evidence that led to the decision follows, unchanged.
+
 The planner bridge's `lidar_offset` ships at (2.393, 0.206) m -- the value `tracker.py` has always
 used. **The evidence now says that is wrong by about 1.7 m, and the answer is near (0.67, -0.10) m**,
 but the one thing that would measure it directly is not in any bag we have.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every scored drive, side by side: do the live rules hold, and can the drive referee at all?
+"""Every scored drive, side by side: does the live rule hold, and is the radar match honest?
 
 `neighbour_ab.py --dump` writes one pickle per drive. This reads them together and answers three
 questions that only make sense across drives:
@@ -7,10 +7,15 @@ questions that only make sense across drives:
   DOES THE RULE HOLD     spike rate (second difference of one tracker id > 2 m) for the old
                          fusion_node rule (A25) and the live one (DropNF). The live rule should
                          win on every drive, not just the one it was tuned on.
-  CAN THIS DRIVE JUDGE   radar is the ruler for range, and on a crowded drive one return gets
-                         matched to several detections -- then a range number from that drive
-                         says as much about the matching as about the stack. Reported as
-                         detections per DISTINCT matched return, with the bearing offset.
+  IS THE MATCH HONEST    radar is the ruler for range, and the per-detection match lets two
+                         detections score against the SAME return (dets/return above 1.00).
+                         The 'strict' column re-scores with that forbidden: each return scores
+                         its nearest claimant only, contested losers unscored. If the two range
+                         columns agree, the sharing did not bias the number. Measured on every
+                         drive 2026-09-23: the MEDIANS agree within 0.13 m everywhere, including
+                         the two crowded drives where sharing was first suspected (wrongly) of
+                         explaining a bias. One TAIL does not: on 11-52-15 the >2 m rate falls
+                         18.2% -> 10.2%, so read that column as well as the median.
   WHAT IS IN THE BOX     share of detections whose box holds real support behind the kept depth
                          cluster (the occlusion flag, HANDOFF item 4), and how much of the box
                          the kept cluster holds.
@@ -46,9 +51,24 @@ def spikes(rows, arm, thresh=2.0):
     return 100.0 * float((dev > thresh).mean()), dev.size
 
 
+def strict_errors(scored):
+    """Range errors with each radar return scoring only its nearest claimant in that frame."""
+    claim = {}
+    for i, r in enumerate(scored):
+        if r.get("DropNF") is None or r.get("radar_az") is None:
+            continue
+        key = (r["t"], round(r["radar_az"], 4), round(r["radar"], 3))
+        d = abs(r["radar_az"] - r["obj_az"])
+        if key not in claim or d < claim[key][0]:
+            claim[key] = (d, i)
+    return np.array([radar_frame_range(scored[i]["DropNF"]) - scored[i]["radar"]
+                     for _, i in claim.values()])
+
+
 def main(paths):
     print(f"  {'drive':16s} {'dets':>6s} {'A25':>7s} {'DropNF':>7s} | {'dets/return':>11s} "
-          f"{'bearing':>8s} | {'occluded':>8s} {'kept frac':>9s} | {'range err vs radar':>19s}")
+          f"{'bearing':>8s} | {'occluded':>8s} {'kept frac':>9s} | {'range err vs radar':>19s} "
+          f"| {'strict':>15s}")
     for p in paths:
         try:
             rows = pickle.load(open(p, "rb"))
@@ -76,12 +96,16 @@ def main(paths):
                         if r.get("DropNF")])
         e = (f"{np.median(err):+5.2f} m, {100 * np.mean(np.abs(err) > 2):4.1f}% > 2 m"
              if err.size else "-")
+        es = strict_errors(sc)
+        e_strict = (f"{np.median(es):+5.2f} m, {100 * np.mean(np.abs(es) > 2):4.1f}%"
+                    if es.size else "-")
         print(f"  {name:16s} {len(rows):6d} {a25:6.1f}% {drop:6.1f}% | {reuse:11.2f} "
               f"{np.median(daz) if daz else float('nan'):7.2f}d | "
-              f"{100 * flagged / max(len(occ), 1):7.1f}% {fg:9.2f} | {e:>19s}")
-    print("\n  dets/return at 1.00 means every detection had its own radar return; above ~1.2 the")
-    print("  drive cannot referee range on its own. kept frac is how much of the box the nearest")
-    print("  depth cluster holds -- near 1.0 the box is one object, near 0 it is fragmented.")
+              f"{100 * flagged / max(len(occ), 1):7.1f}% {fg:9.2f} | {e:>19s} | {e_strict:>15s}")
+    print("\n  dets/return above 1.00 means some detections shared a radar return; 'strict' is the")
+    print("  same error with that forbidden. When the two agree, the sharing did not bias the")
+    print("  number. kept frac is how much of the box the nearest depth cluster holds -- near 1.0")
+    print("  the box is one object, near 0 it is fragmented.")
 
 
 if __name__ == "__main__":

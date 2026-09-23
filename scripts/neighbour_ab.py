@@ -407,11 +407,35 @@ def run(args):
                     _, rr, raz = radar[ri]
                     p_s = G.R_SL @ np.array([pubx, puby]) + G.T_SL
                     _, oaz = G.cartesian_to_polar(p_s[0], p_s[1])
+                    row["obj_az"] = float(oaz)
                     hit = G.match_radar_range(math.hypot(pubx, puby), float(oaz), bw, rr, raz)
                     if hit is not None:
                         row["radar"], row["radar_az"] = hit
-                        row["obj_az"] = float(oaz)
                 rows.append(row)
+            if radar_ok and args.exclusive_radar and dets:
+                # STRICT exclusivity: one radar return scores at most one detection. Each
+                # detection keeps only its OWN nearest return (as the per-detection rule chose
+                # it); where two detections chose the same return, the nearer in azimuth keeps it
+                # and the other goes UNSCORED.
+                #
+                # Not the greedy version this replaced. Greedy let the loser fall through to its
+                # next candidate, and the range window is deliberately wide (+-43 m at 80 m), so
+                # that candidate is often a different object: on 11-50-45 it moved the median
+                # range error from -1.80 m to -4.14 m, all of it manufactured by the matching.
+                frame = rows[-len(dets):]
+                claim = {}
+                for i, r in enumerate(frame):
+                    if r.get("radar") is None or r.get("radar_az") is None:
+                        continue
+                    key = (round(r["radar_az"], 4), round(r["radar"], 3))
+                    d = abs(r["radar_az"] - r["obj_az"])
+                    if key not in claim or d < claim[key][0]:
+                        claim[key] = (d, i)
+                winners = {i for _, i in claim.values()}
+                for i, r in enumerate(frame):
+                    if r.get("radar") is not None and i not in winners:
+                        r["radar"], r["radar_az"] = None, None
+
             done += 1
             if args.max_frames and done >= args.max_frames:
                 break
@@ -573,6 +597,11 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--max-frames", type=int, default=None)
     ap.add_argument("--dump", default=None, help="pickle the per-detection rows here")
+    ap.add_argument("--exclusive-radar", action="store_true",
+                    help="score each radar return against at most ONE detection per frame "
+                         "(the contested loser goes unscored). Off by default so recorded numbers "
+                         "reproduce. Measured 2026-09-23: it changes no headline number on any "
+                         "drive, so it is a check, not a correction")
     ap.add_argument("--gate-sweep", action="store_true", help="also score a grid of gate widths")
     ap.add_argument("--level", choices=["off", "odom", "odom-nomount", "odom-near"], default="off",
                     help="level the sweep by odometry attitude before segmenting")
