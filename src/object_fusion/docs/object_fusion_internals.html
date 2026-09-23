@@ -127,7 +127,7 @@
   <div class="facts">
     <span><b>Reference drive</b> selfcal_loc_2026-09-08 · 398 s · 4 519 detections</span>
     <span><b>Ruler</b> Delphi ESR range, ~0.1 m</span>
-    <span><b>State</b> 2026-09-17 · filtered output is the default</span>
+    <span><b>State</b> 2026-09-23 · filtered output, the cluster path and the velocity gate are all live by default</span>
   </div>
 </header>
 
@@ -142,6 +142,9 @@
     <li><a href="#s6">6 Covariance</a></li>
     <li><a href="#s7">7 Radar</a></li>
     <li><a href="#s8">8 Aggregator</a></li>
+    <li><a href="#s9">9 Clusters</a></li>
+    <li><a href="#s10">10 Radar gate</a></li>
+    <li><a href="#s11">11 Velocity</a></li>
     <li><a href="#params">Parameters</a></li>
     <li><a href="#off">Switched off</a></li>
     <li><a href="#limits">Limits</a></li>
@@ -713,6 +716,108 @@ slope_y = −0.01451·roll − 0.00048·pitch − 0.01419      (degrees in, slop
   <div class="why"><b>…and the rest of it was the Mahalanobis clause, which never bounded a distance (2026-09-16).</b> That clause measures separation in units of the two tracks&rsquo; covariance, and a coasting track&rsquo;s covariance grows without limit: at 2&nbsp;m sigma the 99% two-degree-of-freedom value spans 8.6&nbsp;m, past the next cone in a line. So the clause written to collapse a track onto its own duplicate was reaching across to the neighbour. The fix bounds the reach in metres — <code>max_merge_dist&nbsp;=&nbsp;2.5&nbsp;m</code>, between a duplicate (under 2&nbsp;m apart) and the next cone up the line (5&nbsp;m and more). Measured live over a full 398&nbsp;s replay loop: orphaned measurements <b>15.7% &rarr; 10.5%</b>, while two boxes landing on one measurement went 1.3% &rarr; 3.0%. Tightening the chi-square instead was measured and rejected — it switches merging off entirely (the node logs <code>merged=0</code> for a whole replay) and doubles boxes to 5.6%.</div>
 </section>
 
+<section id="s9" class="stage">
+  <div class="stage-head">
+    <div class="numeral">09</div>
+    <div>
+      <h2>360&deg; LiDAR clusters</h2>
+      <div class="sub">Sustain only: a cluster may keep a track alive, never start one</div>
+    </div>
+  </div>
+
+  <p>The camera sees about 33&deg; ahead; the VLP-32C sees all around. <code>ground_projection</code>
+  publishes the full-sweep non-ground cloud, <code>lidar_cluster_detector</code> voxelises it at
+  0.2 m and joins components with a <em>range-adaptive</em> gap of
+  <code>0.45 + 0.012&middot;r</code> (ring spacing grows with distance, so a fixed gap splits far
+  objects and merges near ones), rejects the shapes an object cannot have, and the aggregator
+  matches what is left to existing tracks within <code>1.0 + 0.02&middot;r</code> metres, one
+  cluster to at most one track.</p>
+
+  <div class="why"><b>Why it may not birth a track.</b> A cluster carries no class: a bush, a kerb
+  and a parked car are the same shape to it. It is trusted to say <em>something is still here</em>,
+  which refreshes the coast budget and nudges the position &mdash; nothing more.</div>
+
+  <p>It earns its place where the camera has nothing. Following static objects past the moment
+  their track died, against a mirrored-position control for chance, the <b>rear</b> is the
+  best-covered sector of all (65&ndash;70% at 15&ndash;60 m against ~1% chance); the side is the
+  roof LiDAR's blind zone, which the 0.5 s coast budget already tolerates. Over a full replay loop
+  six objects the car had passed stayed tracked for ~10 s into the side and rear, where none
+  survived before, and paired block-by-block against a clusters-off arm of the same drive the path
+  removes <b>1.3&ndash;1.7 points</b> of orphaned measurements (two independent pairs, both
+  resolved). Cost: 22 ms of a 100 ms sweep.</p>
+
+  <div class="warn"><b>Two traps, both paid for once.</b> Charging an existence miss when no
+  cluster appears is wrong &mdash; coverage is only 40&ndash;70% even on an object that is
+  certainly there, so &ldquo;no cluster&rdquo; is not evidence of absence; at &minus;0.2 log-odds a
+  sweep it killed tracks wholesale. And a cluster update must move position only: a cluster sits at
+  the footprint centroid while the camera measures the near face, so the difference between
+  consecutive clusters is an offset, not motion.</div>
+</section>
+
+<section id="s10" class="stage">
+  <div class="stage-head">
+    <div class="numeral">10</div>
+    <div>
+      <h2>The camera-referenced radar gate</h2>
+      <div class="sub">A radar return that disagrees with the camera by more than 3&sigma; is refused</div>
+    </div>
+  </div>
+
+  <p>Inside 80 m, where the camera+LiDAR range is trustworthy, a radar return further than
+  3&middot;<code>sigma_along</code> from the track's own camera range of the last 0.3 s is not
+  applied. Beyond 80 m the gate does not act, because out there the camera range is the number
+  that is wrong.</p>
+
+  <p>The evidence for it: at 40&ndash;80 m the radar was pulling vehicle tracks more than 3 m off
+  their camera measurement. Asking the LiDAR what sat on that bearing settled who was right &mdash;
+  <b>83%</b> of those returns had nothing at the radar range and a vehicle at the camera range
+  (multipath ghosts), 12.6% were a different object behind the target, and only 1.7% were the
+  camera being wrong. Live, LiDAR-confirmed bad updates fell <b>119 &rarr; 27</b> for 0.6% fewer
+  radar updates.</p>
+
+  <div class="why"><b>Where it costs.</b> In a dense car park the trade is 88 bad updates blocked
+  against 20 good ones lost (4.4:1, against ~46:1 on the reference drive), because a box there
+  often holds a nearer car as well as the target and the camera range belongs to the occluder.</div>
+</section>
+
+<section id="s11" class="stage">
+  <div class="stage-head">
+    <div class="numeral">11</div>
+    <div>
+      <h2>Velocity, and when it is published</h2>
+      <div class="sub"><code>velocity_valid</code> means distinguishable from standing still</div>
+    </div>
+  </div>
+
+  <p>While the vehicle yaws, an object's bearing sweeps and the set of LiDAR returns inside its 2D
+  box changes, so the measured position moves across the ray and the filter reads motion that is
+  not there. Measured on a drive where every object is static, the between-frame jitter goes from
+  0.77 m/s driving straight to 2.99 m/s while turning, and it is mostly cross-ray.</p>
+
+  <p>The estimator is untouched. The uncertainty it cannot see is added where velocity is
+  <em>published</em>: the covariance carries an extra
+  <code>turn_velocity_k &middot; |&omega;| &middot; range</code> of sigma, and
+  <code>velocity_valid</code> is a chi-square test of the velocity against <em>zero</em> rather
+  than the old &ldquo;the filter is running and odometry exists&rdquo;.</p>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Arrows drawn, by ego yaw rate</th><th class="num">straight</th><th class="num">0.05&ndash;0.10</th><th class="num">turning</th><th class="num">all</th></tr></thead>
+    <tbody>
+      <tr><td class="p">before</td><td class="num">4.0%</td><td class="num">28.3%</td><td class="num">33.9%</td><td class="num">10.1%</td></tr>
+      <tr><td class="p">after</td><td class="num">0.4%</td><td class="num">0.0%</td><td class="num">0.0%</td><td class="num">0.4%</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>Every arrow in that table is false &mdash; the drive is static. What had to survive did: on a
+  drive with two passing vehicles, <b>96.9%</b> of objects above 5 m/s still publish a velocity.
+  <code>k = 1.0</code> was chosen by measurement, not taste: <code>k = 2</code> keeps only 58% of
+  real motion, <code>k = 0.5</code> leaves 22.5% of the false arrows.</p>
+
+  <div class="why"><b>For a consumer.</b> <code>velocity_valid = false</code> means
+  <em>no velocity</em>, not <em>a measured zero</em>. The planner bridge already treats it that
+  way. <code>turn_velocity_k = 0</code> restores the old always-valid behaviour exactly.</div>
+</section>
+
 <section id="params" class="stage">
   <div class="stage-head">
     <div class="numeral">§</div>
@@ -733,6 +838,10 @@ slope_y = −0.01451·roll − 0.00048·pitch − 0.01419      (degrees in, slop
       <tr><td class="p">enable_class_vote</td><td class="num">true</td><td><code>--no-class-vote</code></td></tr>
       <tr><td class="p">class_vote_window_s</td><td class="num">2.0 s</td><td>Capture seconds, score-weighted</td></tr>
       <tr><td class="p">segmentation_empty_fallback</td><td class="num">false</td><td>true restores "never lose a detection"</td></tr>
+      <tr><td class="p">merge_max_dist</td><td class="num">2.5 m</td><td>Hard bound on the merge reach. <code>inf</code> restores the unbounded rule, which orphans 6 points more measurements</td></tr>
+      <tr><td class="p">radar_camera_gate</td><td class="num">true</td><td><code>RADAR_CAMERA_GATE=false</code> — radar returns are applied without the camera cross-check again</td></tr>
+      <tr><td class="p">enable_lidar_clusters</td><td class="num">true</td><td><code>--no-clusters</code> — the 360&deg; path stops; tracks then end when the camera loses them</td></tr>
+      <tr><td class="p">turn_velocity_k</td><td class="num">1.0</td><td><code>0</code> restores the pre-2026-09-23 contract, where <code>velocity_valid</code> meant only "the filter is running"</td></tr>
       <tr><td class="p">projection_topic</td><td class="num">ground-flagged</td><td>Set by <code>run_fusion.sh --ground</code>; without it the detector reads the old projection and segmentation is inert</td></tr>
       <tr><td class="p">ground_max_range</td><td class="num">120 m</td><td>80 m and 150 m both measurably worse</td></tr>
       <tr><td class="p">sensor_height / camera_height_m</td><td class="num">2.37 / 1.5275 m</td><td>Measured; camera height is derived from it and the camera_fl extrinsic</td></tr>
@@ -783,8 +892,8 @@ scripts/run_fusion.sh --ground --no-depth-gate</pre>
     <li><b>Beyond 80 m</b> the camera+LiDAR range is biased, not noisy, and 12.6% of frames there still spike. The fix is radar-owned range, which only acts in <code>filtered</code> mode.</li>
     <li><b>Inside 15 m</b> nothing is validated: those objects sit at 15–26° azimuth, the edge of the camera's field of view, where radar coverage is too sparse to serve as a ruler. Range error there reads −3.95 m and should not be quoted as accuracy.</li>
     <li><b>Withheld frames blink.</b> 6.3% of detections publish nothing — the marker disappears for one frame rather than jumping.</li>
-    <li><b>10.5% of measurements have no track on them</b>, down from 15.7%, and under 80 m every band now sits at 7–11%. What is left is concentrated past 80 m, where the band is <b>30.5%</b> orphaned: out there the camera and the radar disagree about range by tens of metres, so no single track can sit on both. It is the same far-field failure as the first item in this list, seen from the aggregator's side.</li>
-    <li><b>The published position sits behind the measurement when radar has touched it</b> — 0.91 m, against 0.12 m for a track the radar never saw. That is the radar disagreeing with the camera (the radar itself sits 0.32 m behind), and 51% of tracks land between the two sensors. The tail is the open part: 19% sit beyond the radar return, where the return on that bearing is a different object behind the target.</li>
+    <li><b>2.3–5.7% of measurements have no track on them</b>, and past 80 m the band is 1.4–2.4%. Quote that spread, not a single figure: orphans arrive in bursts while the vehicle turns (17.1% of detections against 4.4% driving straight), so one loop carries a ±3 point interval and two arms are only comparable paired block by block on the same drive. The far-band number that earlier versions of this page reported as 30.5% was a defect in the audit, not in the stack — it matched each measurement to a published frame by recording time rather than by capture stamp, and read tracks out of existence.</li>
+    <li><b>The published position sits beyond the measurement when radar has touched it</b> — +0.45 m, against 0.03 m for a track the radar never saw. That is the radar disagreeing with the camera (the radar itself sits +1.28 m beyond), and 72.7% of tracks land between the two sensors. The tail is the open part: 13.9% sit beyond the radar return, where the return on that bearing is a different object behind the target. (Re-measured 2026-09-23 on the corrected frame match; the same recording read 0.91 / 0.12 / 0.32 m and 51% / 19% when each measurement was compared against a frame published before its own update landed.)</li>
     <li><b>A bag rewind drops every track</b> by design; the node logs it as <code>rewinds=</code>.</li>
     <li><b>A genuine reclassification lags</b> up to ~2 s behind, by construction of the class vote.</li>
     <li><b>Curve evidence is thin:</b> the levelling model rests on 232 + 15 curve sweeps across two drives. A curve-rich, cone-rich drive would firm it up.</li>
