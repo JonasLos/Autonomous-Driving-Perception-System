@@ -428,7 +428,9 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                         nis_banded.setdefault(("camera_lidar", band), []).append(n_)
                 # passthrough publishes this measurement whether or not the gate applied it
                 tr.last_cam_xy = np.asarray(p, dtype=float).copy()
-                cam_seen[tr.id] = (t, tr.last_cam_xy)
+                # Carry the occlusion flag with the camera reference: the radar gate defends
+                # this number, and if it came from an occluded box it may be the occluder's.
+                cam_seen[tr.id] = (t, tr.last_cam_xy, _occluded)
             if collect_ab and ab_rts.size:
                 _score_ab(store, t, radar, ab_rts, R_sl, t_sl, ab, ab_prev,
                           holdout=radar_holdout, occluded_ids=occluded_tracks)
@@ -485,7 +487,8 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                              1.0 if "cone" in (tr.class_name() or "") else 0.0))
                         counts.setdefault("radar_vs_cam_events", []).append(
                             (t, float(sweep.range[di]), float(sweep.azimuth[di]),
-                             seen[1].copy(), tr.class_name() or ""))
+                             seen[1].copy(), tr.class_name() or "",
+                             bool(seen[2]) if len(seen) > 2 else False))
                     if collect_nis:
                         nis["radar"].append(n_)
                         band = int(min(sweep.range[di], 170) // 20) * 20

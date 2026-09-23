@@ -1331,9 +1331,48 @@ nearest-depth-cluster rule often ranges an OCCLUDING car:**
 
 So there it blocks 88 bad updates and 20 GOOD ones (the radar correcting an occluder-ranged camera):
 4.4 : 1, against ~46 : 1 on the reference drive. Still net positive, so it stays on, but in crowds
-it is not free. The refinement that would keep those 20: the detector knows when a box holds more
-than one depth cluster (occlusion); flag such measurements and do not use them as the gate's
-reference. Not built -- it touches the detector-to-aggregator message.
+it is not free.
+
+**The refinement this section used to propose -- flag the occluded boxes and let the gate stand
+aside for them -- was MEASURED 2026-09-23 and does not work.** Not "is not worth it": it cannot
+work, and the reason is worth keeping.
+
+`scripts/radar_vehicle_truth.py --dump-events` now records the LiDAR's verdict per event, so a
+candidate rule can be scored in seconds. Joined back to what each box contained:
+
+    verdict (what the LiDAR sees)     n   voxels  behind   gap    clusters  kept frac  range
+    CAMERA ONLY  (radar ghost)       50      8       4    30.1 m      3       0.50     68.6 m
+    TWO OBJECTS  (radar on a car behind) 38  37      35     0.2 m     10       0.05     44.2 m
+    RADAR ONLY   (the camera is wrong)   20  36      34     0.2 m     10       0.04     46.6 m
+    NEITHER                          18      8       6     2.7 m      4       0.29     68.3 m
+
+**Read the middle two rows.** The case the gate gets wrong (RADAR ONLY) and the case it gets right
+(TWO OBJECTS) are the same box: 36 vs 37 voxels, 34 vs 35 of them behind the kept cluster, the same
+0.2 m gap, the same 10 fragments, the same 4-5% kept fraction, the same 180 px box at the same
+range. They are indistinguishable from inside the box, because the box does not contain the thing
+that separates them -- WHICH of the two objects on that bearing is the one the detector boxed.
+
+Every operating point that follows from a box-local flag is therefore worse than doing nothing
+clever, counting a bad pull applied and a good fix lost as equally wrong (both leave a track 3+ m
+out):
+
+    policy                                    bad pulls applied   good fixes lost   total wrong
+    no gate at all                                   88                 0                88
+    the gate as it ships                              0                20                20   <- best
+    stand aside when the gap is < 1 m                46                 0                46
+    stand aside when the kept cluster < 25%          45                 0                45
+    stand aside when >= 10 voxels sit behind         38                 0                38
+
+**And the flag as built measures sparsity, not occlusion.** `bg_frac >= 0.15` fires on boxes with 8
+voxels (two stray points behind clear 15%) and not on the 36-voxel fragmented ones: it caught 78%
+of the ghost cases, where the camera is RIGHT, and 0 of the 20 where it is wrong. That also
+explains why feeding it to the filter made things worse (item 4): it was down-weighting sparse
+detections, not occluded ones.
+
+What would actually separate the two cases is evidence the box cannot hold -- the track's own
+history across frames, or an extent estimate that says which fragment is the boxed object. Both
+are bigger than a flag, and neither is worth starting until a drive with real traffic says this
+band matters.
 
 Live check, one full loop with the gate on (`~/fusion_data/recordings/loopD`) against loopC
 (identical settings, gate off): the node runs normally and nothing got worse. The MEDIAN offset of

@@ -65,6 +65,8 @@ def main():
     ap.add_argument("--replay", default="/home/avalocal/fused_replay_selfcal_2026-09-08")
     ap.add_argument("--measurements",
                     default=os.path.expanduser("~/fusion_data/measurements/rows_gate2.pkl"))
+    ap.add_argument("--dump-events", default=None,
+                    help="pickle one record per event (verdict, ranges, and the detection it\n                         came from) so a candidate flag can be scored offline in seconds\n                         instead of re-segmenting every sweep")
     ap.add_argument("--camera-gate", action="store_true",
                     help="run with the camera-referenced radar range gate on")
     args = ap.parse_args()
@@ -75,12 +77,15 @@ def main():
     d = oa.run(fused, radar, odom, R_sl, t_sl, ego_yaw_deg=-5.35, radar_birth=False,
                cam_gate=oa.CAMERA_GATE_CHI2, radar_camera_gate=args.camera_gate)
     events = []
-    for t, r_rad, az_rad, cam_l, cls in d["counts"].get("radar_vs_cam_events", []):
+    for ev in d["counts"].get("radar_vs_cam_events", []):
+        t, r_rad, az_rad, cam_l, cls = ev[:5]
+        occluded = bool(ev[5]) if len(ev) > 5 else False
         if "cone" in cls:
             continue
         r_cam = float(np.hypot(*(R_sl @ cam_l + t_sl)))
         if 40.0 <= r_cam < 80.0 and r_rad - r_cam > 3.0:
-            events.append((t, r_rad, az_rad, r_cam, cls))
+            events.append((t, r_rad, az_rad, r_cam, cls, occluded,
+                           (float(cam_l[0]), float(cam_l[1]))))
     print(f"[events] {len(events)} radar updates on non-cone tracks at 40-80 m with radar > 3 m "
           f"behind the camera")
     if not events:
@@ -107,7 +112,9 @@ def main():
 
     verdict = Counter()
     by_class = Counter()
-    for t, r_rad, az_rad, r_cam, cls in events:
+    by_occ = Counter()
+    records = []
+    for t, r_rad, az_rad, r_cam, cls, occluded, cam_xy in events:
         j = int(np.argmin(np.abs(st - t)))
         if abs(st[j] - t) > 0.06:
             verdict["no LiDAR sweep near the event"] += 1
@@ -129,11 +136,33 @@ def main():
             v = "NEITHER (the LiDAR sees nothing on the bearing at either range)"
         verdict[v] += 1
         by_class[(cls, v.split(" (")[0])] += 1
+        by_occ[(occluded, v.split(" (")[0])] += 1
+        records.append(dict(t=t, r_rad=r_rad, az_rad=az_rad, r_cam=r_cam, cls=cls,
+                            occluded=occluded, verdict=v.split(" (")[0], cam_xy=cam_xy))
 
     n = sum(verdict.values())
     print(f"\n  {'what the LiDAR sees on that bearing':68s} {'events':>7s}")
     for v, c in verdict.most_common():
         print(f"  {v:68s} {c:5d}  {100 * c / n:5.1f}%")
+    # The question this split exists for: when the LiDAR says the CAMERA was wrong -- the case
+    # where the gate blocks a genuine radar correction -- was that camera range taken from a box
+    # holding another object in front? If it was, an occlusion flag would let the gate stand aside
+    # for exactly those events and keep the corrections it currently throws away.
+    occ_n = sum(c for (o, _), c in by_occ.items() if o)
+    print(f"\n  by whether the camera reference came from an OCCLUDED box "
+          f"({occ_n} of {n} events):")
+    print(f"    {'verdict':46s} {'occluded':>9s} {'clear':>7s} {'share occluded':>15s}")
+    for verd in sorted({v for _, v in by_occ}):
+        o = by_occ[(True, verd)]
+        c = by_occ[(False, verd)]
+        print(f"    {verd:46s} {o:9d} {c:7d} {100 * o / max(o + c, 1):14.1f}%")
+
+    if args.dump_events:
+        import pickle as _pickle
+        with open(os.path.expanduser(args.dump_events), "wb") as fh:
+            _pickle.dump(records, fh)
+        print(f"\n  [dump] {len(records)} events -> {args.dump_events}")
+
     print("\n  by class:")
     for (cls, v), c in sorted(by_class.items(), key=lambda kv: -kv[1])[:10]:
         print(f"    {cls:12s} {v:24s} {c:4d}")
