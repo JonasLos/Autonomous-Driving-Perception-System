@@ -202,7 +202,7 @@ def _odom_feeder(odom, offset=0.0):
     return buf, feed
 
 
-def load_measurements(pkl, arm="DropNF"):
+def load_measurements(pkl, arm="DropNF", occ_frac=0.15, occ_gap=2.0):
     """A `scripts/neighbour_ab.py --dump` file -> the same stream shape as /fused_bbox.
 
     /fused_bbox is what the OLD rule published; the detector now runs segmentation + the
@@ -218,14 +218,22 @@ def load_measurements(pkl, arm="DropNF"):
         p = r.get(arm)
         if p is None:
             continue
-        xy, ids, names = by_t.setdefault(round(r["t"], 3), ([], [], []))
+        xy, ids, names, occ = by_t.setdefault(round(r["t"], 3), ([], [], [], []))
         xy.append([p[0], p[1]])
         ids.append(r["id"])
         names.append(r["cls"])
-    out = [(t, np.asarray(v[0], dtype=float), v[1], v[2]) for t, v in sorted(by_t.items())]
+        # Occlusion evidence, carried with the position so an arm can act on it. A box whose kept
+        # (nearest) depth cluster has real support BEHIND it may be ranged on an occluder rather
+        # than on the object. Measured on the car-park drive: such detections are 2.2x more likely
+        # to sit over 2 m from radar and 3.4x more likely to be over 5 m out.
+        occ.append(bool((r.get("bg_frac") or 0.0) >= occ_frac
+                        and (r.get("bg_gap") or 0.0) >= occ_gap))
+    out = [(t, np.asarray(v[0], dtype=float), v[1], v[2], v[3]) for t, v in sorted(by_t.items())]
+    n_occ = sum(sum(v[3]) for v in by_t.values())
     kept = sum(len(v[1]) for v in by_t.values())
     print(f"[measurements] {pkl} arm={arm}: {len(out)} frames, {kept} detections "
-          f"(of {len(rows)} rows)")
+          f"(of {len(rows)} rows), occluded flag on {n_occ} "
+          f"({100 * n_occ / max(kept, 1):.1f}%, bg_frac>={occ_frac} gap>={occ_gap} m)")
     return out
 
 
@@ -244,6 +252,8 @@ def self_check(R_sl, t_sl):
 def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
         sigma_long=2.0, sigma_lat=1.0, lag=0.12, max_frames=None,
         sigma_along_scale=1.0, range_trust=None, cam_gate=None, collect_ab=False,
+        occlusion_sigma_k=1.0, occlusion_drop_range=False, occlusion_frees_radar=False,
+        occlusion_drop_detection=False,
         radar_holdout=0, lever=True, radar_range_gate=60.0, collect_speed=False,
         merge=True, count_objects=False, merge_range_gap=20.0, merge_bearing_deg=1.5,
         radar_birth=True, assoc_max_dist=6.0, sigma_cross_scale=1.0, merge_chi2=9.21,
@@ -263,10 +273,11 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
     tw, feed_odom = _odom_feeder(odom, offset=odom_offset)
 
     q = MeasurementQueue(lag=lag)
-    for i, (t, xy, ids, names) in enumerate(fused):
+    for i, (t, xy, ids, names, *rest) in enumerate(fused):
+        occ = rest[0] if rest else [False] * len(ids)
         if max_frames and i >= max_frames:
             break
-        q.add(Measurement(t, "camera_lidar", (xy, ids, names)))
+        q.add(Measurement(t, "camera_lidar", (xy, ids, names, occ)))
     tmax = fused[min(len(fused), max_frames or len(fused)) - 1][0]
     for t, r, a, rr in radar:
         if t <= tmax:
@@ -292,6 +303,7 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
     static_speeds, all_speeds = [], []
     static_radial, static_rr_innov = [], []
     counts = {"cam_updates": 0, "radar_updates": 0, "births": 0, "gated_out": 0}
+    occluded_tracks = set()          # tracks that have been fed a box flagged as occluded
     cam_seen = {}      # track id -> (t, lidar xy) of its latest camera measurement
 
     for meas in q.drain():
@@ -336,7 +348,7 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
         v_ego_ref_s = R_sl @ v_ref
 
         if meas.sensor == "camera_lidar":
-            xy, ids, names = meas.payload
+            xy, ids, names, occ = meas.payload
             # Associate by nearest predicted position, with the ByteTrack id as a hard claim.
             used = set()
             for j, p in enumerate(xy):
@@ -370,6 +382,16 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                 r = float(np.linalg.norm(tr.x[:2]))
                 _trust = range_trust if range_trust is not None else 80.0
                 _sa = None if sigma_along_scale == 1.0 else _sigma_along(r) * sigma_along_scale
+                # An occluded box may be ranged on the occluder, not the object. The range is the
+                # only component affected -- the bearing is still the object's -- so this widens
+                # sigma_ALONG and leaves the cross-ray alone. occlusion_drop_range is the harder
+                # variant: refuse the range entirely, as the filter already does past
+                # RANGE_TRUST_MAX_M, and keep only the bearing.
+                _occluded = bool(occ[j]) if j < len(occ) else False
+                if _occluded and occlusion_drop_detection:
+                    continue            # withhold the whole measurement, as the depth gate does
+                if _occluded and occlusion_sigma_k != 1.0:
+                    _sa = (_sigma_along(r) if _sa is None else _sa) * occlusion_sigma_k
                 _sc = None if sigma_cross_scale == 1.0 else sigma_cross(r) * sigma_cross_scale
                 if turn_sigma_k and twist_now is not None:
                     # While the vehicle yaws, an object's bearing sweeps and the set of LiDAR
@@ -380,8 +402,10 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                     base = sigma_cross(r) if _sc is None else _sc
                     turn = turn_sigma_k * abs(float(twist_now.omega)) * r * CAMERA_PERIOD_S
                     _sc = float(np.hypot(base, turn))
-                y, H, R = lidar_measurement(tr.x[:2], p, sigma_a=_sa, sigma_c=_sc,
-                                            drop_range=not range_is_trustworthy(r, _trust))
+                y, H, R = lidar_measurement(
+                    tr.x[:2], p, sigma_a=_sa, sigma_c=_sc,
+                    drop_range=(not range_is_trustworthy(r, _trust)
+                                or (_occluded and occlusion_drop_range)))
                 tr.x, tr.P, n_, applied = kalman_update(tr.x, tr.P, y, H, R,
                                                         gate_chi2=cam_gate)
                 tr.last_update = t
@@ -389,6 +413,11 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                 tr.bytetrack_id = ids[j] or tr.bytetrack_id
                 tr.vote_class(names[j])
                 tr.hits["camera_lidar"] += 1
+                if _occluded:
+                    # Remember that this track has been fed an occluded box, so the A/B can score
+                    # the affected population on its own: a change that only touches 11% of
+                    # detections cannot show up in a pooled median.
+                    occluded_tracks.add(tr.id)
                 if not applied:
                     counts["cam_gated"] = counts.get("cam_gated", 0) + 1
                 if applied:
@@ -402,7 +431,7 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                 cam_seen[tr.id] = (t, tr.last_cam_xy)
             if collect_ab and ab_rts.size:
                 _score_ab(store, t, radar, ab_rts, R_sl, t_sl, ab, ab_prev,
-                          holdout=radar_holdout)
+                          holdout=radar_holdout, occluded_ids=occluded_tracks)
         else:
             sweep = meas.payload
             cref = None
@@ -410,6 +439,14 @@ def run(fused, radar, odom, R_sl, t_sl, *, ego_yaw_deg, collect_nis=False,
                 cref = []
                 for tr_ in store.tracks:
                     seen_ = cam_seen.get(tr_.id)
+                    # The radar-camera gate (item 12) refuses a radar return that disagrees with
+                    # the track's recent CAMERA range. If that camera range came from an occluded
+                    # box it may be the occluder's, and then the gate is defending the wrong
+                    # number -- which is the second half of the occlusion claim. Passing None
+                    # here lets the radar through for exactly those tracks.
+                    if occlusion_frees_radar and tr_.id in occluded_tracks:
+                        cref.append(None)
+                        continue
                     cref.append(float(np.hypot(*(R_sl @ seen_[1] + t_sl)))
                                 if seen_ is not None and t - seen_[0] <= 0.3 else None)
             pairs, _info = associate_radar(store.tracks, sweep, R_sl, t_sl, v_ego_s,
@@ -539,7 +576,7 @@ def _held_out(tr, holdout):
     return (int(hashlib.md5(str(bid).encode()).hexdigest(), 16) % holdout) == 0
 
 
-def _score_ab(store, t, radar, rts, R_sl, t_sl, ab, prev, holdout=0):
+def _score_ab(store, t, radar, rts, R_sl, t_sl, ab, prev, holdout=0, occluded_ids=()):
     """Raw camera measurement vs filtered state, both against the nearest radar sweep in time.
 
     Matched on AZIMUTH alone: range is the quantity under test, so gating on range would decide
@@ -566,6 +603,11 @@ def _score_ab(store, t, radar, rts, R_sl, t_sl, ab, prev, holdout=0):
                 k = idx[int(np.argmin(d_az[idx]))]
                 err = abs(float(orng) - float(rrng[k]))
                 ab[key].append(err)
+                # The same sample, kept separately when this track has been fed a box flagged as
+                # possibly ranged on an occluder. A rule that touches a tenth of the detections
+                # cannot be judged on a pooled median.
+                if tr.id in occluded_ids:
+                    ab.setdefault(key + "_occ", []).append(err)
                 band = int(min(float(rrng[k]), 199) // 20) * 20
                 ab["banded"].setdefault((key, band), []).append(err)
             if tr.id in prev[key]:
@@ -642,7 +684,7 @@ def filter_ab(fused, radar, odom, R_sl, t_sl, max_frames=None,
     err_raw, err_filt, jump_raw, jump_filt = [], [], [], []
     prev_raw, prev_filt = {}, {}
 
-    for fi, (t, xy, ids, names) in enumerate(fused):
+    for fi, (t, xy, ids, names, *_) in enumerate(fused):
         if max_frames and fi >= max_frames:
             break
         feed_odom(t)
@@ -735,7 +777,7 @@ def rejection_by_band(fused, radar, odom, R_sl, t_sl, max_frames=None):
     store = TrackStore()
     last_t = None
     stats = {}
-    for fi, (t, xy, ids, names) in enumerate(fused):
+    for fi, (t, xy, ids, names, *_) in enumerate(fused):
         if max_frames and fi >= max_frames:
             break
         feed_odom(t)
@@ -808,7 +850,7 @@ def rejection_runs(fused, radar, odom, R_sl, t_sl, max_frames=None):
     store = TrackStore()
     last_t = None
     runs, cur = [], {}
-    for fi, (t, xy, ids, names) in enumerate(fused):
+    for fi, (t, xy, ids, names, *_) in enumerate(fused):
         if max_frames and fi >= max_frames:
             break
         feed_odom(t)
@@ -890,7 +932,7 @@ def innovation_shape(fused, radar, odom, R_sl, t_sl, max_frames=None):
     store = TrackStore()
     last_t = None
     bands = {}
-    for fi, (t, xy, ids, names) in enumerate(fused):
+    for fi, (t, xy, ids, names, *_) in enumerate(fused):
         if max_frames and fi >= max_frames:
             break
         feed_odom(t)
@@ -964,6 +1006,13 @@ def main():
                     help="raw measurement vs filtered state, scored against radar range")
     ap.add_argument("--rejection", action="store_true",
                     help="camera gate rejection rate by range band")
+    ap.add_argument("--occ-frac", type=float, default=0.15,
+                    help="occlusion flag: minimum share of the box behind the kept cluster")
+    ap.add_argument("--occ-gap", type=float, default=2.0,
+                    help="occlusion flag: minimum metres from the kept cluster to the next")
+    ap.add_argument("--occlusion-ab", action="store_true",
+                    help="score what to do with boxes flagged as possibly ranged on an occluder "
+                         "(needs a dump from a neighbour_ab that records the cluster structure)")
     ap.add_argument("--full-ab", action="store_true",
                     help="raw vs filtered inside the FULL pipeline (radar updates included), "
                          "overall and by radar-range band")
@@ -998,7 +1047,8 @@ def main():
     if not self_check(R_sl, t_sl):
         sys.exit("self-check failed; not scoring an unvalidated pipeline")
     if args.measurements:
-        fused = load_measurements(args.measurements, args.arm)
+        fused = load_measurements(args.measurements, args.arm,
+                                  occ_frac=args.occ_frac, occ_gap=args.occ_gap)
 
     if args.ego_yaw or not (args.ego_yaw or args.nis or args.filter_ab or args.rejection):
         print("\n=== EGO-YAW A/B -- FILTER-FREE (the instrument that works) ===")
@@ -1118,6 +1168,45 @@ def main():
                       f" {100*np.mean(v>2):7.0f}%")
             else:
                 print(f"  {label:44s} {'no tracks':>6s}")
+
+    if args.occlusion_ab:
+        print("\n=== OCCLUSION A/B -- what to do with a box that may be ranged on an occluder ===")
+        print("  The flag is support BEHIND the kept depth cluster (scripts/occlusion_ab.py). It")
+        print("  is evidence about the RANGE only -- the bearing is still the object's -- so the")
+        print("  arms widen sigma_along or refuse the range, never the cross-ray.")
+        if args.radar_holdout > 1:
+            print(f"  radar HELD OUT for one track in {args.radar_holdout}; only those are scored.")
+        arms = [("baseline (flag ignored)", dict()),
+                ("sigma_along x2", dict(occlusion_sigma_k=2.0)),
+                ("sigma_along x4", dict(occlusion_sigma_k=4.0)),
+                ("sigma_along x8", dict(occlusion_sigma_k=8.0)),
+                ("range REFUSED (bearing kept)", dict(occlusion_drop_range=True)),
+                ("radar gate freed when occluded", dict(occlusion_frees_radar=True)),
+                ("both: x4 and gate freed", dict(occlusion_sigma_k=4.0,
+                                                 occlusion_frees_radar=True)),
+                ("detection WITHHELD entirely", dict(occlusion_drop_detection=True))]
+        print(f"\n  {'arm':30s} {'n':>6s} {'median':>8s} {'p90':>7s} {'>2 m':>7s} "
+              f"{'jump p90':>9s} {'births':>7s}")
+        for label, kw in arms:
+            d = run(fused, radar, odom, R_sl, t_sl, ego_yaw_deg=-5.35,
+                    max_frames=args.max_frames, collect_ab=True,
+                    radar_holdout=args.radar_holdout, **kw)
+            ab, c = d["ab"], d["counts"]
+            v = np.asarray(ab["filt"])
+            j = np.asarray(ab["jump_filt"])
+            vo = np.asarray(ab.get("filt_occ", []))
+            if v.size:
+                print(f"  {label:30s} {v.size:6d} {np.median(v):8.2f} "
+                      f"{np.percentile(v, 90):7.2f} {100 * np.mean(v > 2):6.1f}% "
+                      f"{np.percentile(j, 90) if j.size else float('nan'):9.2f} "
+                      f"{c.get('births', 0):7d}"
+                      + (f"   | tracks fed an occluded box: n={vo.size} "
+                         f"median {np.median(vo):.2f} >2 m {100 * np.mean(vo > 2):.0f}%"
+                         if vo.size else ""))
+            else:
+                print(f"  {label:30s} {'no scored tracks':>20s}")
+        print("\n  Read the median AND the >2 m column together: widening a sigma cannot improve")
+        print("  the typical case, only the tail, and it costs the filter its speed of response.")
 
     if args.full_ab:
         print("\n=== FULL-PIPELINE A/B -- raw measurement vs filtered state (radar updates ON) ===")

@@ -924,34 +924,58 @@ withholds one frame, but the occlusion persists, so the second disagreement is a
 occlusion is why the radar gate costs more there (item 12). An occlusion flag from the detector
 (several depth clusters in one box) would serve both.
 
-**The occlusion flag, started 2026-09-23 and BLOCKED on the drive it needs.** The idea is above:
-several depth clusters in one box means the nearest-cluster rule may be ranging an occluder.
-`neighbour_ab.py --dump` now records what each box contained (`n_clusters`, `fg_frac`, `bg_gap`,
-`bg_frac`, and every cluster's depth, size and position), and `scripts/occlusion_ab.py` scores a
-candidate flag against radar range. What the reachable drive (11-50-45) says:
+**The occlusion flag -- MEASURED 2026-09-23 on the drive it was proposed for, and REFUTED as a
+filter input.** The idea above: several depth clusters in one box means the nearest-cluster rule
+may be ranging an occluder. It is a real signal and acting on it makes things worse. Tools:
+`neighbour_ab.py --dump` now records every box's cluster structure (`n_clusters`, `fg_frac`,
+`bg_gap`, `bg_frac`, and each cluster's depth, size and position), `scripts/occlusion_ab.py` scores
+the flag against radar, and `object_ab.py --occlusion-ab` scores what to DO about it.
 
-- **"more than one cluster" is not a flag.** `nearest_depth_cluster` cuts at the first gap wider
-  than 5 cm, so essentially every box holds several clusters and the kept one holds a median 3%
-  of the box's points (the harness's `sliver` flag fires on 87% of detections here).
-- **this drive's error is not a cluster-choice problem at all.** It is class-correlated -- cars
-  -7.4 m, trucks -1.4 m, buses -0.6 m against radar -- and it survives EVERY choice rule:
-  nearest -7.4, track-consistent (`Dprev`) -6.3, held (`Dhold`) -6.2, and the median of ALL the
-  box's points -5.4 m for cars. A rule that ignores the clustering entirely cannot be blamed on
-  the clustering.
-- **and its radar reference is crowded**, which is the likely explanation of the -3 to -6 m
-  recorded above for this drive: one distinct radar return serves 1.33 detections (p90 2.0)
-  against 1.00 (p90 1.4) on selfcal, with double the bearing offset (0.87 deg against 0.41).
-  Treat 11-50-45 range numbers as suspect until that is settled.
-- picking "whichever cluster matches radar best" looks spectacular (72.7% of car detections have
-  one better by >2 m, median gain 8.0 m) and is worthless: that cluster holds 2% of the box, and
-  with the box cut into dozens of slivers some cluster always lands near the answer. It is the
-  same trap as matching radar by nearest range instead of bearing (item 3).
+**The flag predicts a bad detection.** On the car-park drive, flag = support behind the kept
+cluster (`bg_frac >= 0.15`, `bg_gap >= 2 m`), which fires on 11% of detections:
 
-**To finish this, the car-park drive `adps_2026-08-25_12-02-23` must be reachable** -- that is
-where the effect was characterised (100% of its remaining spikes along the ray, 11% of cars at
-40-60 m and 30% past 60 m). Its dump is in `~/fusion_data/measurements/rows_adps120223.pkl` but a
-dump carries no point cloud, so the flag cannot be computed from it. The bag lives on the external
-disk `/media/avalocal/1.0 TB Disk/perception_eval_debug/`, which is not mounted.
+    detection vs radar          |err| > 2 m    |err| > 5 m    median
+    flagged (n=280)                56.8%          39.3%       -1.20 m
+    not flagged (n=2229)           26.4%          11.5%       -0.47 m
+    40-60 m band, flagged           74.1%                    -10.13 m   <- the band item 4 named
+    40-60 m band, not flagged       39.9%                     -0.77 m
+
+**And every way of using it is neutral or worse.** Filtered range error against radar with radar
+held out (one track in four), scored BOTH pooled and on the affected population -- the tracks that
+were actually fed a flagged box, because a rule touching a tenth of the detections cannot be judged
+on a pooled median:
+
+    arm                          pooled median / >2 m     affected tracks: median / >2 m
+    baseline (flag ignored)          1.23 m / 35.6%            1.71 m / 43%
+    sigma_along x2                   1.26 m / 36.9%            1.91 m / 49%
+    sigma_along x4                   1.24 m / 36.9%            1.97 m / 49%
+    sigma_along x8                   1.23 m / 36.9%            1.98 m / 49%
+    range refused, bearing kept      1.23 m / 37.1%            1.98 m / 49%
+    detection withheld entirely      1.27 m / 37.3%            --
+
+The occluded box's range is biased and still worth more than no range: these are short-lived tracks
+(8049 births over 333 frames) and refusing or discounting the only range they get leaves them on a
+coasted estimate that drifts further than the bias. **Keep the flag as a measurement, do not feed
+it to the filter.**
+
+**The other half of the claim is untested, and cannot be tested this way.** "Occlusion is why the
+radar gate costs more here" needs the item-12 method (count radar updates a LiDAR check confirms as
+right or wrong); under `--radar-holdout` the scored tracks never receive a radar update, so the
+"radar gate freed when occluded" arm is identical to baseline by construction. It is in the harness
+for whoever picks that up.
+
+**On the other vehicle drive (11-50-45) the flag does not even apply**, and that is worth knowing
+before anyone re-runs this: `nearest_depth_cluster` cuts at any gap over 5 cm, so nearly every box
+there holds several clusters and the kept one holds a median 3% of the box's points. That drive's
+error is class-correlated (cars -7.4 m, trucks -1.4, buses -0.6) and survives every choice rule
+including the median of ALL box points (-5.4 m for cars), so it is not about which cluster is kept;
+its radar reference is also crowded (one return serves 1.33 detections, p90 2.0, against 1.00 and
+1.4 on selfcal, at double the bearing offset). Suspect that reference before the rule.
+
+One trap recorded for the next person: "pick whichever cluster matches radar best" improves 72.7%
+of car detections by a median 8.0 m and means NOTHING -- that cluster holds 2% of the box, and with
+a box cut into dozens of slivers something always lands near the answer. Same shape as matching
+radar by nearest range instead of bearing (item 3).
 
 Remaining: a drive with many CURVES and cones (levelling still rests on 232 + 15 curve sweeps),
 and the -3 to -6 m at 25-60 m on 11-50-45 (see the crowding note just above -- suspect the
