@@ -43,7 +43,7 @@ export ENABLE_CAMERA_ONLY_FALLBACK="${ENABLE_CAMERA_ONLY_FALLBACK:-false}"
 export ASSOC_MAX_DIST="${ASSOC_MAX_DIST:-6.0}"
 export MERGE_MAX_DIST="${MERGE_MAX_DIST:-2.5}"
 export RADAR_CAMERA_GATE="${RADAR_CAMERA_GATE:-true}"
-export ENABLE_LIDAR_CLUSTERS="${ENABLE_LIDAR_CLUSTERS:-false}"
+export ENABLE_LIDAR_CLUSTERS="${ENABLE_LIDAR_CLUSTERS:-true}"
 # Velocity honesty. 0.0 is the rollback: no covariance inflation and no significance test,
 # so velocity_valid means what it meant before 2026-09-22.
 export TURN_VELOCITY_K="${TURN_VELOCITY_K:-1.0}"
@@ -59,7 +59,8 @@ while [[ $# -gt 0 ]]; do
     --no-levelling) GROUND_LEVELLING="false"; shift ;;
     --no-depth-gate) ENABLE_DEPTH_GATE="false"; shift ;;
     --no-class-vote) ENABLE_CLASS_VOTE="false"; shift ;;
-    --clusters) ENABLE_LIDAR_CLUSTERS="true"; shift ;;
+    --clusters) ENABLE_LIDAR_CLUSTERS="true"; shift ;;   # the default since 2026-09-23
+    --no-clusters) ENABLE_LIDAR_CLUSTERS="false"; shift ;;  # rollback
     --loose-velocity) TURN_VELOCITY_K="0.0"; shift ;;   # rollback: publish velocity as before
     --down) ACTION="down"; shift ;;
     --logs) ACTION="logs"; shift ;;

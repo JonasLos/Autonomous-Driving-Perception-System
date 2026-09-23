@@ -54,9 +54,10 @@ reinstall host Patchwork++ per "Run it" before any offline harness.
 (`--ground`), empty-box drop (`segmentation_empty_fallback:=true` reverts), depth-jump gate
 (`enable_depth_gate`), class vote (`enable_class_vote`), near-field odometry levelling
 (`ground_levelling`), merge distance bound (`MERGE_MAX_DIST=inf` reverts), camera-referenced
-radar range gate (`RADAR_CAMERA_GATE=false` reverts). OFF by default: the 360-degree cluster path
-(`ENABLE_LIDAR_CLUSTERS=true` / `--clusters` turns it on), though every session since 2026-09-21
-has run WITH it.
+radar range gate (`RADAR_CAMERA_GATE=false` reverts), and since 2026-09-23 the 360-degree cluster
+path (`ENABLE_LIDAR_CLUSTERS=false` / `run_fusion.sh --no-clusters` reverts) -- the user's decision
+once the paired measurement resolved it as -1.3 to -1.7 points of orphans, twice. Nothing is OFF by
+default any more except radar-only birth and extent estimation.
 
 **The velocity honesty has a rollback too** (added 2026-09-23): `TURN_VELOCITY_K` /
 `turn_velocity_k` / `run_fusion.sh --loose-velocity`. `0` is the pre-2026-09-22 behaviour exactly
@@ -140,7 +141,8 @@ python3 -m pytest src/object_fusion/test -q
 - `--ground` points the detector at `/perception/lidar_2d_projection_ground` (Patchwork++
   flags per point); without it the detector reads the existing `/lidar_2d_projection`.
 - `--debug-clouds` publishes `/perception/ground_debug/{ground,nonground}` for RViz.
-- `--clusters` turns on the 360-degree LiDAR cluster path (item 7; OFF by default). It adds
+- `--clusters` is now a no-op (the path is ON by default since 2026-09-23); `--no-clusters` is
+  the rollback. The path adds
   `/perception/measurements/lidar_markers` -- thin cyan boxes, one per cluster -- so what the
   path sees beside and behind the car is visible next to the objects.
 - **Never replay with `--start-offset`.** `/tf_static` is only at the bag start; skip it and the
@@ -1046,7 +1048,7 @@ miss. Re-read that band with a range-aware threshold before treating it as a def
 Done when: a drive with real far-field content (a highway run, or anything with vehicles held at
 80-150 m for tens of seconds) exists, and (a)/(b)/(c) are scored on it with `--radar-holdout`.
 
-### 7. Phase 3: 360-degree LiDAR clusters  -- MEASURED 2026-09-18: small gain on current data
+### 7. Phase 3: 360-degree LiDAR clusters  -- LIVE BY DEFAULT since 2026-09-23
 Plan unchanged: clusters may SUSTAIN tracks, never birth them. Stage 1 is built and tested:
 `object_fusion/lidar_clusters.py` (voxelise 0.2 m, range-adaptive gap 0.45 + 0.012 r, reject walls
 and flat patches; 8 tests). Stage 2 measured whether it is worth a node

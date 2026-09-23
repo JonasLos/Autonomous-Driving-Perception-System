@@ -145,9 +145,13 @@ class ObjectAggregatorNode(Node):
         # what keeps an object alive once the car has passed it: measured, the rear sector is the
         # best covered of all (65-70% at 15-60 m against ~1% chance), and holding through the
         # side-sector blind zone takes departing tracks from 25% to 45% held, median 0.7 -> 4.3 s.
-        # See lidar_cluster_detector_node. Off until it has been watched on the vehicle.
+        # See lidar_cluster_detector_node. ON by default since 2026-09-23, by the user's
+        # decision: paired block-by-block against a clusters-off arm on the same drive it removes
+        # 1.3-1.7 points of orphaned measurements (two independent pairs, both resolved), and it
+        # is the only thing that keeps an object alive once the car has passed it. Rollback:
+        # ENABLE_LIDAR_CLUSTERS=false, or run_fusion.sh --no-clusters.
         self._enable_lidar_clusters = bool(
-            self.declare_parameter("enable_lidar_clusters", False).value)
+            self.declare_parameter("enable_lidar_clusters", True).value)
         # Velocity honesty (2026-09-22). While the vehicle yaws, an object's bearing sweeps and
         # the LiDAR returns inside its 2D box change, so the measured position moves across the
         # ray and the filter reads motion that is not there. k is the coefficient of the extra

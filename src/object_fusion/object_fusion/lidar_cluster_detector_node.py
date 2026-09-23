@@ -4,6 +4,7 @@
       -> object_fusion.lidar_clusters
       -> /perception/measurements/lidar   (Detection3DArray, sensor = SENSOR_LIDAR)
 
+LIVE BY DEFAULT since 2026-09-23 (rollback `ENABLE_LIDAR_CLUSTERS=false` / `--no-clusters`).
 These measurements may only SUSTAIN a track the camera started; the aggregator never births from
 them. A cluster carries no semantics -- a bush, a kerb and a car look alike -- and the radar work
 (HANDOFF item 8) measured what unrefereed birth costs.

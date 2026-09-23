@@ -90,7 +90,7 @@ _ARGS = {
     # The 360-degree LiDAR cluster path: ground_projection publishes the full-sweep non-ground
     # cloud, lidar_cluster_detector clusters it, and the aggregator lets those clusters SUSTAIN
     # existing tracks (never birth). One flag turns the whole chain on.
-    "enable_lidar_clusters": "false",
+    "enable_lidar_clusters": "true",
     # Velocity honesty: the extra velocity sigma from a sweeping bearing is k * |omega| * r,
     # and velocity_valid means "distinguishable from standing still". 0.0 is the rollback --
     # no inflation, no significance test, velocity_valid as it was before 2026-09-22.

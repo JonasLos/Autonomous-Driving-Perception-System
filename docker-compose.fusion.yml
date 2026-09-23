@@ -39,6 +39,6 @@ services:
       # Radar range gate against the track's own camera range; false restores the old behaviour.
       RADAR_CAMERA_GATE: "${RADAR_CAMERA_GATE:-true}"
       # 360-degree LiDAR clusters sustaining tracks the camera has passed.
-      ENABLE_LIDAR_CLUSTERS: "${ENABLE_LIDAR_CLUSTERS:-false}"
+      ENABLE_LIDAR_CLUSTERS: "${ENABLE_LIDAR_CLUSTERS:-true}"
       TURN_VELOCITY_K: "${TURN_VELOCITY_K:-1.0}"
       OMP_NUM_THREADS: "${OMP_NUM_THREADS:-4}"

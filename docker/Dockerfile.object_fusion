@@ -52,5 +52,5 @@ CMD ["/bin/bash", "-lc", \
         assoc_max_dist:=${ASSOC_MAX_DIST:-6.0} \
         merge_max_dist:=${MERGE_MAX_DIST:-2.5} \
         radar_camera_gate:=${RADAR_CAMERA_GATE:-true} \
-        enable_lidar_clusters:=${ENABLE_LIDAR_CLUSTERS:-false} \
+        enable_lidar_clusters:=${ENABLE_LIDAR_CLUSTERS:-true} \
         turn_velocity_k:=${TURN_VELOCITY_K:-1.0}"]
