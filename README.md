@@ -23,6 +23,11 @@ Container build/run detail, troubleshooting, and replay tuning live in [DOCKER.m
 - **Lane Detection**: CLRerNet (mmdet 3.3 / mmcv 2.2), publishing `/clrernet/*` lane polylines and a 3D centerline.
 - **LiDAR Segmentation**: SphereFormer with the SparseTransformer CUDA extension, publishing SemanticKITTI classes with RGB colors.
 - **LiDAR→2D Projection**: `src/transform.py`, publishing `/lidar_2d_projection` — the shared input every 2D stage lifts into 3D.
+- **Track-level Fusion** *(separate stack, consumes the above)*: `src/object_fusion` turns
+  `/fused_bbox` and radar into tracked objects with velocity on `/perception/objects`, adding
+  Patchwork++ ground removal, a 360° LiDAR cluster path and a camera-referenced radar range gate.
+  It does not modify any node above it — see [src/object_fusion/HANDOFF.md](src/object_fusion/HANDOFF.md)
+  for how to run it, every measurement behind it, and the rollback for each rule.
 - **ROS Integration**: ROS 2 Jazzy, `rmw_zenoh_cpp` middleware, host networking, one container per node.
 
 Topic names are centralized in [src/perception_common/topics.yaml](src/perception_common/topics.yaml)

@@ -150,5 +150,9 @@ cython_debug/
 dataset/
 adps_*
 
+# Recordings written into the repo root by the recorder (3.7 GB and growing).
+# Ignored so they do not show as untracked and cannot be swept away by `git clean -fd`.
+rosbags/
+
 # Keep local checkpoint out of git history
 src/sphereformer_ros/src/SphereFormer/model_semantic_kitti.pth
