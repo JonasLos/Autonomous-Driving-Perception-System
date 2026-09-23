@@ -114,6 +114,8 @@ scripts/filter_scale_ab.py    item 2: does scaling the camera sigma change held-
 scripts/coast_budget_ab.py    item 10: re-acquisition gaps per sensor vs the coast budgets
 scripts/coast_sweep_ab.py     item 10: what a longer coast budget costs (orphans, held-out error)
 scripts/cluster_sustain_ab.py item 7: cluster path on vs off -- lifetime, rear survival, ghosts
+scripts/drive_survey.py       every scored drive side by side: does the live rule hold, and
+                              can that drive referee range at all?
 scripts/occlusion_ab.py       does a box with several depth clusters range the occluder?
 scripts/far_orphan_split.py   why a >80 m measurement has no track: none, off-bearing, or
                               on the bearing but out of range
@@ -993,9 +995,37 @@ of car detections by a median 8.0 m and means NOTHING -- that cluster holds 2% o
 a box cut into dozens of slivers something always lands near the answer. Same shape as matching
 radar by nearest range instead of bearing (item 3).
 
-Remaining: a drive with many CURVES and cones (levelling still rests on 232 + 15 curve sweeps),
-and the -3 to -6 m at 25-60 m on 11-50-45 (see the crowding note just above -- suspect the
-reference before the rule).
+**ALL SIX DRIVES RE-SCORED on the current rules, 2026-09-23** (`scripts/drive_survey.py`, which
+reads every `neighbour_ab --dump` together and uses the harness's own spike definition -- verified
+against the harness's table on 11-55-43, both 1.4%):
+
+    drive         dets    A25   DropNF | dets/return  bearing | occluded  kept frac | range vs radar
+    11-50-45      1196    1.1%   0.0%  |    1.33       0.87d  |    0.7%      0.03   | -1.80 m, 49% >2
+    11-52-15       911   15.2%   1.8%  |    1.00       0.19d  |    4.0%      1.00   | -1.37 m, 18% >2
+    11-55-43      1644    5.8%   1.4%  |    1.00       0.59d  |    6.5%      0.50   | -0.20 m, 22% >2
+    11-58-32        74   10.4%   1.6%  |    1.00       1.32d  |    4.1%      0.41   | -2.07 m, 51% >2
+    12-02-23      2898    9.3%   5.2%  |    1.29       0.61d  |   11.5%      0.09   | -0.48 m, 30% >2
+    selfcal       4519   15.6%   1.5%  |    1.00       0.41d  |    5.6%      1.00   | -1.12 m, 40% >2
+
+**The live rule beats the rule the existing pipeline runs on every drive**, by 3x to 10x, including
+the two it was never tuned on. That is item 4's done-when, met. The numbers are also BETTER than
+the ones recorded above for the same drives (11-55-43 read 2.6% for DropNF in 2026-09-17, now
+1.4%): the arm has called the production `DepthJumpGate` directly since that date, so the older
+figures carry the duplicate-gate divergence and should not be quoted.
+
+Two columns are about whether a drive can be a REFEREE at all, and they matter more than the spike
+rates:
+
+- **dets/return** -- detections sharing one distinct matched radar return. At 1.00 every detection
+  had its own; 11-50-45 (1.33) and 12-02-23 (1.29) are crowded, so a range number from those two
+  says as much about the matching as about the stack. That is the likely story behind the -3 to
+  -6 m recorded for 11-50-45, and it is why the occlusion work could not use that drive.
+- **kept frac** -- how much of the box the kept depth cluster holds. 1.00 on the cone drives (one
+  object per box) against 0.03 and 0.09 on the vehicle-dense ones, where boxes fragment into
+  slivers. A rule that assumes "the nearest cluster is the object" is on very different ground in
+  those two worlds, and only the second kind has ever shown the occlusion failure.
+
+Remaining: a drive with many CURVES and cones (levelling still rests on 232 + 15 curve sweeps).
 OLD PLAN:
 Why: everything is scored on selfcal 09-08 (+ 09-03 for levelling). 09-03 has only 15 curve sweeps;
 the user's adps bags are unscored.
