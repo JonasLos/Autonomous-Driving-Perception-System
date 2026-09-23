@@ -183,7 +183,17 @@ Three rules that this work got wrong at least once each, and which silently prod
 wrong answers:
 
 1. **Record a FULL loop** (>= 420 s; the bag is 398 s) before comparing two live arms. A 4-minute
-   window covers a different stretch each time and the counts move by 2x.
+   window covers a different stretch each time and the counts move by 2x. **And a full loop is
+   still not enough to compare two arms**: orphans arrive in BURSTS while the vehicle turns (4.4%
+   of detections orphaned driving straight, 17.1% while turning), so the 4500 detections in a loop
+   are not 4500 independent samples. Resampling 10 s BLOCKS puts a 95% interval of +-3 points on
+   one loop where counting detections claims +-0.6. That is the whole explanation of the
+   "unexplained" 2.3% / 2.7% / 5.7% spread across three loops of one build: one loop cannot
+   resolve less than a few points. `live_orphans.py` now prints that interval, and
+   `live_orphans.py --compare A B` PAIRS the two arms block by block on the same drive, which
+   cancels the content and resolves about three times finer (it also prints an alignment check --
+   the per-block detection counts must correlate above ~0.8, or the recordings do not cover the
+   same stretch and the pairing is meaningless).
 2. **Rotate `lidar_tc` -> `ego` (5.35 deg)** when comparing the measurement markers to the object
    markers. Unrotated, the aggregator is charged 6.5 m of cross-offset at 70 m: 84% "orphans".
 3. **Hold radar out** (`--radar-holdout 4`) when scoring the filter against radar, or the state is
@@ -538,6 +548,10 @@ usually well under) and the next cone up the line (5 m and more on this drive).
 (Re-measured 2026-09-23 on the corrected frame match, rule 4; the same three recordings read
 15.7 / 10.5 / 9.0% and 1.3 / 3.0 / 5.6% on the old one. All three arms published at the same rate,
 so the DECISION never depended on the defect -- only the absolute numbers did.)
+
+Re-checked the same day against the honest interval (rule 1): unbounded 10.3% [6.6-13.9], bounded
+4.1% [2.4-6.2], and PAIRED block by block the bound is -6.2 points [-8.9, -3.3] -- resolved. The
+decision stands on a number that can carry it.
 
 Read the third row before repeating it: narrowing `assoc_max_dist` buys 1.5 more points of objects
 and pays 2.6 points of duplicate boxes, because a detection that cannot reach its coasting track
@@ -1127,11 +1141,22 @@ last saw the object) stays around a second.
     clusters ON  (3 loops)       2.3 / 2.7 / 5.7%  2.0-2.6% 49.6 Hz     1.4 / 1.7 / 2.4%
     clusters ON, merge unbounded 7.1%            1.0%       49.6 Hz     4.5%
 
-The path costs nothing measurable: the far band is the same with it and without, and the spread
-BETWEEN loops of the same build (2.3-5.7%) is now larger than any difference between arms, which
-is the honest headline. (The third arm is `MERGE_MAX_DIST=inf`, which does not disable merging --
-it removes the distance BOUND and merges more, item 11's original behaviour. It is worse
-everywhere, which is item 11 reproduced.)
+The far band is the same with the path and without. The spread between loops of one build
+(2.3-5.7%) is not instability: it is this metric's own interval, +-3 points on a single loop
+(rule 1). (The third arm is `MERGE_MAX_DIST=inf`, which does not disable merging -- it removes the
+distance BOUND and merges more, item 11's original behaviour. It is worse everywhere, which is
+item 11 reproduced.)
+
+**PAIRED, which is the only design that can resolve it** (`live_orphans.py --compare`, same drive,
+block by block):
+
+    clusters off -> on, pair 1 (sel_velfix_noclusters vs markers2)   -1.3 points  CI -2.7 to -0.2
+    clusters off -> on, pair 2 (far_clusters_off vs far_merge_on)    -1.7 points  CI -3.9 to -0.1
+
+Two independent pairs, both resolved, both negative: the cluster path REMOVES about 1.5 points of
+orphaned measurements. Unpaired, those arms' intervals overlap completely and the effect is
+invisible -- which is why this comparison wobbled between "worse", "nothing" and "better"
+depending on which loop was read.
 
 **Two wrong answers were published here first, and the reason is worth more than the result.**
 On 2026-09-22 this section reported a ~5-point far-band cost and blamed the cluster path; on
@@ -1356,8 +1381,9 @@ and the bridge default is set to it.
   skipped while it refills. Any larger ratio is a real odometry problem.
 - 2.3-5.7% of measurements have no published track (range-aware test, stamp-matched), and
   2.0-2.6% of published tracks are a second box on a measurement that already has one -- three
-  full loops of the shipped build, 2026-09-22/23. The 3.4-point spread BETWEEN loops of the same
-  build is the number to remember: it is larger than any arm difference measured here.
+  full loops of the shipped build, 2026-09-22/23. That spread is NOT instability in the stack: one
+  loop of this metric carries a +-3 point interval, because orphans burst while turning (rule 1).
+  Quote the interval, and compare arms with `--compare`, never loop against loop.
   Older numbers in this file (10.5% / 3.0%, 15.7%, and the 7.8-9.0% reported on 2026-09-22) were
   measured on the recording-time match; `--log-time` reproduces them.
 - Velocity is now WITHHELD unless it is distinguishable from standing still, so a genuinely

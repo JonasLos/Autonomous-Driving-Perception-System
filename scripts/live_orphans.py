@@ -87,6 +87,96 @@ def load(path):
     return meas, pub
 
 
+BLOCK_S = 10.0
+
+
+def block_counts(path, block_s=BLOCK_S):
+    """(detections, orphans) per BLOCK_S seconds of drive.
+
+    Orphans arrive in bursts -- the rate is 4.4% while driving straight and 17.1% while turning,
+    because a sweeping bearing is exactly when a track lags its measurement. So the detections in
+    one burst are not independent samples of anything, and an interval computed over detections is
+    far too narrow: on one loop it claims +-0.6 points where resampling BLOCKS says +-3.4.
+    """
+    meas, pub = load(path)
+    pub_t = [t for t, _ in pub]
+    tol = 0.15 if USE_LOG_TIME else STAMP_TOL_S
+    out, t0 = {}, (meas[0][0] if meas else 0.0)
+    for t, cs in meas:
+        i = bisect.bisect_left(pub_t, t)
+        cand = [j for j in (i - 1, i) if 0 <= j < len(pub)]
+        if not cand:
+            continue
+        j = min(cand, key=lambda k: abs(pub_t[k] - t))
+        if abs(pub_t[j] - t) > tol:
+            continue
+        while j + 1 < len(pub) and pub_t[j + 1] == pub_t[j]:
+            j += 1
+        tracks = pub[j][1]
+        b = int((t - t0) // block_s)
+        for (x, y) in cs:
+            r = math.hypot(x, y)
+            cov = False
+            if tracks:
+                cov = min(math.hypot(x - qx, y - qy) for (qx, qy) in tracks) < 3.0
+                if not cov and r >= RANGE_TRUST_MAX_M:
+                    ux, uy = x / r, y / r
+                    cov = any(abs(-(qx - x) * uy + (qy - y) * ux) < 3.0
+                              and abs((qx - x) * ux + (qy - y) * uy) < FAR_ALONG_FRAC * r
+                              for (qx, qy) in tracks)
+            n, o = out.get(b, (0, 0))
+            out[b] = (n + 1, o + (0 if cov else 1))
+    return out
+
+
+def _boot(arr, rng, draws=4000):
+    """Bootstrap a rate by resampling BLOCKS, not detections."""
+    idx = rng.integers(0, len(arr), size=(draws, len(arr)))
+    return np.array([arr[d, 1].sum() / max(arr[d, 0].sum(), 1) for d in idx])
+
+
+def block_ci(path):
+    rng = np.random.default_rng(0)
+    b = block_counts(path)
+    arr = np.array([[v[0], v[1]] for v in b.values()], dtype=float)
+    if len(arr) < 5:
+        return None
+    boot = _boot(arr, rng)
+    return (100 * arr[:, 1].sum() / arr[:, 0].sum(),
+            100 * float(np.percentile(boot, 2.5)), 100 * float(np.percentile(boot, 97.5)),
+            len(arr))
+
+
+def compare(path_a, path_b):
+    """Two arms, PAIRED block by block on the same drive -- the design that can resolve them.
+
+    Comparing two loops arm-to-arm cannot: one loop of this metric carries a +-2 to +-3 point
+    interval, so anything smaller than that vanishes into drive content. Pairing the same stretch
+    of the same drive cancels the content, and the difference resolves at about a third of that.
+    Both recordings must start at the same point of the loop; the alignment check below says so.
+    """
+    rng = np.random.default_rng(0)
+    A, B = block_counts(path_a), block_counts(path_b)
+    keys = sorted(set(A) & set(B))
+    if len(keys) < 5:
+        sys.exit("the two recordings share too few blocks to pair")
+    da = np.array([[A[k][0], A[k][1], B[k][0], B[k][1]] for k in keys], dtype=float)
+    corr = float(np.corrcoef(da[:, 0], da[:, 2])[0, 1])
+    ra = 100 * da[:, 1].sum() / da[:, 0].sum()
+    rb = 100 * da[:, 3].sum() / da[:, 2].sum()
+    idx = rng.integers(0, len(da), size=(4000, len(da)))
+    boot = np.array([100 * (d[:, 3].sum() / max(d[:, 2].sum(), 1)
+                            - d[:, 1].sum() / max(d[:, 0].sum(), 1)) for d in da[idx]])
+    lo_, hi_ = np.percentile(boot, [2.5, 97.5])
+    print(f"  A {path_a.split('/')[-2]:24s} orphaned {ra:5.1f}%")
+    print(f"  B {path_b.split('/')[-2]:24s} orphaned {rb:5.1f}%")
+    print(f"  PAIRED over {len(keys)} blocks of {BLOCK_S:.0f} s: B - A = {rb - ra:+.1f} points, "
+          f"95% CI {lo_:+.1f} to {hi_:+.1f}  -> "
+          f"{'RESOLVED' if (lo_ > 0) == (hi_ > 0) else 'NOT resolved (the interval spans zero)'}")
+    print(f"  alignment check: detections per block correlate {corr:+.2f} between the two "
+          f"recordings" + ("" if corr > 0.8 else "  <- TOO LOW, these do not cover the same drive"))
+
+
 def main(path):
     meas, pub = load(path)
     pub_t = [t for t, _ in pub]
@@ -165,6 +255,12 @@ def main(path):
     aware = np.concatenate([np.asarray(v) for v in bands.values()])
     print(f"  ORPHANED: {100 * aware.mean():.1f}%  (range-aware: past {RANGE_TRUST_MAX_M:.0f} m a "
           f"track on the bearing counts)   naive 3 m test: {100 * np.mean(d >= 3.0):.1f}%")
+    ci = block_ci(path)
+    if ci:
+        print(f"  the same number with an HONEST interval: {ci[0]:.1f}% "
+              f"(95% CI {ci[1]:.1f}-{ci[2]:.1f}%, resampling {ci[3]} blocks of "
+              f"{BLOCK_S:.0f} s, not detections). One loop cannot resolve less than a few points; "
+              f"use --compare for two arms.")
     print("  nearest published track:  "
           + "  ".join(f"<{c} m {100 * np.mean(d < c):5.1f}%" for c in (1, 2, 3, 5, 8))
           + f"   none at all {100 * np.mean(~np.isfinite(d)):.1f}%")
@@ -195,6 +291,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("recordings", nargs="+")
+    ap.add_argument("--compare", action="store_true",
+                    help="two recordings: pair them block by block on the same drive and report "
+                         "the difference with an interval that can actually resolve it")
     ap.add_argument("--log-time", action="store_true",
                     help="match on RECORDING time instead of header stamps, which reproduces "
                          "every orphan number measured before 2026-09-23 -- and their bias")
@@ -202,6 +301,11 @@ if __name__ == "__main__":
     USE_LOG_TIME = args.log_time
     print("  matching on " + ("RECORDING time (the pre-2026-09-23 rule, biased by pipeline "
                               "latency)" if USE_LOG_TIME else "header stamps"))
-    for p in args.recordings:
-        main(p)
-        print()
+    if args.compare:
+        if len(args.recordings) != 2:
+            sys.exit("--compare takes exactly two recordings")
+        compare(*args.recordings)
+    else:
+        for p in args.recordings:
+            main(p)
+            print()
