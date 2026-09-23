@@ -11,7 +11,7 @@ where the track sits on the measurement->radar segment.
 Anything inside [0, 1] is the filter blending two disagreeing sensors, which is its job.
 Outside it is the filter being somewhere neither sensor put it.
 """
-import sys, math, bisect, argparse
+import math, bisect, argparse
 import numpy as np
 from mcap_ros2.reader import read_ros2_messages
 

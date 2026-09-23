@@ -64,7 +64,7 @@ from rclpy.qos import (  # noqa: E402
 
 from builtin_interfaces.msg import Time as TimeMsg  # noqa: E402
 from rosgraph_msgs.msg import Clock  # noqa: E402
-from sensor_msgs.msg import Image, PointCloud2, PointField  # noqa: E402
+from sensor_msgs.msg import Image, PointCloud2  # noqa: E402
 from sensor_msgs_py import point_cloud2  # noqa: E402
 from std_msgs.msg import Header  # noqa: E402
 from tf2_msgs.msg import TFMessage  # noqa: E402

@@ -78,14 +78,14 @@ from object_fusion.ego_motion import EgoTwist, TwistBuffer            # noqa: E4
 from object_fusion.measurement_queue import Measurement, MeasurementQueue  # noqa: E402
 from object_fusion.tracker import sigma_along as _sigma_along        # noqa: E402
 from object_fusion.tracker import (                                   # noqa: E402
-    CAMERA_GATE_CHI2, RADAR_GATE_CHI2, compensated_range_rate, gated_update, sigma_cross,
+    CAMERA_GATE_CHI2, compensated_range_rate, gated_update, sigma_cross,
     init_from_radar,
     kalman_update, lidar_measurement, predict, process_noise, radar_R, radar_h_and_H,
     range_is_trustworthy, wrap_deg,
 )
-from object_fusion.association import associate_radar, solve_assignment  # noqa: E402
+from object_fusion.association import associate_radar  # noqa: E402
 from object_fusion.track_store import (                               # noqa: E402
-    SENSOR_CAMERA, SENSOR_RADAR, Track, TrackStore, radar_expected,
+    SENSOR_CAMERA, SENSOR_RADAR, Track, TrackStore,
 )
 from radar_ros.radar_geometry import cartesian_to_polar, gate_tracks  # noqa: E402
 

@@ -117,8 +117,6 @@ scripts/cluster_sustain_ab.py item 7: cluster path on vs off -- lifetime, rear s
 scripts/drive_survey.py       every scored drive side by side: does the live rule hold, and
                               can that drive referee range at all?
 scripts/occlusion_ab.py       does a box with several depth clusters range the occluder?
-scripts/far_orphan_split.py   why a >80 m measurement has no track: none, off-bearing, or
-                              on the bearing but out of range
 scripts/publish_rate.py       publish cadence and tracks per published frame, per recording
 scripts/velocity_truth_ab.py  false velocity: apparent speed of STATIC objects by ego yaw rate
                               --rule scores a velocity_valid rule: false arrows kept vs real

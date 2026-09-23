@@ -13,7 +13,6 @@ assumption) is wrong instead.
 import pickle, math, sys
 import numpy as np
 sys.path.insert(0, "scripts"); sys.path.insert(0, "src/object_fusion"); sys.path.insert(0, "src/perception_common")
-import ground_ab as G
 from object_fusion.projection import pixel_ray
 
 rows = pickle.load(open(sys.argv[1], "rb"))

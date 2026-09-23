@@ -36,7 +36,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "radar_ros"))
-from radar_ros.radar_geometry import associate, gate_tracks  # noqa: E402
+from radar_ros.radar_geometry import gate_tracks  # noqa: E402
 
 RADAR_TOPIC = "/delphi_esr_interface/radar/tracks"
 ODOM_TOPIC = "/novatel/oem7/odom"

@@ -19,7 +19,6 @@ questions that only make sense across drives:
 """
 
 import glob
-import math
 import pickle
 import sys
 from collections import defaultdict

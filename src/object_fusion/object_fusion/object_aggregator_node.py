@@ -37,7 +37,7 @@ from geometry_msgs.msg import Vector3
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker, MarkerArray
-from fusion_msgs.msg import Detection3D, Detection3DArray, FusedObject, FusedObjectArray
+from fusion_msgs.msg import Detection3DArray, FusedObject, FusedObjectArray
 
 from perception_common.stamp_sync import apply_bounded_parameters
 
@@ -93,10 +93,6 @@ class ObjectAggregatorNode(Node):
         cfg = yaml.safe_load(
             open(get_package_share_directory("object_fusion") + "/config/topics.yaml",
                  encoding="utf-8"))
-        common = yaml.safe_load(
-            open(get_package_share_directory("perception_common") + "/topics.yaml",
-                 encoding="utf-8"))
-
         m = cfg["topics"]["measurements"]
         self._out_topic = cfg["topics"]["object_fusion"]["objects"]
         self._marker_topic = cfg["topics"]["object_fusion"]["markers"]

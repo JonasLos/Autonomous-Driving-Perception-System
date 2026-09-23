@@ -23,7 +23,6 @@ radar frame) are split into range segments (gaps > 1.5 m), and the event is clas
 
 import argparse
 import glob
-import math
 import os
 import sys
 from collections import Counter

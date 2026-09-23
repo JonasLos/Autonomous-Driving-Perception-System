@@ -54,7 +54,7 @@ from tf2_msgs.msg import TFMessage  # noqa: E402
 from visualization_msgs.msg import Marker, MarkerArray  # noqa: E402
 
 import lane_ab as AB  # noqa: E402
-from perception_common.lane_geometry import LanePairSelector, make_grid  # noqa: E402
+from perception_common.lane_geometry import LanePairSelector  # noqa: E402
 from perception_common.stamp_sync import DEFERRED, StampMatchedBuffer  # noqa: E402
 from mcap_ros2.reader import read_ros2_messages  # noqa: E402
 
@@ -416,7 +416,6 @@ def main():
     if args.start_offset > 0:
         frames = [f for f in frames if (f["stamp"] - t0) * 1e-9 >= args.start_offset]
 
-    prev_ns = None
     try:
         pass_no = 0
         while not ctl.quit:

@@ -84,7 +84,6 @@ from rclpy.serialization import deserialize_message  # noqa: E402
 from rosidl_runtime_py.utilities import get_message  # noqa: E402
 
 from perception_common.stamp_sync import DEFERRED, StampMatchedBuffer  # noqa: E402
-from perception_common.utils import stamp_to_seconds  # noqa: E402
 
 FUSION_NODE_PY = os.path.join(
     REPO_ROOT, "src", "Custom_YOLO_ROS", "src", "yolo_ros",

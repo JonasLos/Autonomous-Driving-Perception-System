@@ -6,7 +6,6 @@ measured spread bounds the object's cross-ray sigma: sigma_obj = sqrt(max(0, mea
 import pickle, math, sys
 import numpy as np
 sys.path.insert(0, "scripts"); sys.path.insert(0, "src/object_fusion")
-import ground_ab as G
 from object_fusion.tracker import sigma_cross
 
 rows = pickle.load(open(sys.argv[1], "rb"))
