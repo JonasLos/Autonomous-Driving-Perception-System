@@ -1,5 +1,14 @@
 # Planner obstacles from object_fusion
 
+> **MOVED 2026-09-24.** The integration was rebuilt on the right planner line: branch
+> `perception-fusion-integration` off `latest_tamu_2026-08-04`, workspace `~/latest_planner`.
+> Its own doc is `AVA_Planner-ava_ros2_planner/AVA_Local_Planner/docs/object_fusion_integration.md`
+> in that branch, with launch files `lmp_marked_obstacle_avoidance.launch.py` and
+> `lmp_marked_no_obstacles.launch.py` (both `planner_main.py`, the planner that follows the
+> perceived lanes). What follows describes the first integration on `latest_lmp_experimentation`
+> (`~/planner/src`, commits `c4e05da`, `6eb9a14`, never pushed); it is kept for its measurements.
+
+
 > **This is the versioned copy** (added 2026-09-23). The working copy the planner team edits lives
 > at `~/planner/docs/object_fusion_integration.md`, beside their other planner docs, and is not in
 > any git repository. When they diverge, the one to trust is whichever matches

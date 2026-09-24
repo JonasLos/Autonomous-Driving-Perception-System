@@ -80,6 +80,8 @@ line shows `rewinds=` and per-sensor `dt<=0 n/N med +Xms` -- if `dt<=0` is not ~
 not predicting, which is the failure that looked like "the boxes update slowly". In RViz, a white
 arrow on a track is one second of its velocity; in `passthrough` there are none by design.
 
+**Planner integration moved (2026-09-24)** to branch `perception-fusion-integration` on `latest_tamu_2026-08-04` in `~/latest_planner` — see "Feeding the planner". Vehicle test next, with `lmp_marked_obstacle_avoidance.launch.py` / `lmp_marked_no_obstacles.launch.py`.
+
 **Outstanding** (updated 2026-09-23; nothing here needs a decision from the user):
 1. **Blocked on a drive with traffic and far-field objects** -- the one the user has asked for
    next: item 6 (the 80+ m band), item 8 (radar-only birth), and the cluster path on MOVING
@@ -615,6 +617,15 @@ the camera measurement forces the measured gap to zero and answers the question 
 assumption (it reported the radar 0.06 m from the camera; by bearing it is 0.32 m).
 
 ## Feeding the planner (2026-09-17)
+
+> **MOVED 2026-09-24.** The integration was rebuilt on the right planner line: branch
+> `perception-fusion-integration` off `latest_tamu_2026-08-04`, workspace `~/latest_planner`.
+> Its own doc is `AVA_Planner-ava_ros2_planner/AVA_Local_Planner/docs/object_fusion_integration.md`
+> in that branch, with launch files `lmp_marked_obstacle_avoidance.launch.py` and
+> `lmp_marked_no_obstacles.launch.py` (both `planner_main.py`, the planner that follows the
+> perceived lanes). What follows describes the first integration on `latest_lmp_experimentation`
+> (`~/planner/src`, commits `c4e05da`, `6eb9a14`, never pushed); it is kept for its measurements.
+
 
 The local planner (`~/planner/src/AVA_Local_Planner`, its own repo) now has launch files that take
 obstacles from this stack. **The full write-up lives in the planner repo:
