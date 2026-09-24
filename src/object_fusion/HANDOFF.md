@@ -91,9 +91,8 @@ arrow on a track is one second of its velocity; in `passthrough` there are none 
 2. **On the vehicle**: the live isolation re-check (replay passed; the car never has), the planner
    bridge's first run there (it now places obstacles 1.7 m differently, item 13), and timing
    under real load (cluster 22-29 ms, ground projection 12-13 ms, both replay-only).
-3. **Small and open**: on 11-50-45 cars read ~7 m short of radar at every range, under every
-   point-selection rule and under strict radar matching -- real, class-specific, unexplained.
-   And the RNR label question (Housekeeping).
+3. **Small and open**: the RNR label question (Housekeeping). (The 11-50-45 "cars ~7 m short of
+   radar" is closed: a reference artefact, see "The 11-50-45 car bias" under item 4.)
 
 Settled this session and no longer open: item 13 (decided, see its section), the far-band "cost"
 of the cluster path (an audit defect, item 7), the occlusion flag (refuted as a filter input and
@@ -1007,7 +1006,8 @@ there holds several clusters and the kept one holds a median 3% of the box's poi
 error is class-correlated (cars -7.4 m, trucks -1.4, buses -0.6) and survives every choice rule
 including the median of ALL box points (-5.4 m for cars), so it is not about which cluster is kept.
 It is not the radar matching either, though this line first said so: see "Is the radar match
-honest?" below. The cars' bias on this drive is real and still unexplained.
+honest?" below. The cars' bias turned out to be the radar's, not ours: see "The 11-50-45 car
+bias" below.
 
 One trap recorded for the next person: "pick whichever cluster matches radar best" improves 72.7%
 of car detections by a median 8.0 m and means NOTHING -- that cluster holds 2% of the box, and with
@@ -1061,6 +1061,27 @@ the strict rule; the greedy one is gone.
   object per box) against 0.03 and 0.09 on the vehicle-dense ones, where boxes fragment into
   slivers. A rule that assumes "the nearest cluster is the object" is on very different ground in
   those two worlds, and only the second kind has ever shown the occlusion failure.
+
+**The 11-50-45 car bias is a reference artefact: the radar ranges the bus behind the car
+(2026-09-24).** The -7 m is almost one object: 255 of the 271 scored car detections are tracker id
+42, a sedan (seen from behind) parked in front of two buses, beside two semi trailers (camera
+frames checked at the median, worst and one agreeing detection). The other two car ids are 14 and 2 detections.
+Two independent checks say our range is right and the radar's is not:
+
+- **Camera size.** Box width x range / focal length gives the car's implied width. From our
+  (LiDAR) range: median 2.56 m, p10-p90 2.45-2.61 m, flat while the car goes from 12 to 38 m. From
+  the radar range: 3.34 m, p10-p90 2.52-3.91. A range that is wrong by a varying 0-17 m cannot give
+  a constant physical width; ours does, and 2.5 m is a car's width plus a loose box.
+- **LiDAR on the radar's bearing** (+-1.5 deg, LiDAR-frame z from -2.2 to 0.9 m, cut into objects
+  at 1.5 m gaps). Of the id-42 readings with radar > 3 m behind us, 77% have a SEPARATE LiDAR
+  object at the radar's range (median 8.2 m behind the car), 20% have only the car, 3% only
+  something at the radar range. Base rate in this crowded lot, from the 442 detections that agree
+  with radar: a separate object 8 m behind on the same bearing 40% of the time -- so this check
+  discriminates, but it is the width check that carries the conclusion.
+
+The same split holds for the trucks' short readings (50% two objects, median 8.0 m behind): at a
+yard of parked vehicles nose to tail, the ESR's strongest return on a bearing is often the larger
+vehicle behind. Nothing to fix in the stack; 11-50-45 should not be used to referee car range.
 
 Remaining: a drive with many CURVES and cones (levelling still rests on 232 + 15 curve sweeps).
 OLD PLAN:
