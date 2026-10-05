@@ -1,9 +1,10 @@
 # object_fusion — handoff
 
-State as of 2026-09-22. Everything here is NEW; no pre-existing repository file was modified
-at any point.
+State as of 2026-10-05. Everything here is NEW. The only pre-existing repository files touched
+are documentation, each with the user's explicit go-ahead: `.gitignore`, `README.md` and
+`CHANGELOG.md` (2026-09-23) and `DOCKER.md` (2026-10-05). No pre-existing code was modified.
 
-## RESUME HERE (updated 2026-09-22, machine shut down clean)
+## RESUME HERE (updated 2026-10-05)
 
 **Start with "TO DO" at the bottom of this file** -- it is the prioritised plan, each item with
 its steps and a done-when test.
@@ -14,8 +15,8 @@ Runtime `ros2 param set` is fine. Measure offline before changing behaviour and 
 numbers. sudo needs a password -- never ask for it; `systemctl --no-ask-password reboot` works,
 restarting system services (e.g. anydesk) does not.
 
-**The work is COMMITTED** on branch **`radar_integration_and_fusion`**, through `6ee6e6c`
-(2026-09-22). The trail: `e462094` (by the user, 2026-09-16) carried the 12 pre-existing
+**The work is COMMITTED** on branch **`radar_integration_and_fusion`** (`git log` for the tip;
+the last behaviour change before 2026-10-05 was `fdf1022`, clusters on by default). The trail: `e462094` (by the user, 2026-09-16) carried the 12 pre-existing
 modifications that were already in the working tree; `de9a28d` the merge distance bound and items
 11/12; then the radar-camera gate, the 360-degree cluster path, and `4614ac4` + `6ee6e6c` for the
 velocity honesty and its verification. NOTHING IS PUSHED -- the user pushes. So the old isolation check -- "`git status` shows exactly 12 entries" -- no longer
@@ -28,18 +29,20 @@ applies; the tree is clean. Check isolation instead with
 nine modified paths, every one of them first added by `e462094` itself -- check with
 `git log --oneline --diff-filter=A -- <path>`.
 
-**Live demo** (the user watches RViz on DISPLAY=:1). The `perception-object-fusion` image is
-current as of 2026-09-17 (filtered default); rebuild only after code changes.
+**Live demo** (the user watches RViz on DISPLAY=:1). The `perception-object-fusion` image was
+rebuilt 2026-10-05 for the ground-flag default. On the VEHICLE the container runs the code baked
+into the image (only replay bind-mounts the source), so rebuild after any code change and before
+any drive -- see "Run it".
 
 ```bash
 scripts/run_radar.sh  --replay ~/selfcal_loc_2026-09-08_11-47-43 --obstacle-only     # existing stack
-scripts/run_fusion.sh --replay ~/selfcal_loc_2026-09-08_11-47-43 --ground --clusters
+scripts/run_fusion.sh --replay ~/selfcal_loc_2026-09-08_11-47-43
 DISPLAY=:1 rviz2 -d src/object_fusion/config/object_fusion.rviz --ros-args -p use_sim_time:=true &
 scripts/play_rosbag.sh -l ~/selfcal_loc_2026-09-08_11-47-43      # from the START (tf_static)
 ```
 
-That is exactly what was running when the machine was shut down on 2026-09-22, except that the bag
-in the player was `adps_2026-08-25_11-58-32` (two vehicles pass -- the drive that shows whether a
+That is what was running when the machine was shut down on 2026-09-22 (then with `--ground
+--clusters`, both the defaults now), except that the bag in the player was `adps_2026-08-25_11-58-32` (two vehicles pass -- the drive that shows whether a
 velocity arrow is real). Add `--debug-clouds` for the ground/non-ground clouds. **Exactly one bag
 player**: two of them interleave sensors from different points of the drive, both publish `/clock`,
 and the result looks like a broken tracker. `pkill -f "ros2 bag play"` kills the shell that runs
@@ -51,13 +54,16 @@ Neither stack depends on the bag path, so switching bags = stop the player, star
 reinstall host Patchwork++ per "Run it" before any offline harness.
 
 **Live by default (all measured, all with a rollback parameter):** Patchwork++ ground flags
-(`--ground`), empty-box drop (`segmentation_empty_fallback:=true` reverts), depth-jump gate
+(`PROJECTION_TOPIC=/lidar_2d_projection` / `run_fusion.sh --no-ground` reverts; until 2026-10-05
+this needed `--ground`, and a bare `run_fusion.sh` silently ran the older percentile-cut rule),
+empty-box drop (`segmentation_empty_fallback:=true` reverts), depth-jump gate
 (`enable_depth_gate`), class vote (`enable_class_vote`), near-field odometry levelling
 (`ground_levelling`), merge distance bound (`MERGE_MAX_DIST=inf` reverts), camera-referenced
 radar range gate (`RADAR_CAMERA_GATE=false` reverts), and since 2026-09-23 the 360-degree cluster
 path (`ENABLE_LIDAR_CLUSTERS=false` / `run_fusion.sh --no-clusters` reverts) -- the user's decision
 once the paired measurement resolved it as -1.3 to -1.7 points of orphans, twice. Nothing is OFF by
-default any more except radar-only birth and extent estimation.
+default any more except radar-only birth, extent estimation and the camera-only fallback.
+`run_fusion.sh -h` lists every rollback; `run_fusion.sh --status` reads them back off the nodes.
 
 **The velocity honesty has a rollback too** (added 2026-09-23): `TURN_VELOCITY_K` /
 `turn_velocity_k` / `run_fusion.sh --loose-velocity`. `0` is the pre-2026-09-22 behaviour exactly
@@ -75,7 +81,7 @@ parameter back from the running node. Check that way after adding any new env va
 
 **This version is the one the user watched and called good** (2026-09-16, on
 `adps_2026-08-25_11-58-32` in `publish_mode:=filtered`). It carries the three motion fixes and the
-restricted merge rule below; the image is current. Reading the node while it runs: the 5 s status
+restricted merge rule below. Reading the node while it runs: the 5 s status
 line shows `rewinds=` and per-sensor `dt<=0 n/N med +Xms` -- if `dt<=0` is not ~0/N the filter is
 not predicting, which is the failure that looked like "the boxes update slowly". In RViz, a white
 arrow on a track is one second of its velocity; in `passthrough` there are none by design.
@@ -102,7 +108,7 @@ every median, item 4).
 ## What exists
 
 ```
-src/object_fusion/            ROS-free modules + 6 nodes + launch + config (incl. RViz) + 172 tests
+src/object_fusion/            ROS-free modules + 6 nodes + launch + config (incl. RViz) + 173 tests
 src/custom_msgs/fusion_msgs/  Detection3D(Array), FusedObject(Array)
 scripts/object_ab.py          offline harness (imports production rules, never copies)
 scripts/ground_ab.py          ground-removal A/B (point selection vs radar range + jitter)
@@ -140,17 +146,37 @@ Rollback is `rm -rf` on those paths plus `docker image rm perception-object-fusi
 
 ## Run it
 
+The defaults ARE the adopted configuration: no flags are needed for either mode. The full
+Docker walkthrough (build order, both modes, every env var) is in the repo's `DOCKER.md`,
+"Object fusion stack".
+
 ```bash
+# Build. The image is layered on perception-transform:latest, so that must exist first
+# (docker compose --profile runtime build transform_node).
 docker compose -f docker-compose.yml -f docker-compose.fusion.yml --profile fusion build object_fusion_node
+
+# Replay
 scripts/run_radar.sh  --replay ~/selfcal_loc_2026-09-08_11-47-43 --obstacle-only   # existing stack
-scripts/run_fusion.sh --replay ~/selfcal_loc_2026-09-08_11-47-43 --ground --debug-clouds
+scripts/run_fusion.sh --replay ~/selfcal_loc_2026-09-08_11-47-43 --debug-clouds
 rviz2 -d src/object_fusion/config/object_fusion.rviz --ros-args -p use_sim_time:=true
 scripts/play_rosbag.sh -l ~/selfcal_loc_2026-09-08_11-47-43                        # FROM THE START
+
+# Vehicle (sensor drivers already up on the host; never USE_SIM_TIME=true here)
+scripts/run_radar.sh  --vehicle         # WITH lanes: planner_main.py follows CLRerNet's
+scripts/run_fusion.sh --vehicle
+scripts/run_fusion.sh --status          # every live rule, read back off the running nodes
+
 python3 -m pytest src/object_fusion/test -q
 ```
 
-- `--ground` points the detector at `/perception/lidar_2d_projection_ground` (Patchwork++
-  flags per point); without it the detector reads the existing `/lidar_2d_projection`.
+- The detector reads `/perception/lidar_2d_projection_ground` (Patchwork++ flags per point) by
+  default; `--no-ground` points it at the existing `/lidar_2d_projection`, which carries no flags,
+  so the box rule falls back to the percentile cut + depth cluster with no empty-box drop.
+  `--ground` is kept as a no-op so old commands still work.
+- `ODOM_TOPIC` (default `/novatel/oem7/odom`) feeds the aggregator and the ground levelling. Only
+  the twist is used, and `/odom_grid`'s twist is bit-identical, so `ODOM_TOPIC=/novatel/oem7/odom_grid`
+  is safe if the vehicle publishes only that. `--status` shows the topic NAME, not whether it carries data -- check
+  `ros2 topic hz` on it, and that the aggregator's status line is not counting `odom_starved`.
 - `--debug-clouds` publishes `/perception/ground_debug/{ground,nonground}` for RViz.
 - `--clusters` is now a no-op (the path is ON by default since 2026-09-23); `--no-clusters` is
   the rollback. The path adds
@@ -1187,8 +1213,8 @@ avoidance and lane changes ("once we pass an object it will drop out of the trac
       -> lidar_cluster_detector_node -> /perception/measurements/lidar (Detection3DArray, SENSOR_LIDAR)
       -> object_aggregator._apply_lidar_clusters   SUSTAIN ONLY, never birth
 
-One flag turns the whole chain on: `ENABLE_LIDAR_CLUSTERS=true` (`scripts/run_fusion.sh --clusters`),
-default OFF until it has been watched on the vehicle. The association is
+One flag turns the whole chain on: `ENABLE_LIDAR_CLUSTERS=true` (`scripts/run_fusion.sh --clusters`).
+It was OFF by default when built; ON since 2026-09-23 (`--no-clusters` is the rollback). The association is
 `lidar_clusters.associate_clusters`: gate 1.0 + 0.02 r, exclusive assignment (one cluster cannot
 feed two tracks, which is how a duplicate becomes self-sustaining), and a miss is only charged where
 a cluster could have been seen (2.5-60 m).
@@ -1499,7 +1525,8 @@ and the bridge default is set to it.
 - ~~Expose the rollback parameters as env vars~~ -- DONE. `GROUND_LEVELLING`,
   `ENABLE_DEPTH_GATE`, `ENABLE_CLASS_VOTE`, `SEGMENTATION_EMPTY_FALLBACK`, and since 2026-09-16
   `ASSOC_MAX_DIST` / `MERGE_MAX_DIST`, since 2026-09-20 `RADAR_CAMERA_GATE` and since
-  2026-09-21 `ENABLE_LIDAR_CLUSTERS` (also the `--clusters` flag), all A/B without a rebuild.
+  2026-09-21 `ENABLE_LIDAR_CLUSTERS` (also the `--clusters` flag), since 2026-10-05 `ODOM_TOPIC`
+  (and `PROJECTION_TOPIC` defaulting to the ground-flagged cloud), all A/B without a rebuild.
   Check a rollback took effect by reading the parameter back from the node, not by trusting
   the command: a stray `\\` in the Dockerfile CMD once dropped every env var after
   `merge_max_dist` silently, and the launch default hid it.

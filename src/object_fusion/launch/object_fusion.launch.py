@@ -1,6 +1,9 @@
-"""Brings up the object-fusion stack. Every gate is declared here and defaults OFF, except the
-camera-LiDAR depth-jump gate, class vote and near-field ground levelling, which are on because
-they were measured (see measurement_gate.py, class_vote.py, ground_segmentation.py).
+"""Brings up the object-fusion stack. Every gate is declared here. The defaults are the measured,
+adopted configuration: ground-flagged projection, empty-box drop, depth-jump gate, class vote,
+near-field levelling, merge distance bound, radar camera gate, 360-degree clusters, velocity
+honesty and publish_mode filtered are ON; radar-only birth, extent estimation, centroid
+correction and the camera-only fallback are OFF. docker/Dockerfile.object_fusion and
+scripts/run_fusion.sh repeat these defaults and must be kept in step with them.
 
 Substitutions resolve to strings, so each argument is passed through ParameterValue with an
 explicit value_type or the nodes reject them -- the same trap radar_fusion.launch.py documents.
@@ -68,8 +71,9 @@ _ARGS = {
     "ground_rejection_min_range": "10.0",
     "ground_margin": "0.4",
     # Which projection camera_lidar_detector consumes. /perception/lidar_2d_projection_ground
-    # enables ground segmentation (measured better 15-80 m); /lidar_2d_projection is the rollback.
-    "projection_topic": "/lidar_2d_projection",
+    # enables ground segmentation (measured better 15-80 m) and with it the empty-box drop; the
+    # default since 2026-10-05. /lidar_2d_projection is the rollback.
+    "projection_topic": "/perception/lidar_2d_projection_ground",
     "enable_centroid_correction": "false",
     "enable_camera_only_fallback": "false",
     # A box whose returns are ALL ground: publish nothing (false) or use every point (true, the

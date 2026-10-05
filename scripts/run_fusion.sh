@@ -1,27 +1,34 @@
 #!/bin/bash
-# Bring up the object-fusion stack alongside the existing perception pipeline.
+# Bring up the object-fusion stack alongside the existing perception pipeline. Start that first
+# (scripts/run_radar.sh); this stack consumes its output.
 #
 #   scripts/run_fusion.sh --replay BAG        # bag replay (sets USE_SIM_TIME=true)
-#   scripts/run_fusion.sh --vehicle           # live
-#   scripts/run_fusion.sh --status            # read the gates off the running node
+#   scripts/run_fusion.sh --vehicle           # live (the default mode)
+#   scripts/run_fusion.sh --status            # read the live parameters back off the nodes
 #   scripts/run_fusion.sh --shadow-report     # what the filter would have contributed
+#   scripts/run_fusion.sh --logs | --down
 #
-# Rollbacks for the measured-and-live rules (or set the env vars of the same name):
-#   --no-levelling    ground_levelling:=false     (near-field odometry levelling)
-#   --no-depth-gate   enable_depth_gate:=false    (one-frame depth outlier withholding)
-#   --no-class-vote   enable_class_vote:=false    (per-id majority class sizing)
-#   scripts/run_fusion.sh --down
+# The defaults are the measured, adopted configuration -- no flags needed. Each live rule has a
+# rollback flag, or set the env var of the same name; none needs a rebuild:
+#   --no-ground       PROJECTION_TOPIC=/lidar_2d_projection  Patchwork++ ground flags + empty-box drop
+#   --no-levelling    GROUND_LEVELLING=false        near-field odometry levelling
+#   --no-depth-gate   ENABLE_DEPTH_GATE=false       one-frame depth outlier withholding
+#   --no-class-vote   ENABLE_CLASS_VOTE=false       per-id majority class sizing
+#   --no-clusters     ENABLE_LIDAR_CLUSTERS=false   360-degree LiDAR clusters sustaining tracks
+#   --loose-velocity  TURN_VELOCITY_K=0.0           velocity_valid as before 2026-09-22
+#   --passthrough     PUBLISH_MODE=passthrough      raw camera+LiDAR position, no radar/velocity
+#                     RADAR_CAMERA_GATE=false       camera-referenced radar range gate
+#                     MERGE_MAX_DIST=inf            merge distance bound
+#                     SEGMENTATION_EMPTY_FALLBACK=true   all-ground box uses every point
+# Other settings:
+#   --debug-clouds    PUBLISH_DEBUG_CLOUDS=true     ground/non-ground clouds for RViz
+#                     ODOM_TOPIC=/novatel/oem7/odom (twist only; /odom_grid's is bit-identical)
+#                     EGO_YAW_CORRECTION_DEG=-5.35  lidar_tc -> ego yaw
+# Still OFF by default: ENABLE_RADAR_ONLY_BIRTH, ENABLE_EXTENT_ESTIMATION,
+# ENABLE_CAMERA_ONLY_FALLBACK.
 #
 # This composes an OVERLAY over docker-compose.yml; the base file is not modified, and
 # `docker compose --profile runtime up` is unaffected whether or not this stack is running.
-#
-# Output mode (default filtered since 2026-09-17):
-#   --passthrough     PUBLISH_MODE=passthrough  publish the raw camera+LiDAR position instead of
-#                                               the filter's (rollback: no radar range, no velocity)
-#
-# Still gated OFF by default:
-#   ENABLE_RADAR_ONLY_BIRTH=false   radar may refine, never create
-#   ENABLE_EXTENT_ESTIMATION=false  class priors, as today
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -31,7 +38,10 @@ export PUBLISH_MODE="${PUBLISH_MODE:-filtered}"
 export ENABLE_RADAR_ONLY_BIRTH="${ENABLE_RADAR_ONLY_BIRTH:-false}"
 export ENABLE_EXTENT_ESTIMATION="${ENABLE_EXTENT_ESTIMATION:-false}"
 export EGO_YAW_CORRECTION_DEG="${EGO_YAW_CORRECTION_DEG:--5.35}"
-export PROJECTION_TOPIC="${PROJECTION_TOPIC:-/lidar_2d_projection}"
+# The ground-flagged projection is the adopted rule (default since 2026-10-05; until then it
+# needed --ground). /lidar_2d_projection is the rollback.
+export PROJECTION_TOPIC="${PROJECTION_TOPIC:-/perception/lidar_2d_projection_ground}"
+export ODOM_TOPIC="${ODOM_TOPIC:-/novatel/oem7/odom}"
 export PUBLISH_DEBUG_CLOUDS="${PUBLISH_DEBUG_CLOUDS:-false}"
 # Everything measured-and-live, each with its rollback. Set any of these in the environment, or
 # use the flags below, to A/B without rebuilding the image.
@@ -54,7 +64,8 @@ while [[ $# -gt 0 ]]; do
     --vehicle) MODE="vehicle"; shift ;;
     --filtered) PUBLISH_MODE="filtered"; shift ;;       # the default; kept so old commands work
     --passthrough) PUBLISH_MODE="passthrough"; shift ;;
-    --ground) PROJECTION_TOPIC="/perception/lidar_2d_projection_ground"; shift ;;
+    --ground) PROJECTION_TOPIC="/perception/lidar_2d_projection_ground"; shift ;;  # the default
+    --no-ground) PROJECTION_TOPIC="/lidar_2d_projection"; shift ;;                 # rollback
     --debug-clouds) PUBLISH_DEBUG_CLOUDS="true"; shift ;;
     --no-levelling) GROUND_LEVELLING="false"; shift ;;
     --no-depth-gate) ENABLE_DEPTH_GATE="false"; shift ;;
@@ -66,7 +77,7 @@ while [[ $# -gt 0 ]]; do
     --logs) ACTION="logs"; shift ;;
     --status) ACTION="status"; shift ;;
     --shadow-report) ACTION="shadow"; shift ;;
-    -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
+    -h|--help) sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -82,9 +93,17 @@ case "$ACTION" in
     docker ps --format '  {{.Names}}\t{{.Status}}' | grep perception || echo "  nothing running"
     if docker ps --format '{{.Names}}' | grep -qx perception_object_fusion_node; then
       set +u; source /opt/ros/jazzy/setup.bash 2>/dev/null || true; set -u
-      for p in publish_mode enable_radar_only_birth ego_yaw_correction_deg measurement_lag; do
-        echo -n "  $p: "; ros2 param get /object_aggregator "$p" 2>/dev/null || echo "?"
-      done
+      # Read back from the nodes, not the env: a broken Dockerfile CMD once dropped variables
+      # silently while the launch defaults made everything look right.
+      while read -r node params; do
+        for p in $params; do
+          echo -n "  $node $p: "; ros2 param get "$node" "$p" 2>/dev/null || echo "?"
+        done
+      done <<'NODES'
+/object_aggregator publish_mode enable_radar_only_birth ego_yaw_correction_deg measurement_lag assoc_max_dist merge_max_dist radar_camera_gate enable_lidar_clusters turn_velocity_k odom_topic
+/camera_lidar_detector projection_topic segmentation_empty_fallback enable_depth_gate enable_class_vote enable_extent_estimation enable_camera_only_fallback
+/ground_projection ground_levelling publish_nonground odom_topic
+NODES
     fi
     exit 0 ;;
   shadow)
@@ -125,15 +144,20 @@ if ! pgrep -x rmw_zenohd >/dev/null; then
 fi
 
 echo "mode=$MODE  USE_SIM_TIME=$USE_SIM_TIME"
-echo "projection: $PROJECTION_TOPIC   debug clouds: $PUBLISH_DEBUG_CLOUDS"
+echo "projection: $PROJECTION_TOPIC   odom: $ODOM_TOPIC   debug clouds: $PUBLISH_DEBUG_CLOUDS"
 echo "live rules: levelling=$GROUND_LEVELLING depth_gate=$ENABLE_DEPTH_GATE "\
-     "class_vote=$ENABLE_CLASS_VOTE empty_fallback=$SEGMENTATION_EMPTY_FALLBACK"
+     "class_vote=$ENABLE_CLASS_VOTE empty_fallback=$SEGMENTATION_EMPTY_FALLBACK "\
+     "clusters=$ENABLE_LIDAR_CLUSTERS radar_camera_gate=$RADAR_CAMERA_GATE merge=$MERGE_MAX_DIST"
 echo "velocity: turn_velocity_k=$TURN_VELOCITY_K (0 = the pre-2026-09-22 always-valid rule)"
 echo "gates: publish_mode=$PUBLISH_MODE radar_only_birth=$ENABLE_RADAR_ONLY_BIRTH "\
      "extent=$ENABLE_EXTENT_ESTIMATION ego_yaw=$EGO_YAW_CORRECTION_DEG"
 echo
 echo "This stack CONSUMES the existing pipeline's output. Start that first if it is not up:"
-echo "  scripts/run_radar.sh ${BAG:+--replay $BAG} --obstacle-only"
+if [[ "$MODE" == "replay" ]]; then
+  echo "  scripts/run_radar.sh --replay $BAG --obstacle-only"
+else
+  echo "  scripts/run_radar.sh --vehicle      # with lanes: the planner follows CLRerNet's"
+fi
 echo
 
 "${COMPOSE[@]}" --profile fusion up -d object_fusion_node

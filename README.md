@@ -26,8 +26,9 @@ Container build/run detail, troubleshooting, and replay tuning live in [DOCKER.m
 - **Track-level Fusion** *(separate stack, consumes the above)*: `src/object_fusion` turns
   `/fused_bbox` and radar into tracked objects with velocity on `/perception/objects`, adding
   Patchwork++ ground removal, a 360° LiDAR cluster path and a camera-referenced radar range gate.
-  It does not modify any node above it — see [src/object_fusion/HANDOFF.md](src/object_fusion/HANDOFF.md)
-  for how to run it, every measurement behind it, and the rollback for each rule.
+  It does not modify any node above it. Build and run it with Docker per
+  [DOCKER.md](DOCKER.md#object-fusion-stack); every measurement behind it is in
+  [src/object_fusion/HANDOFF.md](src/object_fusion/HANDOFF.md).
 - **ROS Integration**: ROS 2 Jazzy, `rmw_zenoh_cpp` middleware, host networking, one container per node.
 
 Topic names are centralized in [src/perception_common/topics.yaml](src/perception_common/topics.yaml)

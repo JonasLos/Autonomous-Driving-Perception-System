@@ -24,7 +24,9 @@ services:
       ENABLE_RADAR_ONLY_BIRTH: "${ENABLE_RADAR_ONLY_BIRTH:-false}"
       ENABLE_EXTENT_ESTIMATION: "${ENABLE_EXTENT_ESTIMATION:-false}"
       EGO_YAW_CORRECTION_DEG: "${EGO_YAW_CORRECTION_DEG:--5.35}"
-      PROJECTION_TOPIC: "${PROJECTION_TOPIC:-/lidar_2d_projection}"
+      # Ground-flagged projection (Patchwork++); /lidar_2d_projection is the rollback.
+      PROJECTION_TOPIC: "${PROJECTION_TOPIC:-/perception/lidar_2d_projection_ground}"
+      ODOM_TOPIC: "${ODOM_TOPIC:-/novatel/oem7/odom}"
       PUBLISH_DEBUG_CLOUDS: "${PUBLISH_DEBUG_CLOUDS:-false}"
       # Rollbacks for what is live by default, so each can be A/B'd without a rebuild.
       GROUND_LEVELLING: "${GROUND_LEVELLING:-true}"

@@ -461,6 +461,84 @@ Toggling sim time never needs a rebuild — it is an environment variable.
 
 ---
 
+## Object fusion stack
+
+`src/object_fusion` is a separate, track-level stack. It reads the existing pipeline's outputs
+and publishes tracked objects with velocity on `/perception/objects` (`fusion_msgs/FusedObjectArray`,
+frame `ego`), which the local planner consumes. It runs in its own Compose overlay
+(`docker-compose.fusion.yml`, profile `fusion`) and changes nothing about `--profile runtime`.
+Design, measurements and history are in [src/object_fusion/HANDOFF.md](src/object_fusion/HANDOFF.md).
+
+### Build
+
+The image is layered on `perception-transform:latest`, which must exist first:
+
+```bash
+docker compose --profile runtime build transform_node        # once; also backs radar_node
+docker compose -f docker-compose.yml -f docker-compose.fusion.yml \
+    --profile fusion build object_fusion_node
+```
+
+Rebuild after any change under `src/object_fusion` before a drive. On the vehicle the container
+runs the code baked into the image; only replay bind-mounts the source
+(`docker-compose.fusion.replay.yml`).
+
+### Run
+
+Both scripts start the Zenoh router if it is not already up. The defaults are the measured,
+adopted configuration, so no flags are needed.
+
+```bash
+# Vehicle (sensor drivers already running on the host)
+scripts/run_radar.sh  --vehicle        # existing pipeline + radar_node, lanes included
+scripts/run_fusion.sh --vehicle
+scripts/run_fusion.sh --status         # every live setting, read back off the running nodes
+
+# Replay
+scripts/run_radar.sh  --replay BAG --obstacle-only
+scripts/run_fusion.sh --replay BAG
+scripts/play_rosbag.sh -l BAG          # from the start: /tf_static is only there
+
+# Stop
+scripts/run_fusion.sh --down
+scripts/run_radar.sh  --down
+```
+
+Keep the lanes on the vehicle (do not pass `--obstacle-only`): the planner follows CLRerNet's lanes.
+Replay rules: run exactly one bag player, and never use `--start-offset`, because skipping
+`/tf_static` leaves the radar frame unresolved.
+
+### Settings
+
+Every setting is an environment variable read by `run_fusion.sh` and the compose overlay, so an
+A/B needs no rebuild. `scripts/run_fusion.sh -h` lists the flag form of each.
+
+| Variable | Default | Rollback / meaning |
+|---|---|---|
+| `PROJECTION_TOPIC` | `/perception/lidar_2d_projection_ground` | `/lidar_2d_projection` (`--no-ground`): no Patchwork++ ground flags, no empty-box drop |
+| `GROUND_LEVELLING` | `true` | `false` (`--no-levelling`) |
+| `ENABLE_DEPTH_GATE` | `true` | `false` (`--no-depth-gate`) |
+| `ENABLE_CLASS_VOTE` | `true` | `false` (`--no-class-vote`) |
+| `SEGMENTATION_EMPTY_FALLBACK` | `false` | `true`: an all-ground box uses every point |
+| `ENABLE_LIDAR_CLUSTERS` | `true` | `false` (`--no-clusters`): no 360° cluster path |
+| `RADAR_CAMERA_GATE` | `true` | `false`: no camera-referenced radar range gate |
+| `ASSOC_MAX_DIST` / `MERGE_MAX_DIST` | `6.0` / `2.5` | `MERGE_MAX_DIST=inf` is the original merge rule |
+| `TURN_VELOCITY_K` | `1.0` | `0.0` (`--loose-velocity`): `velocity_valid` as before 2026-09-22 |
+| `PUBLISH_MODE` | `filtered` | `passthrough` (`--passthrough`): raw camera+LiDAR position |
+| `ODOM_TOPIC` | `/novatel/oem7/odom` | twist only; `/novatel/oem7/odom_grid`'s twist is identical |
+| `EGO_YAW_CORRECTION_DEG` | `-5.35` | `lidar_tc` → `ego` yaw (`lidar_tc` is yawed, TF says identity) |
+| `PUBLISH_DEBUG_CLOUDS` | `false` | `true` (`--debug-clouds`): ground/non-ground clouds for RViz |
+| `ENABLE_RADAR_ONLY_BIRTH`, `ENABLE_EXTENT_ESTIMATION`, `ENABLE_CAMERA_ONLY_FALLBACK` | `false` | not adopted |
+
+After changing any of these, confirm it with `scripts/run_fusion.sh --status`, not by trusting
+the command line. A malformed Dockerfile `CMD` once dropped variables silently, and the launch
+defaults hid it.
+
+To see `/perception/objects` from the host, install the messages there once with
+`scripts/install_host_fusion_msgs.sh`.
+
+---
+
 ## Troubleshooting
 
 ### `librmw_zenoh_cpp.so: cannot open shared object file`

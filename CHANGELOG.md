@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-05
+
+### Changed
+- **Patchwork++ ground flags are now the default for the object fusion stack.** The 2026-09-23 entry listed them as live with `--ground` as the off-switch. In fact every default (`run_fusion.sh`, `docker-compose.fusion.yml`, the Dockerfile `CMD`, the launch file) pointed the detector at the unflagged `/lidar_2d_projection`, so a bare `scripts/run_fusion.sh` ran the older percentile-cut rule with no empty-box drop. Only the documented commands, which all passed `--ground`, got the adopted rule. `PROJECTION_TOPIC` now defaults to `/perception/lidar_2d_projection_ground`; `--no-ground` / `PROJECTION_TOPIC=/lidar_2d_projection` is the rollback, and `--ground` remains as a no-op.
+
+### Added
+- `ODOM_TOPIC` for the fusion container (default `/novatel/oem7/odom`). Before this the launch file's `odom_topic` could not be changed through Docker.
+- `scripts/run_fusion.sh -h` lists every rollback flag and variable. `--status` reads all of them back off the three nodes instead of four aggregator parameters.
+- DOCKER.md: an "Object fusion stack" section covering build order (the image is layered on `perception-transform:latest`), vehicle and replay bring-up, and a table of every setting with its default and rollback.
+
 ## 2026-09-23
 
 ### Added
