@@ -33,6 +33,10 @@ cd "$REPO"
 OBSTACLE_SERVICES=(transform_node yolo_node)
 LANE_SERVICES=(sphereformer_node clrernet_node)
 
+# docker-compose.gpu.yml pins each GPU node to one card; without it everything lands on GPU 0.
+# Override per node with YOLO_GPU / SPHEREFORMER_GPU / SAM3_GPU / CLRERNET_GPU.
+COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.gpu.yml)
+
 MODE="vehicle"; BAG=""; OBSTACLE_ONLY=0; ACTION="up"
 export ENABLE_RADAR_FUSION="${ENABLE_RADAR_FUSION:-false}"
 export PUBLISH_RADAR_ONLY="${PUBLISH_RADAR_ONLY:-false}"
@@ -67,12 +71,12 @@ SERVICES=("${OBSTACLE_SERVICES[@]}")
 case "$ACTION" in
   down)
     echo "stopping perception stack..."
-    docker compose --profile runtime --profile radar down --remove-orphans || true
+    "${COMPOSE[@]}" --profile runtime --profile radar down --remove-orphans || true
     pkill -x rmw_zenohd 2>/dev/null && echo "zenoh router stopped" || true
     echo "done."
     exit 0 ;;
   logs)
-    exec docker compose --profile runtime --profile radar logs -f "${SERVICES[@]}" radar_node ;;
+    exec "${COMPOSE[@]}" --profile runtime --profile radar logs -f "${SERVICES[@]}" radar_node ;;
   status)
     docker ps --format '  {{.Names}}\t{{.Status}}' | grep perception || echo "  (nothing running)"
     if pgrep -x rmw_zenohd >/dev/null; then echo "  zenoh router: up"; else echo "  zenoh router: DOWN"; fi
@@ -146,10 +150,12 @@ esac
 echo "transform image: :$TRANSFORM_IMAGE_TAG   voxel filter: $VOXEL"
 
 echo "radar gate: enable_radar_fusion=$ENABLE_RADAR_FUSION  publish_radar_only=$PUBLISH_RADAR_ONLY"
+echo "gpus: yolo=${YOLO_GPU:-0} sphereformer=${SPHEREFORMER_GPU:-0}" \
+     "sam3=${SAM3_GPU:-1} clrernet=${CLRERNET_GPU:-1}"
 echo "starting: ${SERVICES[*]} radar_node"
-docker compose --profile runtime up -d "${SERVICES[@]}"
-[[ $OBSTACLE_ONLY -eq 0 ]] && docker compose up -d sam3_ros
-docker compose --profile radar up -d radar_node
+"${COMPOSE[@]}" --profile runtime up -d "${SERVICES[@]}"
+[[ $OBSTACLE_ONLY -eq 0 ]] && "${COMPOSE[@]}" up -d sam3_ros
+"${COMPOSE[@]}" --profile radar up -d radar_node
 
 echo -n "waiting for yolo_node"
 for _ in $(seq 1 40); do

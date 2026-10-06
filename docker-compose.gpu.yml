@@ -1,0 +1,36 @@
+# Overlay that pins each GPU node to one card. The base file is NOT edited:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile runtime up -d ...
+#
+# scripts/run_radar.sh applies it. Without it every container sees both cards (count: all,
+# NVIDIA_VISIBLE_DEVICES=all) and PyTorch defaults to cuda:0, so the whole stack piled onto
+# GPU 0 -- measured 96% busy / 7.7 GB while GPU 1 sat at 0%.
+#
+# CUDA_VISIBLE_DEVICES rather than NVIDIA_VISIBLE_DEVICES: the base file's deploy reservation
+# (count: all) decides which cards the container is given, and changing that would mean editing
+# it. CUDA_VISIBLE_DEVICES is applied by the CUDA runtime inside the container, whatever the
+# toolkit exposed. Inside the container the chosen card becomes cuda:0, which is
+# what every node asks for (yolo's `device` param, CLRerNet's hardcoded "cuda:0", SAM3's and
+# SphereFormer's plain "cuda"), so no node code changes.
+#
+# CUDA_DEVICE_ORDER=PCI_BUS_ID makes the index match nvidia-smi's; CUDA's own default orders
+# fastest-first, which is not guaranteed to agree.
+#
+# Override any assignment without editing this file, e.g. SAM3_GPU=0 scripts/run_radar.sh
+services:
+  yolo_node:
+    environment:
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      CUDA_VISIBLE_DEVICES: "${YOLO_GPU:-0}"
+  sphereformer_node:
+    environment:
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      CUDA_VISIBLE_DEVICES: "${SPHEREFORMER_GPU:-0}"
+  sam3_ros:
+    environment:
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      CUDA_VISIBLE_DEVICES: "${SAM3_GPU:-1}"
+  clrernet_node:
+    environment:
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      CUDA_VISIBLE_DEVICES: "${CLRERNET_GPU:-1}"
