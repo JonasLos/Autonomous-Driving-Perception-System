@@ -674,11 +674,14 @@ class ObjectAggregatorNode(Node):
 
     def _publish_markers(self, msg: FusedObjectArray):
         arr = MarkerArray()
-        clear = Marker()
-        clear.header = msg.header
-        clear.ns = "fused_objects"
-        clear.action = Marker.DELETEALL
-        arr.markers.append(clear)
+        # RViz2 scopes DELETEALL to the marker's ns, so each namespace needs its own wipe --
+        # with only the box one, arrows of tracks that died or slowed stayed up indefinitely.
+        for ns in ("fused_objects", "fused_velocity"):
+            clear = Marker()
+            clear.header = msg.header
+            clear.ns = ns
+            clear.action = Marker.DELETEALL
+            arr.markers.append(clear)
         for i, o in enumerate(msg.objects):
             mk = Marker()
             mk.header = msg.header
@@ -731,6 +734,7 @@ class ObjectAggregatorNode(Node):
             empty = FusedObjectArray()
             empty.header.frame_id = self._ego_frame
             self._pub.publish(empty)
+            self._publish_markers(empty)
             self._last_publish = self._now()
 
     def _log_stats(self):
