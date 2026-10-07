@@ -13,10 +13,14 @@ outputs remapped to /ab/<arm>/road_{left,right}, and record them (see docs/road_
 
   python3 scripts/road_boundary_planner_ab.py REC/REC_0.mcap
 
-FOR A STATIONARY RECORDING ONLY (checked from the odometry, refused otherwise): the road does not
-move, so each arm's reference edge is its own median over frames with no obstacle on that side,
-and the error in obstacle frames is how far the edge was pulled INWARD from it. That is the
-failure itself, measured directly, and it does not depend on which arm is better calibrated.
+Two references, chosen from the odometry:
+* STATIONARY recording: the road does not move, so each arm's reference edge is its own median
+  over frames with no obstacle on that side, and the error in obstacle frames is how far the edge
+  was pulled INWARD from it -- the failure itself, independent of which arm is better calibrated.
+* MOVING recording (p95 speed > 0.5 m/s, or --moving): the road changes, so the reference is the
+  arm's own ROLLING median over +-ROLL_S seconds. A passing or parked vehicle hides an edge for a
+  fraction of a second at a station, which shows up as a transient inward dip from that rolling
+  reference; slow changes of the road itself (curves, widening) do not.
 
   inward   mean / p95 inward displacement of the side that has the obstacle [m]
   >0.5/>1  share of those frames pulled in by more than 0.5 / 1.0 m
@@ -48,6 +52,20 @@ STATIONS = (10.0, 20.0, 30.0, 40.0)
 OBJ = "/perception/objects"
 ODOM = "/novatel/oem7/odom"
 BLOCK_S = 5.0
+ROLL_S = 1.5
+
+
+def rolling_median(t, y, half=ROLL_S):
+    """Median of the finite y within +-half seconds of each t (t sorted)."""
+    out = np.full(len(y), np.nan)
+    lo = np.searchsorted(t, t - half, side="left")
+    hi = np.searchsorted(t, t + half, side="right")
+    for i in range(len(y)):
+        w = y[lo[i]:hi[i]]
+        w = w[np.isfinite(w)]
+        if w.size >= 3:
+            out[i] = np.median(w)
+    return out
 
 
 def stamp(h):
@@ -131,7 +149,7 @@ def ci(t, v, n_boot=2000, seed=0):
     return float(v.mean()), float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
 
 
-def analyse(series, objs):
+def analyse(series, objs, moving=False):
     rows = {}
     for arm in series:
         L = series[arm]["left"]
@@ -152,8 +170,12 @@ def analyse(series, objs):
             obs = np.array([obstacle_side(t, objs) for t in tl])
             ol, orr = obs[:, 0], obs[:, 1]
             clear_l, clear_r = ~ol, ~orr
-            ref_l = np.nanmedian(yl[clear_l]) if np.isfinite(yl[clear_l]).any() else np.nan
-            ref_r = np.nanmedian(yr[clear_r]) if np.isfinite(yr[clear_r]).any() else np.nan
+            if moving:
+                ref_l = rolling_median(tl, yl)
+                ref_r = rolling_median(tl, yr)
+            else:
+                ref_l = np.nanmedian(yl[clear_l]) if np.isfinite(yl[clear_l]).any() else np.nan
+                ref_r = np.nanmedian(yr[clear_r]) if np.isfinite(yr[clear_r]).any() else np.nan
             in_l = ref_l - yl                      # >0: left edge pulled toward the centre
             in_r = yr - ref_r                      # >0: right edge pulled toward the centre
             centre = 0.5 * (yl + yr) - 0.5 * (ref_l + ref_r)
@@ -163,7 +185,9 @@ def analyse(series, objs):
             t_clear = np.r_[tl[clear_l], tl[clear_r]]
             any_obs = ol | orr
             res[x] = dict(
-                ref=(ref_l, ref_r), n_obs=int(np.isfinite(inward_obs).sum()),
+                ref=(float(np.nanmedian(ref_l)) if np.isfinite(ref_l).any() else np.nan,
+                     float(np.nanmedian(ref_r)) if np.isfinite(ref_r).any() else np.nan),
+                n_obs=int(np.isfinite(inward_obs).sum()),
                 inward=ci(t_obs, inward_obs),
                 p95=float(np.nanpercentile(inward_obs, 95)) if np.isfinite(inward_obs).any() else np.nan,
                 gt05=float(np.nanmean(inward_obs[np.isfinite(inward_obs)] > 0.5)) if np.isfinite(inward_obs).any() else np.nan,
@@ -181,13 +205,15 @@ def analyse(series, objs):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("mcap")
+    ap.add_argument("--moving", action="store_true", help="force the rolling reference")
+    ap.add_argument("--arms", help="comma-separated arm names (default: all in the recording)")
     args = ap.parse_args()
-    series, objs, speed = load(args.mcap)
-    if speed.size and np.percentile(speed, 95) > 0.5:
-        raise SystemExit(f"vehicle moves (p95 speed {np.percentile(speed, 95):.2f} m/s): the static "
-                         "reference used here is invalid for this recording")
-    rows = analyse(series, objs)
-    print(f"{os.path.basename(args.mcap)}  (stationary: p95 speed {np.percentile(speed, 95):.2f} m/s)")
+    series, objs, speed = load(args.mcap, args.arms.split(",") if args.arms else None)
+    moving = args.moving or (speed.size and np.percentile(speed, 95) > 0.5)
+    rows = analyse(series, objs, moving=moving)
+    kind = f"MOVING, rolling +-{ROLL_S:.1f} s reference" if moving else "stationary"
+    print(f"{os.path.basename(args.mcap)}  ({kind}: median speed {np.median(speed):.1f} m/s, "
+          f"p95 {np.percentile(speed, 95):.1f} m/s)")
     for x in STATIONS:
         print(f"\n  x = {x:.0f} m")
         print(f"    {'arm':4s} {'ref L/R':>13s} {'n_obs':>5s}  {'inward mean [95% CI]':>24s} {'p95':>5s} "

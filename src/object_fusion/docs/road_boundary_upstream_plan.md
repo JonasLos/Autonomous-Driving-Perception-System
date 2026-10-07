@@ -81,6 +81,39 @@ at about +3.8/-3.4 m against +3.2/-3.0 m today. `lmp_v10c` now follows SphereFor
 which includes the dirt shoulder (X3). Whether the shoulder is drivable decides whether that is
 right, or whether SAM3's prompt should include it.
 
+### Public-road test: Route2 (`rosbag2_2026_05_05-14_52_50`, 12 min at ~19.5 m/s)
+
+Each stack was run once over the full drive, with `text_prompt="paved road or gravel road"`.
+The branch run also had `obstacle_prompt="car or person"`. In a first-150 s prompt survey,
+`paved road` found road in 60–100% of frames, and `gravel road` took over on weathered
+stretches. The camera here is `/camera_fl/image_color`, remapped on playback; radar was left out
+because its tracks topic has a different type. Results files are
+`~/fusion_data/recordings/route2_*_{planner,perception}.txt`.
+
+**Perception level, clear frames (>95% of the drive), today → branch:**
+
+| | SphereFormer 10/20/40 m | SAM3 10/20/40 m |
+|---|---|---|
+| frame-to-frame jump | 1.28/1.18/0.94 → 0.90/0.73/0.54 m | 0.36/0.48/0.67 → 0.30/0.49/0.55 m |
+| gaps | 6.6/17.6/16.4 → 2.8/5.1/16.7% | 31.7/12.2/28.2 → **67.1/25.6/43.4%** |
+| rate | 4.65 → 6.4 Hz | 2.3 → **1.4 Hz** (obstacle prompt) |
+
+road_boundary on top brings SphereFormer's jumps to 0.30–0.37 m and its gaps to 0–0.4%, on
+either version. Only 51–87 frames had a fused vehicle near an edge, too few to settle the
+obstacle question on this drive.
+
+**Planner level: `lmp_v10c` does not fit this road.** The segmented road is the whole two-way
+road: the median width of rejected pairs is about 11 m, against `max_lane_width` 8.5 m. After a
+run of rejections, its "insufficient overlap with the previous motion-compensated boundary"
+check compares against a boundary left far behind at 20 m/s and never accepts again. It
+accepted 2 pairs in 12 min on today's code, and 723–976 on the branch. These are planner
+issues, not fixed here: it needs a lane, not the road, on two-way roads, and it needs to re-seed
+when its reference is stale.
+
+**Suggested SAM3 follow-ups from this drive:** drop or shorten the obstacle prompt
+(`obstacle_prompt:=""` or `"car"`) to recover the rate. Also check whether the field-of-view and
+edge-evidence rules are too strict where the road is wider than the camera's view at 10 m.
+
 Not done (tier 5): S8 (amodal retraining), A6 (SAM3 video mode), X1 (typed boundary message),
 and S5 (per-point state field). Not yet shown: a moving drive; the A/B above is stationary only.
 
