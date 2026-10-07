@@ -93,6 +93,7 @@ def test_twist_integrator_and_accumulator_carry_static_points():
         tw.add(0.01 * k, 10.0, 0.0, 0.0)           # 10 m/s straight
     m = tw.motion(0.0, 0.5)
     assert m[1] == pytest.approx(5.0, abs=1e-6) and m[0] == 0.0
+    assert tw.covers(0.5) and tw.covers(1.1) and not tw.covers(1.5)   # 0.2 s hold past 1.0
     acc = SweepAccumulator(3, ego_yaw_deg=YAW)
     p_world = np.array([[30.0, 3.5]])               # vehicle frame at t=0
     for t in (0.0, 0.25, 0.5):

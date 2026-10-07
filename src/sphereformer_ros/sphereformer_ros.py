@@ -56,6 +56,10 @@ SPHEREFORMER_LEGEND_TOPIC = topic_config["topics"]["sphereformer"]["legend"]
 RING_FILTERED_POINTS_TOPIC = topic_config["topics"]["sphereformer"]["ring_filtered"]
 LIDAR_2D_PROJ_TOPIC = topic_config["topics"]["transform"]["lidar_2d_projection"]
 
+# Sweeps in a row without odometry before accumulate_sweeps warns it has fallen back to one
+# sweep (~2 s at 10 Hz: longer than an odometry hiccup, short enough to notice at start-up).
+ODOM_WARN_SWEEPS = 20
+
 # Crop bounds tuned to match the KITTI training distribution.
 # x: forward-facing forward of ego, y: lateral, z: ground to sensor height.
 lim_x, lim_y, lim_z = [-30, 100], [-40, 40], [-5, 3]
@@ -176,12 +180,30 @@ class SphereformerLidarSegmentation(Node):
         odom_topic = str(dp("odom_topic", "/novatel/oem7/odom").value)
         self.twist = TwistIntegrator()
         self.accumulator = SweepAccumulator(accumulate, self.ego_yaw_deg)
+        self._odom_topic = odom_topic
+        self._sweeps_without_odom = 0
         self.create_subscription(Odometry, odom_topic, self._on_odom, 50)
         self.get_logger().info(
             f"boundary_mode={self.boundary_mode} ego_crop_radius={self.ego_crop_radius} "
             f"accumulate_sweeps={accumulate} require_edge_evidence={self.require_edge_evidence} "
             f"connected_runs={self.connected_runs} ego_yaw_deg={self.ego_yaw_deg} odom={odom_topic}"
         )
+
+    def _check_odometry(self, t):
+        """Warn when accumulate_sweeps silently falls back to one sweep for lack of odometry."""
+        if self.accumulator.n <= 1:
+            return
+        if self.twist.covers(t):
+            if self._sweeps_without_odom >= ODOM_WARN_SWEEPS:
+                self.get_logger().info(f"Odometry on {self._odom_topic} is back; accumulating sweeps again")
+            self._sweeps_without_odom = 0
+            return
+        self._sweeps_without_odom += 1
+        if self._sweeps_without_odom == ODOM_WARN_SWEEPS:
+            self.get_logger().warning(
+                f"No odometry on {self._odom_topic} for the last {ODOM_WARN_SWEEPS} sweeps: "
+                f"accumulate_sweeps={self.accumulator.n} falls back to the newest sweep alone, so the "
+                "boundary is sparser beyond ~20 m. Check the topic, or set accumulate_sweeps:=1.")
 
     def _on_odom(self, msg):
         tw = msg.twist.twist
@@ -373,6 +395,7 @@ class SphereformerLidarSegmentation(Node):
             other_xy = seg_points[class_ids >= OTHER_MIN_CLASS, :2]
             self.accumulator.add(t, road_points[:, :3], other_xy)
             road_xyz, other_xy = self.accumulator.merged(self.twist)
+            self._check_odometry(t)
             left_points, right_points = fixed_bin_boundary(
                 road_xyz, other_xy=other_xy, ego_yaw_deg=self.ego_yaw_deg,
                 x_min=self.boundary_x_min, x_max=self.boundary_x_max,

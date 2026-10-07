@@ -25,14 +25,39 @@ Each change sits behind a parameter, so the previous behaviour stays one `ros2 p
 | A3 row-wise ego-component contours | `segmentation.py`, `road_mask_boundary.py` | `boundary_mode=rowwise` | `boundary_mode:=legacy` |
 | A4 obstacle prompt (same encoding) | `segmentation.py` | `obstacle_prompt="car or truck or person"` | `obstacle_prompt:=""` |
 | A5 whole-mask lifting, with edge evidence | `sam3_mask_transform.py`, `road_mask_boundary.py` | `lift_mode=mask` | `lift_mode:=contour` |
+| A6a batched prompts, cached text encodings | `segmentation.py` | `batch_prompts=true` | `batch_prompts:=false` |
+| A6b half-resolution boundaries, result image only when subscribed | `segmentation.py` | `boundary_downsample=2` | `boundary_downsample:=1` |
+| A6c per-stage timing | `segmentation.py` | **off** (`profile_stages`) | — |
+| A6d CUDA graphs for the batched pass — **needs a 16 s to 3 min warm-up**, see below | `segmentation.py` | **off** (`cuda_graphs`, or `SAM3_CUDA_GRAPHS=true` for compose) | `cuda_graphs:=false` |
+| A6e CPU pinning of the perception containers | `docker-compose.cpuset.yml`, `docker-compose.fusion.cpuset.yml` | **off** (opt-in overlays) | leave the overlay out |
 | S1 `label` field (uint8) | `sphereformer_ros.py` | on | (extra field only) |
 | S2 ego crop before inference | `sphereformer_ros.py` | `ego_crop_radius=2.5` | `ego_crop_radius:=0.0` |
 | S3 fixed vehicle-frame bins, with edge evidence | `sphereformer_boundary.py` | `boundary_mode=fixed` | `boundary_mode:=legacy` |
 | S4 ego-corridor runs | `sphereformer_boundary.py` | **off** (`connected_runs`) | — |
 | S6 numpy cloud packing | `sphereformer_ros.py` | on | — |
-| S7 3-sweep accumulation | `sphereformer_ros.py`, `sphereformer_boundary.py` | `accumulate_sweeps=3` | `accumulate_sweeps:=1` |
+| S7 3-sweep accumulation (warns after 20 sweeps without odometry, when it falls back to one sweep) | `sphereformer_ros.py`, `sphereformer_boundary.py` | `accumulate_sweeps=3` | `accumulate_sweeps:=1` |
 | X2 `boundary_eval` recording category | `perception_common/topics.yaml` | — | — |
 | X3 edge-offset diagnostic | `scripts/boundary_edge_offset.py` | — | — |
+
+### Start-up and warm-up: check before a vehicle test
+
+With the branch defaults nothing needs a warm-up beyond loading the models. Two things change
+that, and both log a warning:
+
+- **SAM3 `cuda_graphs` (off by default).** The first two passes for each number of prompt terms
+  compile and record: ~16 s idle / ~47 s under the full stack with the compile cache in
+  `~/.cache/huggingface/torchinductor_sam3`, ~70 s / ~166 s without it. Enabled at start-up
+  (`SAM3_CUDA_GRAPHS=true`), the node warms up on a blank image before it takes any image and logs
+  `cuda_graphs WARM-UP ...`, then `cuda_graphs: ready for N prompt terms after X s`, then
+  `Waiting for images`. Enabled at runtime, or after a prompt change that alters the term count,
+  the next live frames pay it and SAM3 publishes nothing meanwhile. Only do that with the
+  vehicle stopped. Words changed with the same number of terms need no warm-up. The node also
+  warns when the cache will not persist, and falls back to eager if compiling fails. Details:
+  `src/SAM3_ROS_NODE/README.md`, "Speed and warm-up".
+- **SphereFormer `accumulate_sweeps` needs odometry** (`/novatel/oem7/odom`). Without it the
+  boundary silently used one sweep; it now warns after 20 sweeps (~2 s) without odometry, and
+  logs again when odometry returns. The first two sweeps after start-up use fewer sweeps by
+  construction.
 
 Found while doing it (each now covered by a unit test):
 - **Ring arcs.** A 2 m bin at range often holds only an arc of one LiDAR ring, which ends inside
@@ -172,6 +197,25 @@ largest single stage.
 record: about 166 s cold under load, about 47 s with the persistent cache
 (`compile_cache_dir`, about 200 MB, inside the Hugging Face mount; about 27 s with pinning as
 well). Compiler workers are capped at 4 threads.
+
+**Warm-up handling (SAM3 node, 2026-10-07).** At start-up the node now warms up on a blank image
+before it reports ready. It logs a warning with the expected time when a warm-up starts (at
+start-up or at runtime), and an INFO line when it ends. It also warns about a cache that won't
+persist, and about `cuda_graphs` having no effect on the per-term path; it falls back to eager on
+any compile error. Verified with the real node on Route2 frames, idle machine:
+
+| case | warm-up | first frames after it |
+|---|---|---|
+| start-up, warm cache | 16.9 s, before "ready" | 0.054, 0.038 s |
+| start-up, empty cache (`/tmp`, also warned as not persistent) | 69.2 s | — |
+| runtime `obstacle_prompt` 2 → 1 terms (4 → 3 in total) | 36.9 s, one live frame | replay |
+| back to 4 terms; then new road words, same count | none | replay |
+
+Found while testing: torch keeps its CUDA-graph tree manager in thread-local state. A start-up
+warm-up on the main thread recorded fine and replayed fine on the inference thread, but
+recording a NEW term count there failed (`AssertionError` in `cudagraph_trees.get_obj`). The
+warm-up therefore runs on the inference thread. Operating notes are in the SAM3 README,
+"Speed and warm-up".
 
 **Pinning only restricts the perception containers.** The planner, controller and sensor drivers
 run outside them, keep every core, and now share 12-31 with fusion, YOLO, transform and

@@ -195,6 +195,10 @@ class TwistIntegrator:
         i = bisect_left(self._t, t)
         return self._v[min(i, len(self._v) - 1)]
 
+    def covers(self, t) -> bool:
+        """Whether a twist sample is close enough to ``t`` to move a sweep taken then."""
+        return self._at(t) is not None
+
     def motion(self, t0, t1):
         """(dpsi, dx, dy) of the vehicle frame from t0 to t1, in the t0 frame; None if unknown."""
         if t1 <= t0:
