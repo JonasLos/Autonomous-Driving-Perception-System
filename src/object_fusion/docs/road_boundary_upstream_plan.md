@@ -133,6 +133,24 @@ contention from the fusion stack and the GPU-0 nodes is what slows the per-term 
 92 → 165 ms). The visualisation timer and per-frame image decoding made no measurable difference.
 `batch_prompts:=false` restores the per-term path. Profiler: `scripts/sam3_prompt_profile.py`.
 
+**Around the model (SAM3 `62bfe25`):** the node's per-stage timing (`profile_stages:=true`)
+showed the row-wise boundary extraction costing 70–90 ms per frame under load. It now runs at half
+resolution (21–24 ms). The raw result image is built only when subscribed (12–16 → 2–3 ms). Per
+frame under the full stack: about 307 → 244 ms, about 4 Hz with four terms. What remains is the
+model: image encoder about 80 ms and batched prompts about 110 ms (about 70 ms on an idle
+machine). Tried and dropped: PNG compression level 1 (slower to publish), and fp16 weights (SAM3
+mixes in fp32 tensors internally; autocast already runs the matrix maths in fp16).
+
+**Effect of the faster SAM3 (reruns, 2026-10-07):**
+- **Sep 22, through `lmp_v10c`:** without its source-switching guards the edge flickers more.
+  With SAM3 arriving more often, it alternates between SAM3-fused and SphereFormer-only pairs,
+  and those disagree by about 0.6 m (X3). Jitter for `up` went from 0.04–0.09 m to 0.12–0.16 m.
+  With the guards on, `up_rb_coh` stays the best arm: jitter 0.006 m, no pulls over 1 m. So turn
+  the guards on together with the faster SAM3.
+- **Route2:** SAM3 rate 1.5 → 3.1 Hz. Through road_boundary the SAM3 edge's frame-to-frame
+  jump falls (0.46 → 0.30 m at 20 m), partly just because frames are closer together in time.
+  Raw SAM3 gaps are unchanged; that's the field-of-view and edge-evidence issue.
+
 Not done (tier 5): S8 (amodal retraining), A6 (SAM3 video mode), X1 (typed boundary message),
 and S5 (per-point state field). Not yet shown: a moving drive; the A/B above is stationary only.
 
