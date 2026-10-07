@@ -36,6 +36,9 @@ LANE_SERVICES=(sphereformer_node clrernet_node)
 # docker-compose.gpu.yml pins each GPU node to one card; without it everything lands on GPU 0.
 # Override per node with YOLO_GPU / SPHEREFORMER_GPU / SAM3_GPU / CLRERNET_GPU.
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.gpu.yml)
+# Extra overlays, e.g. EXTRA_COMPOSE_FILES=docker-compose.upstream.yml to run images built under
+# another tag. Empty by default, so the vehicle bring-up is unchanged.
+for f in ${EXTRA_COMPOSE_FILES:-}; do COMPOSE+=(-f "$f"); done
 
 MODE="vehicle"; BAG=""; OBSTACLE_ONLY=0; ACTION="up"
 export ENABLE_RADAR_FUSION="${ENABLE_RADAR_FUSION:-false}"

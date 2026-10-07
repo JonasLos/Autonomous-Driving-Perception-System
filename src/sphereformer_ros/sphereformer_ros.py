@@ -13,11 +13,17 @@ import spconv.pytorch as spconv
 import torch
 import yaml
 from semantic_kitti_ros import SemanticKITTI
+from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py import point_cloud2 as pc2
 from sklearn.cluster import DBSCAN
 from visualization_msgs.msg import Marker, MarkerArray
+from perception_common.lane_geometry import DEFAULT_EGO_YAW_DEG
 from perception_common.utils import crop_pointcloud, timer
+from sphereformer_boundary import (
+    OTHER_MIN_CLASS, ROAD, SweepAccumulator, TwistIntegrator, crop_ego, fixed_bin_boundary,
+    legacy_boundary, pack_cloud,
+)
 
 PKG_SHARE = get_package_share_directory("sphereformer_ros")
 if PKG_SHARE not in sys.path:
@@ -146,6 +152,41 @@ class SphereformerLidarSegmentation(Node):
             PointField(name="rgb", offset=12, datatype=PointField.FLOAT32, count=1),
         ]
         self.cluster_pointcloud = False
+
+        dp = self.declare_parameter
+        # The ego vehicle's roof and hood come back at 0.8-0.9 m and are labelled "car"; every
+        # consumer then sees an obstacle on top of the sensor. Cropped before inference.
+        self.ego_crop_radius = float(dp("ego_crop_radius", 2.5).value)
+        # "fixed": per fixed vehicle-frame x-bin extremes (sphereformer_boundary.fixed_bin_boundary).
+        # "legacy": 21 bins between the road's own min and max lidar_tc x, as before.
+        self.boundary_mode = str(dp("boundary_mode", "fixed").value)
+        self.ego_yaw_deg = float(dp("ego_yaw_deg", DEFAULT_EGO_YAW_DEG).value)
+        self.boundary_x_min = float(dp("boundary_x_min", 5.0).value)
+        self.boundary_x_max = float(dp("boundary_x_max", 60.0).value)
+        self.boundary_bin_len = float(dp("boundary_bin_len", 2.0).value)
+        # An extreme is an edge only with a non-road return just beyond it; without this a bin
+        # holding one ring arc reports where the arc ends (-0.3 m vs a real -2.9 m at 40 m).
+        self.require_edge_evidence = bool(dp("require_edge_evidence", True).value)
+        # Keep only the road run continuing the vehicle's road. OFF: on wide paved lots it
+        # latched onto strips of the lot (jumps of 5-14 m on the Aug 25 drives).
+        self.connected_runs = bool(dp("connected_runs", False).value)
+        # Boundary from the last N labelled sweeps, carried by the odometry twist (rings are
+        # 3-6 m apart beyond 20 m, so one sweep leaves gaps). 1 disables.
+        accumulate = int(dp("accumulate_sweeps", 3).value)
+        odom_topic = str(dp("odom_topic", "/novatel/oem7/odom").value)
+        self.twist = TwistIntegrator()
+        self.accumulator = SweepAccumulator(accumulate, self.ego_yaw_deg)
+        self.create_subscription(Odometry, odom_topic, self._on_odom, 50)
+        self.get_logger().info(
+            f"boundary_mode={self.boundary_mode} ego_crop_radius={self.ego_crop_radius} "
+            f"accumulate_sweeps={accumulate} require_edge_evidence={self.require_edge_evidence} "
+            f"connected_runs={self.connected_runs} ego_yaw_deg={self.ego_yaw_deg} odom={odom_topic}"
+        )
+
+    def _on_odom(self, msg):
+        tw = msg.twist.twist
+        self.twist.add(msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                       tw.linear.x, tw.linear.y, tw.angular.z)
 
     def _load_learned_rgb_lut(self) -> tuple[np.ndarray, list[str]]:
         semkitti_cfg_path = os.path.join(PKG_SHARE, "SphereFormer_changes", "semantic-kitti.yaml")
@@ -314,57 +355,64 @@ class SphereformerLidarSegmentation(Node):
             )
 
         # Keep road-only subset for boundary extraction.
-        mask = class_ids == 9
+        mask = class_ids == ROAD
         road_points = seg_points[mask]
-
-        if self.cluster_pointcloud:
-            if road_points.size > 0:
-                clustering = DBSCAN(eps=0.5, min_samples=10).fit(road_points[:, :3])
-                labels = clustering.labels_
-                road_points = road_points[labels != -1]  # Remove outliers
-
-        left_points = []
-        right_points = []
-        if road_points.size > 0:
-            min_x = np.min(road_points[:, 0])
-            max_x = np.max(road_points[:, 0])
-            bins = np.linspace(min_x, max_x, num=22)
-
-            widths = []
-            for i in range(len(bins) - 1):
-                bin_mask = (road_points[:, 0] >= bins[i]) & (
-                    road_points[:, 0] < bins[i + 1]
-                )
-                bin_points = road_points[bin_mask]
-                if bin_points.size == 0:
-                    continue
-
-                leftmost_idx = np.argmax(bin_points[:, 1])  # Index of max y
-                rightmost_idx = np.argmin(bin_points[:, 1])  # Index of min y
-
-                left_points.append(bin_points[leftmost_idx])
-                right_points.append(bin_points[rightmost_idx])
-
-                width = bin_points[rightmost_idx, 1] - bin_points[leftmost_idx, 1]
-                widths.append(width)
-
-        left_points, right_points = np.array(left_points), np.array(right_points)
-        self.create_cloud_rgb(seg_points[:, :3], segmented_rgb, self.pub, msg)
+        self.create_cloud_rgb(seg_points[:, :3], segmented_rgb, self.pub, msg, labels=class_ids)
         self.publish_legend(msg)
 
-        if left_points.size > 0 and right_points.size > 0:
+        if self.boundary_mode == "legacy":
+            if self.cluster_pointcloud and road_points.size > 0:
+                clustering = DBSCAN(eps=0.5, min_samples=10).fit(road_points[:, :3])
+                road_points = road_points[clustering.labels_ != -1]  # Remove outliers
+            left_points, right_points = legacy_boundary(road_points)
+            if left_points.size > 0 and right_points.size > 0:
+                self.create_cloud(left_points, self.left_boundary_pub, msg)
+                self.create_cloud(right_points, self.right_boundary_pub, msg)
+        else:
+            t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            other_xy = seg_points[class_ids >= OTHER_MIN_CLASS, :2]
+            self.accumulator.add(t, road_points[:, :3], other_xy)
+            road_xyz, other_xy = self.accumulator.merged(self.twist)
+            left_points, right_points = fixed_bin_boundary(
+                road_xyz, other_xy=other_xy, ego_yaw_deg=self.ego_yaw_deg,
+                x_min=self.boundary_x_min, x_max=self.boundary_x_max,
+                bin_len=self.boundary_bin_len, connected=self.connected_runs,
+                require_evidence=self.require_edge_evidence,
+            )
+            # Published even when empty: an absent boundary must read as absent downstream,
+            # not as the last one that happened to work.
             self.create_cloud(left_points, self.left_boundary_pub, msg)
-
-        if right_points.size > 0 and left_points.size > 0:
             self.create_cloud(right_points, self.right_boundary_pub, msg)
 
         self.get_logger().info("Publishing the processed point cloud and bounding boxes.")
 
+    _ROS_DTYPE = {np.dtype(np.float32): PointField.FLOAT32,
+                  np.dtype(np.uint8): PointField.UINT8,
+                  np.dtype(np.uint32): PointField.UINT32}
+
+    def _publish_columns(self, pub, header, columns, datatypes):
+        """Publish a PointCloud2 packed straight from numpy columns (no per-point tuples)."""
+        fields, step, data, n = pack_cloud(header, columns, datatypes)
+        msg = PointCloud2()
+        msg.header = header
+        msg.height, msg.width = 1, n
+        msg.fields = [PointField(name=name, offset=o, datatype=self._ROS_DTYPE[dt], count=1)
+                      for name, o, dt in fields]
+        msg.is_bigendian = False
+        msg.point_step, msg.row_step = step, step * n
+        msg.data = data
+        msg.is_dense = True
+        pub.publish(msg)
+
     def create_cloud(self, points: np.ndarray, pub, ref_msg: PointCloud2):
-        header = ref_msg.header
-        data = [tuple(p) for p in np.asarray(points, dtype=np.float32)]
-        pc_msg = pc2.create_cloud(header, self.fields, data)
-        pub.publish(pc_msg)
+        p = np.asarray(points, dtype=np.float32)
+        if p.ndim != 2 or p.shape[0] == 0:
+            p = p.reshape(0, 3)
+        inten = p[:, 3] if p.shape[1] > 3 else np.zeros(p.shape[0], np.float32)
+        self._publish_columns(
+            pub, ref_msg.header,
+            {"x": p[:, 0], "y": p[:, 1], "z": p[:, 2], "intensity": inten},
+            {"x": np.float32, "y": np.float32, "z": np.float32, "intensity": np.float32})
 
     def create_cloud_rgb(
         self,
@@ -372,8 +420,8 @@ class SphereformerLidarSegmentation(Node):
         colors_rgb: np.ndarray,
         pub,
         ref_msg: PointCloud2,
+        labels: np.ndarray | None = None,
     ):
-        header = ref_msg.header
         xyz = np.asarray(points_xyz, dtype=np.float32)
         rgb = np.asarray(colors_rgb, dtype=np.uint8)
         rgb_u32 = (
@@ -381,13 +429,13 @@ class SphereformerLidarSegmentation(Node):
             | (rgb[:, 1].astype(np.uint32) << 8)
             | rgb[:, 2].astype(np.uint32)
         )
-        rgb_f32 = rgb_u32.view(np.float32)
-        data = [
-            (x, y, z, c)
-            for (x, y, z), c in zip(xyz[:, :3], rgb_f32, strict=False)
-        ]
-        pc_msg = pc2.create_cloud(header, self.rgb_fields, data)
-        pub.publish(pc_msg)
+        columns = {"x": xyz[:, 0], "y": xyz[:, 1], "z": xyz[:, 2], "rgb": rgb_u32.view(np.float32)}
+        types = {"x": np.float32, "y": np.float32, "z": np.float32, "rgb": np.float32}
+        if labels is not None:
+            # The class id itself, so consumers need not invert the colour palette.
+            columns["label"] = np.clip(labels, 0, 255).astype(np.uint8)
+            types["label"] = np.uint8
+        self._publish_columns(pub, ref_msg.header, columns, types)
 
     def publish_legend(self, ref_msg: PointCloud2):
         marker_array = MarkerArray()
@@ -488,6 +536,7 @@ class SphereformerLidarSegmentation(Node):
 
         np_points = np.asarray(pcd)
         np_points = crop_pointcloud(np_points, lim_x, lim_y, lim_z)
+        np_points = crop_ego(np_points, self.ego_crop_radius)
         if np_points.size == 0:
             empty_points = np.zeros(
                 0,

@@ -1,0 +1,11 @@
+# Overlay for the upstream_boundary_fixes branch, composed on top of docker-compose.yml (and
+# docker-compose.gpu.yml). It only re-tags the image SphereFormer is built into, so building
+# this branch never overwrites perception-sphereformer:latest -- the image the vehicle runs.
+#
+#   EXTRA_COMPOSE_FILES=docker-compose.upstream.yml scripts/run_radar.sh --replay BAG
+#
+# SAM3 needs no entry: its container colcon-builds the bind-mounted checkout at start, so it runs
+# whichever checkout the stack is brought up from.
+services:
+  sphereformer_node:
+    image: perception-sphereformer:${SPHEREFORMER_IMAGE_TAG:-upstream}

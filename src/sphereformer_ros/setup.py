@@ -62,7 +62,7 @@ setup(
     name=package_name,
     version="0.0.0",
     packages=[],
-    py_modules=["sphereformer_ros", "semantic_kitti_ros"],
+    py_modules=["sphereformer_ros", "semantic_kitti_ros", "sphereformer_boundary"],
     data_files=data_files,
     install_requires=["setuptools"],
     zip_safe=True,

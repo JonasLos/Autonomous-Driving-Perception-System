@@ -69,10 +69,21 @@ def path_station_y(msg, xs):
     return out
 
 
-def load(path):
-    series = {a: {"left": [], "right": []} for a in ARMS}
+def discover_arms(path):
+    """Arm names from the /ab/<arm>/road_left topics present in the recording."""
+    from mcap.reader import make_reader
+    with open(path, "rb") as fh:
+        summary = make_reader(fh).get_summary()
+    names = {ch.topic.split("/")[2] for ch in summary.channels.values()
+             if ch.topic.startswith("/ab/") and ch.topic.endswith("/road_left")}
+    return [a for a in ARMS if a in names] + sorted(names - set(ARMS))
+
+
+def load(path, arms=None):
+    arms = arms or discover_arms(path)
+    series = {a: {"left": [], "right": []} for a in arms}
     objs, speed = [], []
-    topics = [f"/ab/{a}/road_{s}" for a in ARMS for s in ("left", "right")] + [OBJ, ODOM]
+    topics = [f"/ab/{a}/road_{s}" for a in arms for s in ("left", "right")] + [OBJ, ODOM]
     for m in read_ros2_messages(path, topics=topics):
         t, msg = m.channel.topic, m.ros_msg
         if t == ODOM:
@@ -122,7 +133,7 @@ def ci(t, v, n_boot=2000, seed=0):
 
 def analyse(series, objs):
     rows = {}
-    for arm in ARMS:
+    for arm in series:
         L = series[arm]["left"]
         R = series[arm]["right"]
         if not L or not R:
@@ -181,7 +192,7 @@ def main():
         print(f"\n  x = {x:.0f} m")
         print(f"    {'arm':4s} {'ref L/R':>13s} {'n_obs':>5s}  {'inward mean [95% CI]':>24s} {'p95':>5s} "
               f"{'>0.5m':>6s} {'>1m':>5s}  {'centre mean [CI]':>22s} {'p95':>5s}  {'clear inward':>12s} {'empty':>6s} {'jitter':>6s}")
-        for arm in ARMS:
+        for arm in rows:
             r = rows[arm]
             if r is None:
                 print(f"    {arm:4s} no output recorded")

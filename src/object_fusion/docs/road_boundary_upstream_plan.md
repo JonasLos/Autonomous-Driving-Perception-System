@@ -1,8 +1,88 @@
-# Road boundaries: upstream changes worth making (plan only)
+# Road boundaries: upstream changes worth making
 
 `road_boundary_node` repairs the SphereFormer and SAM3 boundaries **downstream**, without
 editing either node. This is the list of changes **inside** those nodes that would help,
-ordered from small to large effort. Nothing here has been implemented.
+ordered from small to large effort.
+
+## Status (2026-10-07): tiers 1–4 implemented on branch `upstream_boundary_fixes`
+
+The work is in a separate `git worktree` (`~/Downloads/ADPS-upstream`), so the checkout the
+vehicle runs from is untouched. SAM3 is a submodule; its changes are on branch
+`upstream_boundary_fixes` of the SAM3 repo. SphereFormer is built as
+`perception-sphereformer:upstream`; `:latest` is not touched. To bring the stack up from the
+branch:
+
+```
+EXTRA_COMPOSE_FILES=docker-compose.upstream.yml scripts/run_radar.sh --replay BAG
+```
+
+Each change sits behind a parameter, so the previous behaviour stays one `ros2 param set` away.
+
+| item | where | default on branch | revert with |
+|---|---|---|---|
+| A1 PNG mask | `segmentation.py` | on | (format only) |
+| A2 per-term prompt stats | `segmentation.py` | every 50 inferences | `prompt_stats_period:=0` |
+| A3 row-wise ego-component contours | `segmentation.py`, `road_mask_boundary.py` | `boundary_mode=rowwise` | `boundary_mode:=legacy` |
+| A4 obstacle prompt (same encoding) | `segmentation.py` | `obstacle_prompt="car or truck or person"` | `obstacle_prompt:=""` |
+| A5 whole-mask lifting, with edge evidence | `sam3_mask_transform.py`, `road_mask_boundary.py` | `lift_mode=mask` | `lift_mode:=contour` |
+| S1 `label` field (uint8) | `sphereformer_ros.py` | on | (extra field only) |
+| S2 ego crop before inference | `sphereformer_ros.py` | `ego_crop_radius=2.5` | `ego_crop_radius:=0.0` |
+| S3 fixed vehicle-frame bins, with edge evidence | `sphereformer_boundary.py` | `boundary_mode=fixed` | `boundary_mode:=legacy` |
+| S4 ego-corridor runs | `sphereformer_boundary.py` | **off** (`connected_runs`) | — |
+| S6 numpy cloud packing | `sphereformer_ros.py` | on | — |
+| S7 3-sweep accumulation | `sphereformer_ros.py`, `sphereformer_boundary.py` | `accumulate_sweeps=3` | `accumulate_sweeps:=1` |
+| X2 `boundary_eval` recording category | `perception_common/topics.yaml` | — | — |
+| X3 edge-offset diagnostic | `scripts/boundary_edge_offset.py` | — | — |
+
+Found while doing it (each now covered by a unit test):
+- **Ring arcs.** A 2 m bin at range often holds only an arc of one LiDAR ring, which ends inside
+  the road. Without an edge-evidence rule, fixed bins reported a right edge at -0.3 m (true
+  -2.9 m) at 40 m, and SAM3 lifting reported one at +1.4…+2.6 m. Both rules now keep an extreme
+  only when non-road GROUND is seen within 1 m beyond it. Ground matters: a pedestrian on the road
+  otherwise "confirmed" an edge at their feet. Extremes at the camera's field-of-view border are
+  dropped too.
+- **S4 misfires on wide lots.** On the Aug 25 drives, connected-run selection latched onto strips
+  of an open paved lot (jumps of 5–14 m). Off by default, as in road_boundary.
+- **A road_boundary tracker bug** (fixed on this branch). A sparse fit through an occluded
+  stretch initialised stations with a left edge right of the right edge. Correct measurements were
+  then gated as outliers, so the bad stations coasted for up to 3 s; through `lmp_v10c` that was a
+  ~1 s, 4 m swing of the planner's edge. Now: crossed stations are dropped, and a station gated 3
+  frames running re-initialises. **This fix should also go to `radar_integration_and_fusion`**,
+  where road_boundary is committed (off by default).
+- **X3 answered:** the camera and LiDAR disagree on what counts as road, not on calibration. On
+  this gravel road SAM3 (prompt "gravel road") stops at the gravel, and SphereFormer stops at the
+  vegetation, so it includes a ~0.5–1 m dirt shoulder on both sides. SAM3 is narrower on BOTH sides
+  (left -0.4…-0.8 m, right +0.2…+0.5 m at 15–30 m); a calibration error would shift both edges the
+  same way. The overlay is `~/fusion_data/recordings/planner_ab_plots/x3_overlay_*.png`.
+
+Measured through three/four unmodified `lmp_v10c` instances on the same live replay (stationary
+Sep 22 road bags, `scripts/road_boundary_planner_ab.py`). At 20 m, in obstacle frames:
+
+| arm | pulled in > 0.5 m / > 1 m | centreline p95 | jitter | empty |
+|---|---|---|---|---|
+| today's vehicle code, raw | 27–31% / 13% | 0.63 m | 0.10 m | 7–8% |
+| today + road_boundary | 0–2.4% / 0–0.2% | 0.15–0.19 m | 0.08–0.10 m | 0% |
+| branch, raw (upstream fixes only; 3 runs) | 0.4–3.9% / 0–2.5% | 0.13–0.29 m | 0.04–0.10 m | 8–12% |
+| branch + road_boundary | 0–1.0% / 0% | 0.08–0.12 m | 0.02–0.05 m | 0% |
+| branch + road_boundary + `lmp_v10c` guards* | 0% / 0% | 0.06–0.10 m | 0.006–0.007 m | 0% |
+
+\* `enable_coherent_source_mode` and `enable_pair_dropout_hysteresis`, set at runtime with no
+planner edit.
+
+Other measurements:
+- **SphereFormer rate:** about 7.9 Hz, up from 6.3 Hz (S6).
+- **SAM3 frame time:** about 0.70–0.74 s. The obstacle prompt costs about 160 ms of that
+  (three terms at about 53 ms each); `'gravel road'` itself takes 124 ms.
+- **Prompt stats** on the road bag: `'gravel road'` gives a mask in 100% of frames (mean score
+  0.62), `'person'` in 30%, `'car'` in 2%, `'truck'` in 0%.
+
+**Decision needed:** on the branch the planner's road is about 0.9 m wider: at 20 m the edges sit
+at about +3.8/-3.4 m against +3.2/-3.0 m today. `lmp_v10c` now follows SphereFormer's edge,
+which includes the dirt shoulder (X3). Whether the shoulder is drivable decides whether that is
+right, or whether SAM3's prompt should include it.
+
+Not done (tier 5): S8 (amodal retraining), A6 (SAM3 video mode), X1 (typed boundary message),
+and S5 (per-point state field). Not yet shown: a moving drive; the A/B above is stationary only.
 
 Each item gives what to change, why (with the evidence), and how to measure it. The measuring
 tool for every item is `scripts/road_boundary_ab.py`. Its `raw` arm is whatever the upstream
@@ -35,8 +115,9 @@ Crop a vehicle box (or r < 2.5 m) from the input cloud in `inference_from_ros_me
 ### S3. Fixed, vehicle-frame bins for the boundary (small)
 The boundary uses `np.linspace(min_x, max_x, 22)` over **all** road points. On the replay that
 range was -30…92 m, so the bins are about 5.8 m wide, cover the road behind the vehicle, and
-change width every frame as the farthest road point moves. They are also cut along `lidar_tc` x,
-which is yawed 5.35°.
+change width every frame as the farthest road point moves. (They are cut along `lidar_tc` x,
+yawed 5.35°, but that does not shear the picked points: on a straight edge the extreme of a
+tilted strip still lies on the edge. The yaw only matters for where the stations fall.)
 Use fixed bins (for example 2 m from 3 to 60 m) after rotating into the vehicle frame
 (`perception_common.lane_geometry.DEFAULT_EGO_YAW_DEG`, as the lane node already does).
 *Measure:* `jump` and `empty` in the raw arm, on clear frames.

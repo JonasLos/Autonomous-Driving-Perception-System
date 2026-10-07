@@ -52,6 +52,9 @@ topics:
     right_contour: "/sam3_right_contour"
     left_boundary: "/sam3_left_boundary"
     right_boundary: "/sam3_right_boundary"
+    # Per-pixel road mask ids (PNG) and the obstacle mask from the same image encoding.
+    mask_image: "/segmentation/mask_image/compressed"
+    obstacle_mask: "/segmentation/obstacle_mask/compressed"
 
   sphereformer:
     segmentation_mask: "/sphereformer_road_segmentation"
@@ -69,6 +72,17 @@ topics:
 
   transform:
     lidar_2d_projection: "/lidar_2d_projection"
+
+  # Produced by src/object_fusion (its own config/topics.yaml owns these names). Listed here
+  # only so recording categories can reference them and play_rosbag.sh knows they are
+  # produced inside the stack.
+  object_fusion:
+    objects: "/perception/objects"
+    projection_ground_flagged: "/perception/lidar_2d_projection_ground"
+    road_boundary_sphereformer_left: "/road_boundary/sphereformer/left"
+    road_boundary_sphereformer_right: "/road_boundary/sphereformer/right"
+    road_boundary_sam3_left: "/road_boundary/sam3/left"
+    road_boundary_sam3_right: "/road_boundary/sam3/right"
 
   radar:
     tracked_objects: "/tracked_objects"
@@ -109,6 +123,12 @@ categories:
     - topics.sam.right_contour
     - topics.sam.left_boundary
     - topics.sam.right_boundary
+    # SAM3 replaced SAM2 on the vehicle; the topics.sam.* entries above are SAM2's and record
+    # nothing when only SAM3 runs.
+    - topics.sam3.left_contour
+    - topics.sam3.right_contour
+    - topics.sam3.left_boundary
+    - topics.sam3.right_boundary
     - topics.sphereformer.segmentation_mask
     - topics.sphereformer.left_boundary
     - topics.sphereformer.right_boundary
@@ -136,6 +156,33 @@ categories:
     # The radar range-rate validation compares against ego velocity, so odom has to be
     # replayed alongside it.
     - topics.raw.ins
+
+  # Everything needed to re-evaluate the road boundaries offline (scripts/road_boundary_ab.py,
+  # scripts/road_boundary_planner_ab.py): the replay inputs plus each stage's output, so a
+  # drive can be replayed through new boundary rules without re-running the GPU models.
+  boundary_eval:
+    - topics.raw.camera
+    - topics.raw.camera_info
+    - topics.raw.lidar_tc
+    - topics.raw.tf_static
+    - topics.raw.radar_tracks
+    - topics.raw.ins
+    - topics.sphereformer.segmentation_mask
+    - topics.sphereformer.left_boundary
+    - topics.sphereformer.right_boundary
+    - topics.sam3.mask_image
+    - topics.sam3.obstacle_mask
+    - topics.sam3.left_contour
+    - topics.sam3.right_contour
+    - topics.sam3.left_boundary
+    - topics.sam3.right_boundary
+    - topics.transform.lidar_2d_projection
+    - topics.object_fusion.objects
+    - topics.object_fusion.projection_ground_flagged
+    - topics.object_fusion.road_boundary_sphereformer_left
+    - topics.object_fusion.road_boundary_sphereformer_right
+    - topics.object_fusion.road_boundary_sam3_left
+    - topics.object_fusion.road_boundary_sam3_right
 
   raw:
     - topics.raw.camera

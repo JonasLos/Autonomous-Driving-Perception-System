@@ -205,3 +205,56 @@ def test_a_single_stray_obstacle_point_shadows_nothing():
     assert ShadowMap(stray, min_points=1).occluded([[30.0, 2.5]]).all()
     dense = stray * np.linspace(1.0, 1.03, 4)[:, None]       # four returns on one bearing
     assert ShadowMap(dense, min_points=3).occluded([[30.0, 2.5]]).all()
+
+
+def _meas(p, left, right):
+    xa = p.anchors()
+    from object_fusion.road_boundary import Measurement
+    n = xa.size
+    L = np.full(n, float(left)) if np.isscalar(left) else np.asarray(left, float)
+    Rr = np.full(n, float(right)) if np.isscalar(right) else np.asarray(right, float)
+    st = np.zeros(n, np.int8)
+    return Measurement(xa, L, Rr, np.full(n, p.sigma_meas), np.full(n, p.sigma_meas),
+                       np.full(n, Z), st, st, float("nan"), 1.0, L.copy(), Rr.copy(), {})
+
+
+def test_a_wild_initialisation_is_replaced_within_a_few_frames():
+    p = BoundaryParams()
+    tr = BoundaryTracker(p)
+    xa = p.anchors()
+    wild = np.where(xa > 20, -4.4, HALF)          # left edge crossing to the far right
+    tr.predict(0.0, (0.0, np.zeros(2)))
+    tr.update(_meas(p, wild, -HALF))
+    left, right, _ = tr.output()
+    # The crossed stations are dropped at once rather than published.
+    assert not np.any(np.isfinite(left) & np.isfinite(right) & (left - right < p.min_width))
+    for k in range(1, 6):
+        tr.predict(0.1 * k, (0.0, np.zeros(2)))
+        tr.update(_meas(p, HALF, -HALF))
+    left, _, _ = tr.output()
+    assert np.allclose(left[np.isfinite(left)], HALF, atol=0.2) and np.isfinite(left).sum() == xa.size
+
+
+def test_a_persistently_gated_station_is_reinitialised():
+    p = BoundaryParams()
+    tr = BoundaryTracker(p)
+    tr.predict(0.0, (0.0, np.zeros(2)))
+    tr.update(_meas(p, HALF, -HALF))
+    xa = p.anchors()
+    moved = np.where((xa > 30) & (xa < 40), HALF + 6.0, HALF)   # a change far outside the gate
+    for k in range(1, 5):
+        tr.predict(0.1 * k, (0.0, np.zeros(2)))
+        tr.update(_meas(p, moved, -HALF))
+    left, _, _ = tr.output()
+    k = (xa > 30) & (xa < 40)
+    assert np.allclose(left[k], HALF + 6.0, atol=0.3)
+    assert tr.reinits >= k.sum()
+
+
+def test_measure_drops_crossed_stations():
+    from object_fusion.road_boundary import _drop_crossed
+    left = np.array([3.5, 1.0, -4.0])
+    right = np.array([-3.5, -1.0, -3.0])
+    bad = _drop_crossed(left, right, 2.5)
+    assert bad.tolist() == [False, True, True]
+    assert np.isnan(left[1:]).all() and np.isnan(right[1:]).all()
