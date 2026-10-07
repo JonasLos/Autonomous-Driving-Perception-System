@@ -37,6 +37,8 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.fusion.yml)
+# Extra overlays (e.g. EXTRA_COMPOSE_FILES=docker-compose.fusion.cpuset.yml). Empty by default.
+for f in ${EXTRA_COMPOSE_FILES:-}; do COMPOSE+=(-f "$f"); done
 MODE="vehicle"; BAG=""; ACTION="up"
 export PUBLISH_MODE="${PUBLISH_MODE:-filtered}"
 export ENABLE_RADAR_ONLY_BIRTH="${ENABLE_RADAR_ONLY_BIRTH:-false}"

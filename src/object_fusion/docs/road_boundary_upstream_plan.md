@@ -151,6 +151,73 @@ mixes in fp32 tensors internally; autocast already runs the matrix maths in fp16
   jump falls (0.46 → 0.30 m at 20 m), partly just because frames are closer together in time.
   Raw SAM3 gaps are unchanged; that's the field-of-view and edge-evidence issue.
 
+### SAM3 speed options 1, 2, 3 and a TensorRT scope (2026-10-07)
+
+Measured with the instrumented node (`profile_stages:=true`) under the full replay stack on
+Route2, GPU 1, four prompt terms, at least two runs each. The baseline in this session was
+210–217 ms (4.4–4.5 Hz):
+
+| option | SAM3 per frame | effect on the rest | status |
+|---|---|---|---|
+| 1 CPU pinning: SAM3 0-3, SphereFormer 4-11, rest 12-31 | 194–196 ms (p90 ~205), ~5.0 Hz | SphereFormer 7.4 → 8.6 Hz; YOLO, CLRerNet unchanged; fusion lateness unchanged | **opt-in** `docker-compose.cpuset.yml` / `docker-compose.fusion.cpuset.yml` |
+| 2a SAM3's built-in `compile=True` | idle 123 → 117 ms | +30 s start-up | not adopted |
+| 2b CUDA graphs for the batched pass (`cuda_graphs`) | 167–171 ms, ~5.6 Hz | none measured | **opt-in** parameter |
+| 1 + 2b together | 159 ms (p90 168), ~6.0 Hz | as 1 | — |
+| 3 CLRerNet on GPU 0 | 188 ms (vs 195 with pinning), within noise | SphereFormer slightly lower; a third model on the YOLO GPU | not adopted |
+
+The other SAM3 models above don't move: the image encoder stays at about 79 ms, now the
+largest single stage.
+
+**CUDA graphs:** masks match eager (IoU ≥ 0.9989 per term). The first two frames compile and
+record: about 166 s cold under load, about 47 s with the persistent cache
+(`compile_cache_dir`, about 200 MB, inside the Hugging Face mount; about 27 s with pinning as
+well). Compiler workers are capped at 4 threads.
+
+**Pinning only restricts the perception containers.** The planner, controller and sensor drivers
+run outside them, keep every core, and now share 12-31 with fusion, YOLO, transform and
+CLRerNet. It was measured with perception alone; validate on the vehicle with the whole software
+running (controller loop rate, driver rates) before relying on it. The layout is specific to
+this i9-14900 (P-cores 0-15 as hyperthread pairs, E-cores 16-31).
+
+#### TensorRT for the image encoder: scope, not started
+- **Target:** the encoder at about 67 ms idle and about 79 ms under load, now the largest stage.
+- **Export works.** `torch.export.export(..., strict=False)` captures the vision backbone at
+  1008×1008 in 2 s, giving 1,763 ops. **The blocker** is the rotary position encoding,
+  implemented with complex numbers: 64 `view_as_complex` and 64 `view_as_real` (`vitdet.py`,
+  `torch.polar`). TensorRT has no complex type. Fix: replace the rotation with the equivalent
+  real-valued cos/sin form, patched from the node rather than editing the sam3 package, and
+  check that the output is unchanged.
+- **Packages:**
+  - The SAM3 venv has torch 2.10.0+cu128. `torch-tensorrt` 2.10.0 targets exactly that torch
+    (x86_64 wheel) and requires `tensorrt` ≥ 10.14.1, < 10.15. That generation supports the
+    RTX 5080 (Blackwell).
+  - Both would be added to the SAM3 `pyproject.toml`, which the container installs with
+    `uv sync` at every start: a download at first start and roughly 2 GB more disk.
+  - `onnxscript` is not installed, so the ONNX route was not tried. The Torch-TensorRT route
+    compiles the exported program directly.
+- **Integration:**
+  - A `tensorrt_encoder` parameter wraps `backbone.forward_image`. Its outputs (FPN features and
+    position encodings, plus the SAM2 branch the processor post-processes) must match the eager
+    ones in structure.
+  - The engine is built once per GPU model and TensorRT version and cached on disk like the
+    compile cache. Engine build is minutes.
+- **Validation:**
+  - per-term mask IoU against eager on the profiler frames (≥ 0.99, as for CUDA graphs)
+  - encoder output difference in fp16
+  - a Route2 perception-level rerun
+- **Expected gain (an estimate, not measured):** fp16 TensorRT on a ViT this size is typically
+  1.5–3× faster than eager with autocast, so the encoder would drop from about 79 to about
+  30–50 ms, and a frame from about 160 to about 115–140 ms (about 7–8 Hz with CUDA graphs and
+  pinning).
+- **Effort:** about 2–4 days. In order: the rotary rewrite and an equivalence test, export plus
+  Torch-TensorRT compile, node integration with the engine cache, container dependencies, and
+  validation.
+- **Risks:**
+  - further unsupported operations after the rotary fix
+  - fp16 drift in the encoder showing up as mask changes
+  - TensorRT/torch version pinning tying future torch upgrades to a matching torch-tensorrt
+  - longer first start while the engine builds
+
 Not done (tier 5): S8 (amodal retraining), A6 (SAM3 video mode), X1 (typed boundary message),
 and S5 (per-point state field). Not yet shown: a moving drive; the A/B above is stationary only.
 

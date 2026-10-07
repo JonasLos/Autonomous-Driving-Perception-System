@@ -1,0 +1,5 @@
+# OPT-IN CPU pinning for the object-fusion container; see docker-compose.cpuset.yml for the
+# layout, the measurements and the caution. Used together with that file.
+services:
+  object_fusion_node:
+    cpuset: "${OTHER_CPUS:-12-31}"

@@ -1,0 +1,30 @@
+# OPT-IN CPU pinning for the perception containers. Not applied unless you add it:
+#
+#   EXTRA_COMPOSE_FILES="docker-compose.upstream.yml docker-compose.cpuset.yml" scripts/run_radar.sh ...
+#   EXTRA_COMPOSE_FILES=docker-compose.fusion.cpuset.yml scripts/run_fusion.sh ...
+#
+# Layout for THIS host's CPU (i9-14900, hybrid): P-cores are hyperthread pairs 0-1 .. 14-15
+# (5.5 GHz), E-cores are 16-31 (4.3 GHz). Check `lscpu` / /sys/devices/cpu_core/cpus first on
+# any other machine. Override any set with the env vars below.
+#
+# Measured 2026-10-07, Route2 replay, perception stack only (no planner/controller/drivers):
+#   SAM3 per frame ~214 -> ~195 ms (p90 ~250 -> ~205 ms); SphereFormer 7.4 -> 8.6 Hz;
+#   YOLO /fused_bbox and CLRerNet unchanged at 10 Hz; fusion lateness unchanged.
+#
+# CAUTION: only the perception containers are restricted. Host processes (planner, controller,
+# sensor drivers, zenoh router) still use every core, including SAM3's, and the perception
+# containers now share fewer cores with them. Validate on the vehicle with the whole software
+# running -- controller loop rate and sensor driver rates -- before relying on it.
+services:
+  sam3_ros:
+    cpuset: "${SAM3_CPUS:-0-3}"
+  sphereformer_node:
+    cpuset: "${SPHEREFORMER_CPUS:-4-11}"
+  yolo_node:
+    cpuset: "${OTHER_CPUS:-12-31}"
+  transform_node:
+    cpuset: "${OTHER_CPUS:-12-31}"
+  clrernet_node:
+    cpuset: "${OTHER_CPUS:-12-31}"
+  radar_node:
+    cpuset: "${OTHER_CPUS:-12-31}"
