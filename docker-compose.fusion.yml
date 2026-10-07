@@ -43,4 +43,10 @@ services:
       # 360-degree LiDAR clusters sustaining tracks the camera has passed.
       ENABLE_LIDAR_CLUSTERS: "${ENABLE_LIDAR_CLUSTERS:-true}"
       TURN_VELOCITY_K: "${TURN_VELOCITY_K:-1.0}"
+      # Obstacle-robust road boundaries (own topics only); off until measured.
+      ENABLE_ROAD_BOUNDARY: "${ENABLE_ROAD_BOUNDARY:-false}"
+      ROAD_BOUNDARY_OCCLUSION: "${ROAD_BOUNDARY_OCCLUSION:-true}"
+      ROAD_BOUNDARY_EXTRACTION: "${ROAD_BOUNDARY_EXTRACTION:-false}"
+      ROAD_BOUNDARY_FIT: "${ROAD_BOUNDARY_FIT:-true}"
+      ROAD_BOUNDARY_TRACKING: "${ROAD_BOUNDARY_TRACKING:-true}"
       OMP_NUM_THREADS: "${OMP_NUM_THREADS:-4}"

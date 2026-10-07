@@ -25,7 +25,11 @@
 #                     ODOM_TOPIC=/novatel/oem7/odom (twist only; /odom_grid's is bit-identical)
 #                     EGO_YAW_CORRECTION_DEG=-5.35  lidar_tc -> ego yaw
 # Still OFF by default: ENABLE_RADAR_ONLY_BIRTH, ENABLE_EXTENT_ESTIMATION,
-# ENABLE_CAMERA_ONLY_FALLBACK.
+# ENABLE_CAMERA_ONLY_FALLBACK, and the road-boundary node:
+#   --road-boundary   ENABLE_ROAD_BOUNDARY=true     /road_boundary/{sphereformer,sam3}/{left,right}
+#                     ROAD_BOUNDARY_{OCCLUSION,FIT,TRACKING}=false  drop one step
+#                     ROAD_BOUNDARY_EXTRACTION=true  experimental, off by default
+#   Needs SphereFormer and SAM3 running, i.e. run_radar.sh WITHOUT --obstacle-only.
 #
 # This composes an OVERLAY over docker-compose.yml; the base file is not modified, and
 # `docker compose --profile runtime up` is unaffected whether or not this stack is running.
@@ -57,6 +61,13 @@ export ENABLE_LIDAR_CLUSTERS="${ENABLE_LIDAR_CLUSTERS:-true}"
 # Velocity honesty. 0.0 is the rollback: no covariance inflation and no significance test,
 # so velocity_valid means what it meant before 2026-09-22.
 export TURN_VELOCITY_K="${TURN_VELOCITY_K:-1.0}"
+# Obstacle-robust road boundaries: OFF until measured. Its own topics only; the raw
+# /sphereformer_* and /sam3_* boundaries are unaffected either way.
+export ENABLE_ROAD_BOUNDARY="${ENABLE_ROAD_BOUNDARY:-false}"
+export ROAD_BOUNDARY_OCCLUSION="${ROAD_BOUNDARY_OCCLUSION:-true}"
+export ROAD_BOUNDARY_EXTRACTION="${ROAD_BOUNDARY_EXTRACTION:-false}"   # see road_boundary.md
+export ROAD_BOUNDARY_FIT="${ROAD_BOUNDARY_FIT:-true}"
+export ROAD_BOUNDARY_TRACKING="${ROAD_BOUNDARY_TRACKING:-true}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -73,11 +84,13 @@ while [[ $# -gt 0 ]]; do
     --clusters) ENABLE_LIDAR_CLUSTERS="true"; shift ;;   # the default since 2026-09-23
     --no-clusters) ENABLE_LIDAR_CLUSTERS="false"; shift ;;  # rollback
     --loose-velocity) TURN_VELOCITY_K="0.0"; shift ;;   # rollback: publish velocity as before
+    --road-boundary) ENABLE_ROAD_BOUNDARY="true"; shift ;;
+    --no-road-boundary) ENABLE_ROAD_BOUNDARY="false"; shift ;;   # the default
     --down) ACTION="down"; shift ;;
     --logs) ACTION="logs"; shift ;;
     --status) ACTION="status"; shift ;;
     --shadow-report) ACTION="shadow"; shift ;;
-    -h|--help) sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
+    -h|--help) sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -103,6 +116,7 @@ case "$ACTION" in
 /object_aggregator publish_mode enable_radar_only_birth ego_yaw_correction_deg measurement_lag assoc_max_dist merge_max_dist radar_camera_gate enable_lidar_clusters turn_velocity_k odom_topic
 /camera_lidar_detector projection_topic segmentation_empty_fallback enable_depth_gate enable_class_vote enable_extent_estimation enable_camera_only_fallback
 /ground_projection ground_levelling publish_nonground odom_topic
+/road_boundary enable_occlusion enable_extraction enable_fit enable_tracking enable_sphereformer enable_sam3
 NODES
     fi
     exit 0 ;;
@@ -149,12 +163,19 @@ echo "live rules: levelling=$GROUND_LEVELLING depth_gate=$ENABLE_DEPTH_GATE "\
      "class_vote=$ENABLE_CLASS_VOTE empty_fallback=$SEGMENTATION_EMPTY_FALLBACK "\
      "clusters=$ENABLE_LIDAR_CLUSTERS radar_camera_gate=$RADAR_CAMERA_GATE merge=$MERGE_MAX_DIST"
 echo "velocity: turn_velocity_k=$TURN_VELOCITY_K (0 = the pre-2026-09-22 always-valid rule)"
+echo "road boundary: enabled=$ENABLE_ROAD_BOUNDARY occlusion=$ROAD_BOUNDARY_OCCLUSION "\
+     "extraction=$ROAD_BOUNDARY_EXTRACTION fit=$ROAD_BOUNDARY_FIT tracking=$ROAD_BOUNDARY_TRACKING"
 echo "gates: publish_mode=$PUBLISH_MODE radar_only_birth=$ENABLE_RADAR_ONLY_BIRTH "\
      "extent=$ENABLE_EXTENT_ESTIMATION ego_yaw=$EGO_YAW_CORRECTION_DEG"
 echo
 echo "This stack CONSUMES the existing pipeline's output. Start that first if it is not up:"
 if [[ "$MODE" == "replay" ]]; then
-  echo "  scripts/run_radar.sh --replay $BAG --obstacle-only"
+  if [[ "$ENABLE_ROAD_BOUNDARY" == "true" ]]; then
+    echo "  scripts/run_radar.sh --replay $BAG       # NOT --obstacle-only: road_boundary needs"
+    echo "                                            # SphereFormer and SAM3"
+  else
+    echo "  scripts/run_radar.sh --replay $BAG --obstacle-only"
+  fi
 else
   echo "  scripts/run_radar.sh --vehicle      # with lanes: the planner follows CLRerNet's"
 fi

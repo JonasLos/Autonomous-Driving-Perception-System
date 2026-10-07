@@ -18,6 +18,16 @@ topics:
   object_fusion:
     objects: "/perception/objects"
     markers: "/perception/objects_markers"
+  # Obstacle-robust drop-in twins of /sphereformer_*_boundary and /sam3_*_boundary (same type,
+  # frame and stamp semantics). Produced by road_boundary_node; off unless ENABLE_ROAD_BOUNDARY.
+  road_boundary:
+    sphereformer:
+      left: "/road_boundary/sphereformer/left"
+      right: "/road_boundary/sphereformer/right"
+    sam3:
+      left: "/road_boundary/sam3/left"
+      right: "/road_boundary/sam3/right"
+    markers: "/road_boundary/markers"
   frames:
     # Vehicle-longitudinal frame published by ego_frame_publisher as a child of lidar_tc.
     # base_link is NOT this frame -- tf_static declares lidar_tc -> base_link as identity,

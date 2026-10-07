@@ -2,7 +2,8 @@
 adopted configuration: ground-flagged projection, empty-box drop, depth-jump gate, class vote,
 near-field levelling, merge distance bound, radar camera gate, 360-degree clusters, velocity
 honesty and publish_mode filtered are ON; radar-only birth, extent estimation, centroid
-correction and the camera-only fallback are OFF. docker/Dockerfile.object_fusion and
+correction and the camera-only fallback are OFF, and so is the road_boundary node (obstacle-robust
+twins of the SphereFormer/SAM3 boundaries) until it is measured. docker/Dockerfile.object_fusion and
 scripts/run_fusion.sh repeat these defaults and must be kept in step with them.
 
 Substitutions resolve to strings, so each argument is passed through ParameterValue with an
@@ -29,7 +30,8 @@ _BOOL = {"enable_radar_only_birth", "enable_extent_estimation", "use_sim_time",
          "enable_centroid_correction", "enable_camera_only_fallback",
          "publish_debug_clouds", "segmentation_empty_fallback", "enable_depth_gate",
          "enable_class_vote", "ground_levelling", "radar_camera_gate",
-         "enable_lidar_clusters"}
+         "enable_lidar_clusters", "enable_road_boundary", "road_boundary_occlusion",
+         "road_boundary_extraction", "road_boundary_fit", "road_boundary_tracking"}
 _INT = {"min_update_count", "ground_min_points"}
 
 _ARGS = {
@@ -100,6 +102,16 @@ _ARGS = {
     # no inflation, no significance test, velocity_valid as it was before 2026-09-22.
     "turn_velocity_k": "1.0",
     "sticky_sanity_dist": "20.0",
+    # Obstacle-robust road boundaries on /road_boundary/{sphereformer,sam3}/{left,right}. OFF by
+    # default: nothing consumes them until a consumer remaps onto them, and the raw topics are
+    # untouched either way. The four steps are separately switchable (also at runtime).
+    # Extraction is OFF: no difference on the two road replays, and on wide paved lots (the
+    # Aug 25 and selfcal drives) it locked onto arbitrary lateral runs -- 3-6 m jumps.
+    "enable_road_boundary": "false",
+    "road_boundary_occlusion": "true",
+    "road_boundary_extraction": "false",
+    "road_boundary_fit": "true",
+    "road_boundary_tracking": "true",
 }
 
 
@@ -160,4 +172,11 @@ def generate_launch_description():
                                 "assoc_max_dist", "merge_max_dist", "radar_camera_gate",
                                 "enable_lidar_clusters", "sticky_sanity_dist",
                                 "turn_velocity_k")),
+        Node(package="object_fusion", executable="road_boundary",
+             name="road_boundary", output="screen",
+             condition=IfCondition(LaunchConfiguration("enable_road_boundary")),
+             parameters=_params("use_sim_time", "odom_topic", "ego_yaw_correction_deg")
+             + [{f"enable_{step}": ParameterValue(LaunchConfiguration(f"road_boundary_{step}"),
+                                                  value_type=bool)
+                 for step in ("occlusion", "extraction", "fit", "tracking")}]),
     ])

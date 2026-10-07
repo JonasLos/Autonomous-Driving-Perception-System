@@ -31,6 +31,7 @@ RUN . /opt/ros/jazzy/setup.sh && \
     python3 -c "from fusion_msgs.msg import FusedObjectArray; \
                 from object_fusion.tracker import radar_h_and_H; \
                 from object_fusion.track_store import TrackStore; \
+                from object_fusion.road_boundary import measure; \
                 print('object_fusion deps OK')"
 
 ENV USE_SIM_TIME=false
@@ -54,4 +55,9 @@ CMD ["/bin/bash", "-lc", \
         merge_max_dist:=${MERGE_MAX_DIST:-2.5} \
         radar_camera_gate:=${RADAR_CAMERA_GATE:-true} \
         enable_lidar_clusters:=${ENABLE_LIDAR_CLUSTERS:-true} \
-        turn_velocity_k:=${TURN_VELOCITY_K:-1.0}"]
+        turn_velocity_k:=${TURN_VELOCITY_K:-1.0} \
+        enable_road_boundary:=${ENABLE_ROAD_BOUNDARY:-false} \
+        road_boundary_occlusion:=${ROAD_BOUNDARY_OCCLUSION:-true} \
+        road_boundary_extraction:=${ROAD_BOUNDARY_EXTRACTION:-false} \
+        road_boundary_fit:=${ROAD_BOUNDARY_FIT:-true} \
+        road_boundary_tracking:=${ROAD_BOUNDARY_TRACKING:-true}"]

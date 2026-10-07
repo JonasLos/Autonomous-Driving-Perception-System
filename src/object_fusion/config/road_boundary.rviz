@@ -1,0 +1,178 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid 10 m
+      Enabled: true
+      Cell Size: 10
+      Plane Cell Count: 14
+      Color: 70; 70; 76
+      Offset: {X: 30, Y: 0, Z: -2.4}
+      Reference Frame: <Fixed Frame>
+      Value: true
+    # SphereFormer's labelled sweep, in its own SemanticKITTI colours (road = magenta, car = blue).
+    - Class: rviz_default_plugins/PointCloud2
+      Name: SphereFormer segmentation
+      Enabled: true
+      Topic:
+        Depth: 2
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /sphereformer_road_segmentation
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: RGB8
+      Alpha: 0.45
+      Decay Time: 0
+      Value: true
+    # ---- SphereFormer: original (red) vs road_boundary (green = left, blue = right) ----
+    - Class: rviz_default_plugins/PointCloud2
+      Name: "SphereFormer ORIGINAL left (red)"
+      Enabled: true
+      Topic: {Depth: 5, Durability Policy: Volatile, History Policy: Keep Last, Reliability Policy: Reliable, Value: /sphereformer_left_boundary}
+      Style: Spheres
+      Size (m): 0.5
+      Color Transformer: FlatColor
+      Color: 239; 41; 41
+      Alpha: 1
+      Decay Time: 0
+      Value: true
+    - Class: rviz_default_plugins/PointCloud2
+      Name: "SphereFormer ORIGINAL right (red)"
+      Enabled: true
+      Topic: {Depth: 5, Durability Policy: Volatile, History Policy: Keep Last, Reliability Policy: Reliable, Value: /sphereformer_right_boundary}
+      Style: Spheres
+      Size (m): 0.5
+      Color Transformer: FlatColor
+      Color: 239; 41; 41
+      Alpha: 1
+      Decay Time: 0
+      Value: true
+    - Class: rviz_default_plugins/PointCloud2
+      Name: "SphereFormer NEW left (green)"
+      Enabled: true
+      Topic: {Depth: 5, Durability Policy: Volatile, History Policy: Keep Last, Reliability Policy: Reliable, Value: /road_boundary/sphereformer/left}
+      Style: Spheres
+      Size (m): 0.3
+      Color Transformer: FlatColor
+      Color: 46; 220; 70
+      Alpha: 1
+      Decay Time: 0
+      Value: true
+    - Class: rviz_default_plugins/PointCloud2
+      Name: "SphereFormer NEW right (blue)"
+      Enabled: true
+      Topic: {Depth: 5, Durability Policy: Volatile, History Policy: Keep Last, Reliability Policy: Reliable, Value: /road_boundary/sphereformer/right}
+      Style: Spheres
+      Size (m): 0.3
+      Color Transformer: FlatColor
+      Color: 40; 130; 255
+      Alpha: 1
+      Decay Time: 0
+      Value: true
+    # ---- SAM3: original (orange) vs road_boundary (yellow), off by default to keep it readable ----
+    - Class: rviz_default_plugins/PointCloud2
+      Name: "SAM3 ORIGINAL left (orange)"
+      Enabled: false
+      Topic: {Depth: 5, Durability Policy: Volatile, History Policy: Keep Last, Reliability Policy: Reliable, Value: /sam3_left_boundary}
+      Style: Spheres
+      Size (m): 0.4
+      Color Transformer: FlatColor
+      Color: 255; 150; 30
+      Alpha: 1
+      Decay Time: 0
+      Value: false
+    - Class: rviz_default_plugins/PointCloud2
+      Name: "SAM3 ORIGINAL right (orange)"
+      Enabled: false
+      Topic: {Depth: 5, Durability Policy: Volatile, History Policy: Keep Last, Reliability Policy: Reliable, Value: /sam3_right_boundary}
+      Style: Spheres
+      Size (m): 0.4
+      Color Transformer: FlatColor
+      Color: 255; 150; 30
+      Alpha: 1
+      Decay Time: 0
+      Value: false
+    - Class: rviz_default_plugins/PointCloud2
+      Name: "SAM3 NEW left (yellow)"
+      Enabled: false
+      Topic: {Depth: 5, Durability Policy: Volatile, History Policy: Keep Last, Reliability Policy: Reliable, Value: /road_boundary/sam3/left}
+      Style: Spheres
+      Size (m): 0.3
+      Color Transformer: FlatColor
+      Color: 250; 240; 60
+      Alpha: 1
+      Decay Time: 0
+      Value: false
+    - Class: rviz_default_plugins/PointCloud2
+      Name: "SAM3 NEW right (yellow)"
+      Enabled: false
+      Topic: {Depth: 5, Durability Policy: Volatile, History Policy: Keep Last, Reliability Policy: Reliable, Value: /road_boundary/sam3/right}
+      Style: Spheres
+      Size (m): 0.3
+      Color Transformer: FlatColor
+      Color: 250; 240; 60
+      Alpha: 1
+      Decay Time: 0
+      Value: false
+    # Why samples were rejected: grey = occluded (obstacle or its shadow beyond the extreme),
+    # orange = unsupported (nothing seen beyond it). Namespaces split by source.
+    - Class: rviz_default_plugins/MarkerArray
+      Name: road_boundary debug (fitted lines, rejected samples)
+      Enabled: true
+      Topic: {Depth: 2, Durability Policy: Volatile, History Policy: Keep Last, Reliability Policy: Reliable, Value: /road_boundary/markers}
+      Namespaces: {}
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Obstacle tracks
+      Enabled: true
+      Topic: {Depth: 5, Durability Policy: Volatile, History Policy: Keep Last, Reliability Policy: Reliable, Value: /perception/objects_markers}
+      Namespaces: {}
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Name: SAM3 road mask on camera
+      Enabled: true
+      Topic: {Depth: 2, Durability Policy: Volatile, History Policy: Keep Last, Reliability Policy: Best Effort, Value: /segmentation/result_image}
+      Normalize Range: true
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 24; 24; 28
+    Fixed Frame: lidar_tc
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/Measure
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 55
+      Focal Point: {X: 25, Y: 0, Z: -2}
+      Pitch: 1.2
+      Yaw: 3.1416
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz)
+    Saved: ~
+Window Geometry:
+  Height: 1050
+  Width: 1900
+  X: 10
+  Y: 10
+  Displays:
+    collapsed: false
+  Views:
+    collapsed: true
+  SAM3 road mask on camera:
+    collapsed: false

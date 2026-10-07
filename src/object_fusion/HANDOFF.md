@@ -1555,3 +1555,17 @@ and the bridge default is set to it.
   intended behaviour but means the FSM sees them as static obstacles.
 - Levelling evidence in curves rests on 232 + 15 curve sweeps from two drives.
 - The 360 deg path (item 7) would add clutter with no semantic check outside the camera FOV.
+
+## Road boundaries robust to obstacles (2026-10-07)
+New, OFF by default: `road_boundary_node` publishes `/road_boundary/{sphereformer,sam3}/{left,right}`,
+drop-in twins of the raw boundary topics. A consumer switches by remapping. Design, rollback, the
+measured A/B and what is not yet shown are in `docs/road_boundary.md`; the plan for upstream
+SphereFormer/SAM3 changes (not implemented) is in `docs/road_boundary_upstream_plan.md`.
+
+Key facts:
+- Only the two `perception_input_2026-09-22` bags are roads, and both are stationary. Every
+  Aug 25 bag and `selfcal_loc_2026-09-08` is a wide paved lot (raw edges 17–39 m out), so they
+  cannot test this.
+- SphereFormer labels the ego roof/hood (0.8–0.9 m) as `car`.
+- `perception-object-fusion:roadb` is the tested image of this code; `:latest` predates it.
+
