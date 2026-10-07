@@ -114,6 +114,25 @@ when its reference is stale.
 (`obstacle_prompt:=""` or `"car"`) to recover the rate. Also check whether the field-of-view and
 edge-evidence rules are too strict where the road is wider than the camera's view at 10 m.
 
+### SAM3 rate with several prompts (2026-10-07)
+
+Each OR term was a full `set_text_prompt`: the text encoder, then the grounding encoder, decoder
+and heads, re-run per term over the same image features. Only the image encoder (~67 ms) was
+shared. The grounding kernels are small and launch-bound, so CPU load from the rest of the
+stack stretches them. Measured on GPU 1 for four terms (two road, two obstacle):
+
+| | sequential (per term) | batched (one pass, text cached) |
+|---|---|---|
+| model only, idle machine | 177 ms | 123 ms |
+| model only, full stack running | 269 ms | 143 ms |
+| the node, full stack running | 566 ms (1.7 Hz) | 270 ms (3.7 Hz) |
+
+The batched masks are identical (IoU 1.000 per term). This batches the prompts of ONE frame,
+not several frames, so it adds no latency. Sharing GPU 1 with CLRerNet costs about 7%. CPU
+contention from the fusion stack and the GPU-0 nodes is what slows the per-term path (grounding
+92 → 165 ms). The visualisation timer and per-frame image decoding made no measurable difference.
+`batch_prompts:=false` restores the per-term path. Profiler: `scripts/sam3_prompt_profile.py`.
+
 Not done (tier 5): S8 (amodal retraining), A6 (SAM3 video mode), X1 (typed boundary message),
 and S5 (per-point state field). Not yet shown: a moving drive; the A/B above is stationary only.
 
