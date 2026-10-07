@@ -179,7 +179,10 @@ CLRerNet. It was measured with perception alone; validate on the vehicle with th
 running (controller loop rate, driver rates) before relying on it. The layout is specific to
 this i9-14900 (P-cores 0-15 as hyperthread pairs, E-cores 16-31).
 
-#### TensorRT for the image encoder: scope, not started
+#### TensorRT for the image encoder: DROPPED (2026-10-07)
+Decided against: the expected gain does not justify 2–4 days plus the extra dependency and
+version pinning. The scope below is kept only as the reason; do not pick it up without a new
+decision.
 - **Target:** the encoder at about 67 ms idle and about 79 ms under load, now the largest stage.
 - **Export works.** `torch.export.export(..., strict=False)` captures the vision backbone at
   1008×1008 in 2 s, giving 1,763 ops. **The blocker** is the rotary position encoding,
