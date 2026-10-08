@@ -1559,8 +1559,10 @@ and the bridge default is set to it.
 ## Road boundaries robust to obstacles (2026-10-07)
 New, OFF by default: `road_boundary_node` publishes `/road_boundary/{sphereformer,sam3}/{left,right}`,
 drop-in twins of the raw boundary topics. A consumer switches by remapping. Design, rollback, the
-measured A/B and what is not yet shown are in `docs/road_boundary.md`; the plan for upstream
-SphereFormer/SAM3 changes (not implemented) is in `docs/road_boundary_upstream_plan.md`.
+measured A/B and what is not yet shown are in `docs/road_boundary.md`. The upstream
+SphereFormer/SAM3 changes are implemented on this branch (`upstream_boundary_fixes`, worktree
+`~/Downloads/ADPS-upstream`) and written up in `docs/road_boundary_upstream_plan.md`.
+**Where it stands, decisions pending and how to resume: `docs/road_boundary_status.md`.**
 
 Key facts:
 - Only the two `perception_input_2026-09-22` bags are roads, and both are stationary. Every
