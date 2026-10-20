@@ -18,6 +18,8 @@ EXTRA_COMPOSE_FILES=docker-compose.upstream.yml scripts/run_radar.sh --replay BA
 
 Each change sits behind a parameter, so the previous behaviour stays one `ros2 param set` away.
 
+How these changes and `road_boundary` handle obstacles, in one place: `road_boundary_obstacles.md`.
+
 | item | where | default on branch | revert with |
 |---|---|---|---|
 | A1 PNG mask | `segmentation.py` | on | (format only) |

@@ -1563,6 +1563,7 @@ measured A/B and what is not yet shown are in `docs/road_boundary.md`. The upstr
 SphereFormer/SAM3 changes are implemented on this branch (`upstream_boundary_fixes`, worktree
 `~/Downloads/ADPS-upstream`) and written up in `docs/road_boundary_upstream_plan.md`.
 **Where it stands, decisions pending and how to resume: `docs/road_boundary_status.md`.**
+Obstacle handling, every change with its parameter: `docs/road_boundary_obstacles.md`.
 
 Key facts:
 - Only the two `perception_input_2026-09-22` bags are roads, and both are stationary. Every

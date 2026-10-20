@@ -5,6 +5,8 @@ The note to start from when this work is picked up again. Detail lives in
 [`road_boundary_upstream_plan.md`](road_boundary_upstream_plan.md) (the SphereFormer/SAM3
 changes, measurements, speed work). This page says where everything is, what is decided, and
 what is open.
+[`road_boundary_obstacles.md`](road_boundary_obstacles.md) lists every change that handles
+obstacles near the edge, layer by layer, with its parameter and off value.
 
 ## Where everything is
 
