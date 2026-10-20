@@ -41,7 +41,7 @@ from object_fusion import frames                                   # noqa: E402
 from object_fusion.ego_motion import frame_increment                # noqa: E402
 from object_fusion.tracker import predict                           # noqa: E402
 from object_fusion.ground_segmentation import GroundSegmenter       # noqa: E402
-from object_fusion.lidar_clusters import cluster_nonground          # noqa: E402
+from object_fusion.lidar_clusters import ClusterParams, cluster_nonground  # noqa: E402
 from object_fusion.projection import project_to_pixels              # noqa: E402
 
 LIDAR = "/lidar_tc/velodyne_points"
@@ -130,8 +130,15 @@ def main():
                          "strict rule; a passed object dies in the SIDE sector, where the roof "
                          "LiDAR's blind zone gives the worst coverage, so tolerating that gap is "
                          "what decides whether it is held into the well-covered rear sector")
+    ap.add_argument("--method", choices=("exact", "grid"), default="exact",
+                    help="how lidar_clusters links components (ClusterParams.method)")
+    ap.add_argument("--max-lateral", type=float, default=0.0,
+                    help="lateral crop in the ego frame, 0 = off (ClusterParams.max_lateral)")
     args = ap.parse_args()
     globals()["FOLLOW_S"] = float(args.follow_s)
+    cparams = ClusterParams(method=args.method, max_lateral=args.max_lateral,
+                            lateral_rot_rad=-frames.ego_tf_yaw_rad(None))
+    print(f"[clusters] method={args.method} max_lateral={args.max_lateral:g}")
 
     segments = load_objects(args.objects)
     deaths = deaths_from(segments)
@@ -149,7 +156,7 @@ def main():
     tw_buf, feed = oa._odom_feeder(odom)
 
     seg = GroundSegmenter(backend="patchworkpp", sensor_height=2.37, max_range=120.0)
-    sweeps, spent, n_clusters, n_out = [], 0.0, [], []
+    sweeps, spent, n_clusters, n_out, cl_ms = [], 0.0, [], [], []
     for f in sorted(glob.glob(os.path.join(args.source, "*.mcap"))):
         for m in read_ros2_messages(f, topics=[LIDAR]):
             t = stamp(m.ros_msg.header)
@@ -158,8 +165,10 @@ def main():
             p = decode(m.ros_msg)
             t0 = time.perf_counter()
             ground = seg.segment(p[:, :3], p[:, 3] / 255.0)
-            cl = cluster_nonground(p[~ground, :3])
+            t1 = time.perf_counter()
+            cl = cluster_nonground(p[~ground, :3], cparams)
             spent += time.perf_counter() - t0
+            cl_ms.append(1000.0 * (time.perf_counter() - t1))
             xy = np.array([[c.x, c.y] for c in cl]) if cl else np.empty((0, 2))
             sweeps.append((t, xy))
             n_clusters.append(len(cl))
@@ -167,7 +176,8 @@ def main():
     sweeps.sort(key=lambda s: s[0])
     st = np.array([s[0] for s in sweeps])
     print(f"[lidar] {len(sweeps)} sweeps, segmentation + clustering {1000 * spent / len(sweeps):.1f}"
-          f" ms/sweep, clusters/sweep median {np.median(n_clusters):.0f} "
+          f" ms/sweep (clustering alone median {np.median(cl_ms):.1f}, p90 "
+          f"{np.percentile(cl_ms, 90):.1f}), clusters/sweep median {np.median(n_clusters):.0f} "
           f"({np.median(n_out):.0f} outside the camera's view)\n")
 
     def follow(t_d, p0, v0=(0.0, 0.0)):

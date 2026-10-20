@@ -28,6 +28,7 @@ updates the track every sweep, so it should do better -- but that is a claim to 
 runs, not one to believe.
 """
 
+import dataclasses
 import time
 
 import numpy as np
@@ -36,13 +37,21 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
+from rcl_interfaces.msg import SetParametersResult
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2
 from visualization_msgs.msg import Marker, MarkerArray
 
 from fusion_msgs.msg import Detection3D, Detection3DArray
 
+from object_fusion import frames
 from object_fusion.lidar_clusters import ClusterParams, cluster_nonground
+
+#: ROS parameter -> ClusterParams field, for the values that may be changed live.
+_LIVE = {"cluster_min_range": "min_range", "cluster_max_range": "max_range",
+         "cluster_voxel": "voxel", "cluster_gap_base": "gap_base",
+         "cluster_gap_per_m": "gap_per_m", "cluster_max_length": "max_length",
+         "cluster_min_height": "min_height", "cluster_max_lateral": "max_lateral"}
 
 
 class LidarClusterDetectorNode(Node):
@@ -64,12 +73,31 @@ class LidarClusterDetectorNode(Node):
             min_voxels=int(p("cluster_min_voxels", ClusterParams.min_voxels).value),
             max_length=float(p("cluster_max_length", ClusterParams.max_length).value),
             min_height=float(p("cluster_min_height", ClusterParams.min_height).value),
+            # Lateral crop in the ego frame, 0 = off -- the default since 2026-10-20, because
+            # grid clustering (below) keeps the full width inside the budget. With "exact" a
+            # crop is needed in trees: uncropped ~115 ms/sweep live, 10 m 7 ms (2026-10-08).
+            # The rollback pair is cluster_method exact + cluster_max_lateral 10.0. Live:
+            #   ros2 param set /lidar_cluster_detector cluster_max_lateral 10.0
+            max_lateral=float(p("cluster_max_lateral", 0.0).value),
+            lateral_rot_rad=-frames.ego_tf_yaw_rad(
+                float(p("ego_yaw_correction_deg", frames.EGO_YAW_IN_LIDAR_DEG).value)),
+            # "grid" (the default since 2026-10-20) or "exact". Grid: ~7 ms for the full 60 m in
+            # trees where exact takes ~48 ms (idle CPU); live at the treeline 22-26 ms, 10 Hz,
+            # 71-82 ms age at publish, uncropped (2026-10-15). See lidar_clusters._components_grid.
+            # Live: ros2 param set /lidar_cluster_detector cluster_method exact
+            method=str(p("cluster_method", "grid").value),
         )
+        self.add_on_set_parameters_callback(self._on_set_parameters)
         self._pub = self.create_publisher(Detection3DArray, self._out, 5)
         self._markers = self.create_publisher(MarkerArray, self._out + "_markers", 2)
-        self.create_subscription(PointCloud2, self._in, self._cb, 5)
+        # Depth 1: always cluster the NEWEST sweep. With depth 5, a sweep that takes longer than
+        # the 100 ms sweep period queues the next ones behind it -- at the treeline on 2026-10-08
+        # that was ~150 ms per sweep and 640 ms of age at publish, every cluster applied half a
+        # second behind its track. A dropped sweep costs one update; a stale one costs all of them.
+        self.create_subscription(PointCloud2, self._in, self._cb, 1)
         self._n = self._clusters = 0
         self._ms = []
+        self._age_ms = []
         # Steady clock: under use_sim_time a looping replay rewinds ROS time and a ROS-time timer
         # then fires on every /clock tick to catch up.
         self.create_timer(5.0, self._log, clock=Clock(clock_type=ClockType.STEADY_TIME))
@@ -110,6 +138,28 @@ class LidarClusterDetectorNode(Node):
             out.detections.append(d)
         self._pub.publish(out)
         self._publish_markers(msg.header, clusters)
+        # Age at publish: what the aggregator's measurement_lag has to cover.
+        self._age_ms.append(
+            (self.get_clock().now().nanoseconds * 1e-9
+             - (msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9)) * 1000.0)
+
+    def _on_set_parameters(self, params):
+        changes = {}
+        for prm in params:
+            if prm.name == "cluster_method":
+                if prm.value not in ("exact", "grid"):
+                    return SetParametersResult(successful=False,
+                                               reason="cluster_method must be exact|grid")
+                changes["method"] = str(prm.value)
+            elif prm.name in _LIVE:
+                v = float(prm.value)
+                if v < 0.0:
+                    return SetParametersResult(successful=False, reason=f"{prm.name} must be >= 0")
+                changes[_LIVE[prm.name]] = v
+        if changes:
+            self._params = dataclasses.replace(self._params, **changes)
+            self.get_logger().warning(f"cluster parameters -> {changes}")
+        return SetParametersResult(successful=True)
 
     def _publish_markers(self, header, clusters):
         """One wireframe box per cluster, so what the 360-degree path sees is visible in RViz.
@@ -148,10 +198,15 @@ class LidarClusterDetectorNode(Node):
                                       "with publish_nonground?")
             return
         ms = np.asarray(self._ms)
+        age = np.asarray(self._age_ms) if self._age_ms else np.zeros(1)
+        lateral = (f"{self._params.max_lateral:.0f} m" if self._params.max_lateral > 0 else "off")
         self.get_logger().info(
             f"sweeps={self._n} clusters/sweep {self._clusters / self._n:.0f} "
-            f"cluster {ms.mean():.1f} ms (p90 {np.percentile(ms, 90):.1f})")
+            f"cluster {ms.mean():.1f} ms (p90 {np.percentile(ms, 90):.1f}) "
+            f"age at publish {np.median(age):.0f} ms (p90 {np.percentile(age, 90):.0f}) "
+            f"lateral crop {lateral} method {self._params.method}")
         self._ms = self._ms[-200:]
+        self._age_ms = self._age_ms[-200:]
 
 
 def main(args=None):

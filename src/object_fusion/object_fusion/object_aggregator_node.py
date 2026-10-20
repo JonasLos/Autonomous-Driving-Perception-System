@@ -42,6 +42,7 @@ from fusion_msgs.msg import Detection3DArray, FusedObject, FusedObjectArray
 from perception_common.stamp_sync import apply_bounded_parameters
 
 from object_fusion import frames
+from object_fusion.projection import in_image
 from object_fusion.association import apply_sticky_ids, associate_radar, solve_assignment
 from object_fusion.lidar_clusters import associate_clusters
 from object_fusion.ego_motion import EgoTwist, TwistBuffer
@@ -109,6 +110,16 @@ class ObjectAggregatorNode(Node):
             self.declare_parameter("enable_radar_only_birth", False).value)
         self._ego_yaw_deg = float(self.declare_parameter(
             "ego_yaw_correction_deg", frames.EGO_YAW_IN_LIDAR_DEG).value)
+        # Charge a camera MISS only where the track projects inside the image. camera_expected()
+        # alone tests transform.py's crop (x 0-150 m, |y| <= 20 m), which is far wider than the
+        # image: the image ends at about -17..-20 deg on the right and +11.5 deg on the left. A
+        # track just outside it was charged -0.8 per camera frame (-8/s) that it could never
+        # answer, against at most +4/s from clusters at 10 Hz. It died ~1 s after leaving the
+        # image -- the pedestrian dropped while passing, 2026-10-08, with clusters still on it.
+        # ON by default since 2026-10-08, after the user watched it hold the pedestrian live.
+        # Rollback: ros2 param set /object_aggregator camera_miss_in_image_only false
+        self._camera_miss_in_image_only = bool(
+            self.declare_parameter("camera_miss_in_image_only", True).value)
 
         self._lag = float(self.declare_parameter("measurement_lag", DEFAULT_LAG_S).value)
         self._sigma_long = float(self.declare_parameter("sigma_long", 2.0).value)
@@ -253,6 +264,10 @@ class ObjectAggregatorNode(Node):
                     f"enable_radar_only_birth -> {self._enable_radar_only_birth}")
             elif p.name == "ego_yaw_correction_deg":
                 self._ego_yaw_deg = float(p.value)
+            elif p.name == "camera_miss_in_image_only":
+                self._camera_miss_in_image_only = bool(p.value)
+                self.get_logger().warning(
+                    f"camera_miss_in_image_only -> {self._camera_miss_in_image_only}")
         return SetParametersResult(successful=True)
 
     def _accrue(self, tr, sensor, hit, expected, t):
@@ -523,8 +538,10 @@ class ObjectAggregatorNode(Node):
 
         # Existence, for EVERY track -- a track the camera did not update is evidence against
         # itself only if the camera could have seen it.
+        seen = (in_image([tr.x[:2] for tr in self._store.tracks])
+                if self._camera_miss_in_image_only and self._store.tracks else None)
         for k, tr in enumerate(self._store.tracks):
-            expected = camera_expected(tr.x[:2])
+            expected = camera_expected(tr.x[:2]) and (seen is None or bool(seen[k]))
             if expected:
                 tr.opportunities["camera_lidar"] += 1
             self._accrue(tr, "camera_lidar", k in used, expected, t)

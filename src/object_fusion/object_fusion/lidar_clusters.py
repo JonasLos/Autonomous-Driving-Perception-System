@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import ndimage
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
@@ -55,6 +56,24 @@ class ClusterParams:
     #: Shapes an object cannot have. A kerb or wall is long and low / long and flat.
     max_length: float = 12.0
     min_height: float = 0.25
+    #: Lateral half-width in the EGO frame, 0 = off (the default). Vegetation is what makes this
+    #: path slow: at the treeline on 2026-10-08 half the non-ground points sat > 19.7 m to the
+    #: side and a sweep cost ~110 ms (15 m: 18 ms). ``lateral_rot_rad`` rotates lidar_tc into ego
+    #: (lidar_tc is yawed 5.35 deg -- 5.6 m of lateral at 60 m), the rotation frames.lidar_to_ego
+    #: applies; this module stays ROS-free, so the node passes it in.
+    max_lateral: float = 0.0
+    lateral_rot_rad: float = 0.0
+    #: How components are linked. "exact": KD-tree pairs, d <= max(gap_i, gap_j) -- the method
+    #: every coverage number in HANDOFF item 7 was measured with. "grid": a 2-D occupancy grid,
+    #: dilated per range band and labelled (_components_grid) -- 6.8 ms for the full 60 m on the
+    #: 2026-10-08 treeline sweeps where "exact" takes 47.5 ms (idle CPU; live load ~3x both), so
+    #: it needs no lateral crop. Not identical (~85-90% of object-sized clusters within 0.5-1 m
+    #: of an exact one), but its coverage of real objects on the selfcal replay is the same or
+    #: better in every sector, at equal or lower chance (scripts/lidar_cluster_ab.py --method).
+    #: This LIBRARY default stays "exact" (the harnesses and tests reference it); the NODE has
+    #: launched with "grid" and no crop since 2026-10-20.
+    method: str = "exact"
+    grid_bands: int = 6
 
 
 @dataclass
@@ -70,25 +89,92 @@ class Cluster:
 
 
 def _voxelise(xyz, size):
+    """Mean point and point count per occupied voxel, ordered by voxel key.
+
+    One packed int64 key and a sort, rather than ``np.unique(axis=0)`` on the (N, 3) keys, which
+    sorts rows lexicographically and was ~14 ms of a sweep in vegetation. Same voxels, same order.
+    """
     keys = np.floor(xyz / size).astype(np.int64)
-    _, first, inv, counts = np.unique(keys, axis=0, return_index=True, return_inverse=True,
-                                      return_counts=True)
-    sums = np.zeros((counts.size, 3))
-    np.add.at(sums, inv.reshape(-1), xyz)
+    keys -= keys.min(axis=0)
+    span = keys.max(axis=0) + 1
+    packed = (keys[:, 0] * span[1] + keys[:, 1]) * span[2] + keys[:, 2]
+    order = np.argsort(packed, kind="stable")
+    sorted_keys = packed[order]
+    starts = np.flatnonzero(np.r_[True, sorted_keys[1:] != sorted_keys[:-1]])
+    counts = np.diff(np.r_[starts, sorted_keys.size])
+    sums = np.add.reduceat(xyz[order], starts, axis=0)
     return sums / counts[:, None], counts
+
+
+#: Gap bands for the pair search in :func:`_components`. Any number gives the same pairs; six
+#: measured fastest on the 2026-10-08 treeline sweeps.
+_GAP_BANDS = 6
 
 
 def _components(pts2d, gap):
     """Connected components over KD-tree pairs; a pair joins when it is closer than the LARGER of
-    its two points' gaps, so a near point never vetoes a far neighbour's looser spacing."""
+    its two points' gaps, so a near point never vetoes a far neighbour's looser spacing.
+
+    Searched per gap band: each band queries its own largest gap against every point and keeps a
+    pair when it is within the band point's own gap. A pair passes for one of its ends exactly
+    when d <= max(gap_i, gap_j), so the edge set is the old single query at gap.max() -- without
+    searching the dense near field at the far field's radius.
+    """
     n = pts2d.shape[0]
-    pairs = cKDTree(pts2d).query_pairs(float(gap.max()), output_type="ndarray")
-    if pairs.size:
-        d = np.linalg.norm(pts2d[pairs[:, 0]] - pts2d[pairs[:, 1]], axis=1)
-        pairs = pairs[d <= np.maximum(gap[pairs[:, 0]], gap[pairs[:, 1]])]
-    graph = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])) if len(pairs)
-                       else (np.empty(0), (np.empty(0, int), np.empty(0, int))), shape=(n, n))
+    tree = cKDTree(pts2d)
+    rows, cols = [], []
+    for band in np.array_split(np.argsort(gap, kind="stable"), _GAP_BANDS):
+        if band.size == 0:
+            continue
+        sp = cKDTree(pts2d[band]).sparse_distance_matrix(tree, float(gap[band].max()),
+                                                          output_type="ndarray")
+        i, j = band[sp["i"]], sp["j"]
+        ok = (sp["v"] <= gap[i]) & (i != j)
+        rows.append(i[ok])
+        cols.append(j[ok])
+    i = np.concatenate(rows) if rows else np.empty(0, int)
+    j = np.concatenate(cols) if cols else np.empty(0, int)
+    graph = coo_matrix((np.ones(i.size), (i, j)), shape=(n, n))
     return connected_components(graph, directed=False)[1]
+
+
+def _disk(radius):
+    k = int(np.floor(radius))
+    y, x = np.mgrid[-k:k + 1, -k:k + 1]
+    return (x * x + y * y) <= radius * radius + 1e-9
+
+
+def _components_grid(vox, gap, cell, bands):
+    """Components on a 2-D occupancy grid instead of point pairs.
+
+    Each voxel marks its ``cell``-sized cell. Cells of one range band are dilated by a disk of
+    radius ``(gap_band / cell - 1) / 2`` cells, where gap_band is the band's largest gap, and the
+    union is labelled with 8-connectivity: two disks touch when their centres are about
+    2 * radius + 1 cells apart, i.e. one gap. Cost is the grid, not the number of neighbour pairs,
+    which is what made the exact search slow in vegetation. Approximations against "exact": cell
+    quantisation (0.2 m), a band's gap rather than each point's, and two bands meeting at the
+    mean of their gaps rather than the larger.
+    """
+    r = np.hypot(vox[:, 0], vox[:, 1])
+    edges = np.linspace(r.min(), r.max() + 1e-6, bands + 1)
+    band = np.clip(np.searchsorted(edges, r, side="right") - 1, 0, bands - 1)
+    radius = np.array([(float(gap[band == b].max()) / cell - 1.0) / 2.0 if (band == b).any()
+                       else 0.0 for b in range(bands)])
+    pad = int(np.floor(max(radius.max(), 0.0)))
+    ij = np.floor(vox[:, :2] / cell).astype(np.int64)
+    ij -= ij.min(axis=0) - pad
+    linked = np.zeros(tuple(ij.max(axis=0) + 1 + pad), dtype=bool)
+    # Dilation by a symmetric disk is the union of the disk stamped at every occupied cell, so
+    # stamp it: a few writes per cell, where ndimage.binary_dilation swept the whole ~600 x 500
+    # grid once per band (15 of the 20 ms). Identical result.
+    for b in range(bands):
+        cells = ij[band == b]
+        if cells.size == 0:
+            continue
+        for di, dj in np.argwhere(_disk(max(radius[b], 0.0))) - int(np.floor(max(radius[b], 0.0))):
+            linked[cells[:, 0] + di, cells[:, 1] + dj] = True
+    labels, _ = ndimage.label(linked, structure=np.ones((3, 3), dtype=bool))
+    return labels[ij[:, 0], ij[:, 1]]
 
 
 def cluster_nonground(xyz, params: ClusterParams = ClusterParams()):
@@ -101,23 +187,36 @@ def cluster_nonground(xyz, params: ClusterParams = ClusterParams()):
     ego = (xyz[:, 0] > x0) & (xyz[:, 0] < x1) & (xyz[:, 1] > y0) & (xyz[:, 1] < y1)
     keep = ((r >= params.min_range) & (r <= params.max_range) & ~ego
             & (xyz[:, 2] >= params.z_min) & (xyz[:, 2] <= params.z_max))
+    if params.max_lateral > 0.0:
+        a = params.lateral_rot_rad
+        keep &= np.abs(np.sin(a) * xyz[:, 0] + np.cos(a) * xyz[:, 1]) <= params.max_lateral
     if not keep.any():
         return []
     vox, counts = _voxelise(xyz[keep], params.voxel)
     vr = np.hypot(vox[:, 0], vox[:, 1])
-    labels = _components(vox[:, :2], params.gap_base + params.gap_per_m * vr)
+    gap = params.gap_base + params.gap_per_m * vr
+    if params.method == "grid":
+        labels = _components_grid(vox, gap, params.voxel, params.grid_bands)
+    else:
+        labels = _components(vox[:, :2], gap)
 
+    # One sort, then a slice per component -- not a full-length mask per label, which in
+    # vegetation means hundreds of components times thousands of voxels.
+    order = np.argsort(labels, kind="stable")
+    sorted_labels = labels[order]
+    starts = np.flatnonzero(np.r_[True, sorted_labels[1:] != sorted_labels[:-1]])
+    ends = np.r_[starts[1:], sorted_labels.size]
     out = []
-    for lab in np.unique(labels):
-        m = labels == lab
-        if m.sum() < params.min_voxels:
+    for s, e in zip(starts, ends):
+        idx = order[s:e]
+        if idx.size < params.min_voxels:
             continue
-        p = vox[m]
+        p = vox[idx]
         height = float(p[:, 2].max() - p[:, 2].min()) + params.voxel
         if height < params.min_height:
             continue
         c = p[:, :2].mean(axis=0)
-        if m.sum() >= 3:
+        if idx.size >= 3:
             ev, evec = np.linalg.eigh(np.cov((p[:, :2] - c).T))
             major = evec[:, 1]
         else:
@@ -130,7 +229,7 @@ def cluster_nonground(xyz, params: ClusterParams = ClusterParams()):
             continue
         out.append(Cluster(x=float(c[0]), y=float(c[1]), length=length, width=width,
                            height=height, yaw=float(np.arctan2(major[1], major[0])),
-                           n_points=int(counts[m].sum()), range=float(np.hypot(*c))))
+                           n_points=int(counts[idx].sum()), range=float(np.hypot(*c))))
     return out
 
 

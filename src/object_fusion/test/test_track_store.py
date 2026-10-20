@@ -323,3 +323,27 @@ def test_missed_updates_counts_camera_periods_since_the_last_update():
     assert tr.missed_updates(10.3) == 3
     assert tr.missed_updates(100.0) == 255, "uint8 on the wire"
     assert tr.missed_updates(9.0) == 0, "a late stamp is not a negative miss"
+
+
+def test_clusters_cannot_hold_a_track_the_camera_is_charged_for():
+    """The pedestrian drop of 2026-10-08, through the real existence update.
+
+    Outside the image but inside camera_expected()'s crop, a camera MISS (-0.8) lands every
+    camera frame. Even a cluster hit (+0.4) on EVERY sweep cannot answer it: the track is
+    deleted in about a second. Charged only inside the image, the same clusters hold it.
+    """
+    from object_fusion.track_store import P_DELETE
+
+    def life_s(charge_camera):
+        store = TrackStore()
+        tr = _track(8.0, -4.5, SENSOR_CAMERA | SENSOR_LIDAR, logodds=6.0)
+        t = 0.0
+        while tr.existence >= P_DELETE and t < 10.0:
+            t += 0.1
+            store.update_existence(tr, "lidar", True, True, 0.1)
+            store.update_existence(tr, "camera_lidar", False, charge_camera, 0.0)
+        return t
+
+    assert camera_expected(np.array([8.0, -4.5]))      # in the crop, though out of the image
+    assert life_s(charge_camera=True) < 2.0
+    assert life_s(charge_camera=False) >= 10.0

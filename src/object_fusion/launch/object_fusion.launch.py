@@ -1,7 +1,7 @@
 """Brings up the object-fusion stack. Every gate is declared here. The defaults are the measured,
 adopted configuration: ground-flagged projection, empty-box drop, depth-jump gate, class vote,
-near-field levelling, merge distance bound, radar camera gate, 360-degree clusters, velocity
-honesty and publish_mode filtered are ON; radar-only birth, extent estimation, centroid
+near-field levelling, merge distance bound, radar camera gate, 360-degree clusters (grid, no
+lateral crop), camera misses only inside the image, velocity honesty and publish_mode filtered are ON; radar-only birth, extent estimation, centroid
 correction and the camera-only fallback are OFF, and so is the road_boundary node (obstacle-robust
 twins of the SphereFormer/SAM3 boundaries) until it is measured. docker/Dockerfile.object_fusion and
 scripts/run_fusion.sh repeat these defaults and must be kept in step with them.
@@ -19,7 +19,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 _FLOAT = {"ego_yaw_correction_deg", "ego_z_offset", "measurement_lag", "sigma_long",
           "sensor_height", "camera_height_m", "assoc_max_dist", "merge_max_dist",
-          "sticky_sanity_dist", "turn_velocity_k",
+          "sticky_sanity_dist", "turn_velocity_k", "cluster_max_lateral",
           "ground_max_range",
           "ground_rejection_min_range", "ground_margin",
           "depth_gate_min_m", "depth_gate_range_frac", "class_vote_window_s",
@@ -29,7 +29,7 @@ _FLOAT = {"ego_yaw_correction_deg", "ego_z_offset", "measurement_lag", "sigma_lo
 _BOOL = {"enable_radar_only_birth", "enable_extent_estimation", "use_sim_time",
          "enable_centroid_correction", "enable_camera_only_fallback",
          "publish_debug_clouds", "segmentation_empty_fallback", "enable_depth_gate",
-         "enable_class_vote", "ground_levelling", "radar_camera_gate",
+         "enable_class_vote", "ground_levelling", "radar_camera_gate", "camera_miss_in_image_only",
          "enable_lidar_clusters", "enable_road_boundary", "road_boundary_occlusion",
          "road_boundary_extraction", "road_boundary_fit", "road_boundary_tracking"}
 _INT = {"min_update_count", "ground_min_points"}
@@ -97,6 +97,15 @@ _ARGS = {
     # cloud, lidar_cluster_detector clusters it, and the aggregator lets those clusters SUSTAIN
     # existing tracks (never birth). One flag turns the whole chain on.
     "enable_lidar_clusters": "true",
+    # How clusters are linked, and how far to the side (ego frame, 0.0 = no crop). Default since
+    # 2026-10-20: "grid", no crop -- live at the treeline 22-26 ms/sweep, 10 Hz, 71-82 ms old,
+    # and the same replay coverage as "exact". Rollback pair: "exact" + 10.0 (an uncropped exact
+    # ran ~115 ms/sweep in trees, too slow). Both settable live on /lidar_cluster_detector.
+    "cluster_max_lateral": "0.0",
+    "cluster_method": "grid",
+    # Camera misses only inside the image (see object_aggregator_node). ON since 2026-10-08;
+    # false is the rollback.
+    "camera_miss_in_image_only": "true",
     # Velocity honesty: the extra velocity sigma from a sweeping bearing is k * |omega| * r,
     # and velocity_valid means "distinguishable from standing still". 0.0 is the rollback --
     # no inflation, no significance test, velocity_valid as it was before 2026-09-22.
@@ -149,7 +158,8 @@ def generate_launch_description():
         Node(package="object_fusion", executable="lidar_cluster_detector",
              name="lidar_cluster_detector", output="screen",
              condition=IfCondition(LaunchConfiguration("enable_lidar_clusters")),
-             parameters=_params("use_sim_time")),
+             parameters=_params("use_sim_time", "ego_yaw_correction_deg",
+                                "cluster_max_lateral", "cluster_method")),
         Node(package="object_fusion", executable="camera_lidar_detector",
              name="camera_lidar_detector", output="screen",
              parameters=_params("use_sim_time", "max_pairing_skew", "wait_for_newer",
@@ -171,7 +181,7 @@ def generate_launch_description():
                                 "sigma_lat", "output_timeout", "odom_topic",
                                 "assoc_max_dist", "merge_max_dist", "radar_camera_gate",
                                 "enable_lidar_clusters", "sticky_sanity_dist",
-                                "turn_velocity_k")),
+                                "turn_velocity_k", "camera_miss_in_image_only")),
         Node(package="object_fusion", executable="road_boundary",
              name="road_boundary", output="screen",
              condition=IfCondition(LaunchConfiguration("enable_road_boundary")),

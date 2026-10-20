@@ -1,10 +1,29 @@
 # object_fusion — handoff
 
-State as of 2026-10-05. Everything here is NEW. The only pre-existing repository files touched
+State as of 2026-10-20. Everything here is NEW. The only pre-existing repository files touched
 are documentation, each with the user's explicit go-ahead: `.gitignore`, `README.md` and
-`CHANGELOG.md` (2026-09-23) and `DOCKER.md` (2026-10-05). No pre-existing code was modified.
+`CHANGELOG.md` (2026-09-23), `DOCKER.md` (2026-10-05), and `CHANGELOG.md` + `DOCKER.md` again
+(2026-10-20, "document and save everything"). No pre-existing code was modified.
 
-## RESUME HERE (updated 2026-10-05)
+## RESUME HERE (updated 2026-10-20)
+
+**October, in one paragraph** (details: item 7, "Live at a treeline"). On the vehicle, passed
+objects died the moment they left the camera image although the cluster path held them on replay.
+Two causes, both fixed and seen working live:
+1. The cluster detector fell 0.5 s behind in trees: clustering cost ~150 ms/sweep live, and its
+   depth-5 input queue stacked sweeps up. Fixed with a depth-1 queue, then **grid clustering**
+   (`cluster_method grid`, default since 2026-10-20): 22-26 ms/sweep live for the full 60 m,
+   10 Hz, 71-82 ms old, same replay coverage as the old KD-tree linking.
+2. Camera MISSES were charged across transform.py's +/-20 m crop, not the image (-8/s against
+   at most +4/s from clusters). **`camera_miss_in_image_only`** (default since 2026-10-08)
+   charges them only where the track projects into the image.
+
+On 2026-10-15 a static dummy was held 9-15 s past the car (43-69 m behind) with both cluster
+arms, and grid held a cone 29 m to the side. Live tools: `scripts/fusion_live_capture.sh`
+(preflight / pass / lag / summary), `scripts/fusion_live_check.py` (scores a pass), test card
+`docs/live_cluster_test.md`, data in `~/fusion_live/<date>/`. **Not yet tested live:** moving
+traffic alongside, an autonomous pass, and ghosts outside the image beyond one 63 s treeline pass
+(which published none).
 
 **Start with "TO DO" at the bottom of this file** -- it is the prioritised plan, each item with
 its steps and a done-when test.
@@ -61,7 +80,10 @@ empty-box drop (`segmentation_empty_fallback:=true` reverts), depth-jump gate
 (`ground_levelling`), merge distance bound (`MERGE_MAX_DIST=inf` reverts), camera-referenced
 radar range gate (`RADAR_CAMERA_GATE=false` reverts), and since 2026-09-23 the 360-degree cluster
 path (`ENABLE_LIDAR_CLUSTERS=false` / `run_fusion.sh --no-clusters` reverts) -- the user's decision
-once the paired measurement resolved it as -1.3 to -1.7 points of orphans, twice. Nothing is OFF by
+once the paired measurement resolved it as -1.3 to -1.7 points of orphans, twice. Since 2026-10-08
+camera misses only inside the image (`CAMERA_MISS_IN_IMAGE_ONLY=false` / `--crop-misses`
+reverts), and since 2026-10-20 grid cluster linking with no lateral crop (`--exact-clusters`
+reverts to KD-tree linking with the 10 m crop it needs in trees). Nothing is OFF by
 default any more except radar-only birth, extent estimation and the camera-only fallback.
 `run_fusion.sh -h` lists every rollback; `run_fusion.sh --status` reads them back off the nodes.
 
@@ -94,9 +116,10 @@ arrow on a track is one second of its velocity; in `passthrough` there are none 
    objects, which has never been measured and is where its one known risk (a track publishing
    >10 s after the camera lost it) would show. A curve-and-cone drive would close item 4, and a
    close pass of static objects would measure item 13 instead of trusting the vendor.
-2. **On the vehicle**: the live isolation re-check (replay passed; the car never has), the planner
-   bridge's first run there (it now places obstacles 1.7 m differently, item 13), and timing
-   under real load (cluster 22-29 ms, ground projection 12-13 ms, both replay-only).
+2. **On the vehicle**: the live isolation re-check (replay passed; the car never has) and the
+   planner bridge with the October changes (objects now persist into the side and rear). Timing
+   under real load is MEASURED (2026-10-15): grid clustering 22-26 ms, ground projection
+   27-31 ms per sweep, both at 10 Hz with the full perception stack running.
 3. **Small and open**: the RNR label question (Housekeeping). (The 11-50-45 "cars ~7 m short of
    radar" is closed: a reference artefact, see "The 11-50-45 car bias" under item 4.)
 
@@ -1298,6 +1321,116 @@ coverage; when an audit says they do, suspect the audit.
 Watch items for the vehicle: the one track with a cluster-only tail over 10 s, and a p99
 per-message step of 3.3 m with clusters on (1.4 m without) -- a track occasionally jerks onto a
 cluster. Moving objects are still unmeasured here (the cone drive has none).
+
+#### Live at a treeline: the cluster path fell 0.5 s behind (2026-10-08)
+
+Why the vehicle lost what replay kept. On the Sep 24 bags clusters updated 0.2 / 0 / 0% of
+published frames (replay ~6%), and the person dummy died at the FOV edge. The live preflight at
+a treeline (`scripts/fusion_live_capture.sh`, data in `~/fusion_live/2026-10-08/`) showed where:
+
+    /perception/nonground              10.0 Hz   latency p90  48 ms   (ground_projection fine)
+    /perception/measurements/lidar      6.7 Hz   latency p90 687 ms   <- the cluster detector
+
+Vegetation is dense non-ground: ~110-150 ms per sweep, almost all of it genuine neighbour pairs
+(458k per sweep). The input queue was depth 5, so each sweep waited behind ~4 older ones,
+and 4 x 150 ms is the 640 ms. At `measurement_lag` 0.12 every cluster was released late and
+applied ~485 ms behind its track, against tracks it no longer met. Raising the lag live to 0.75
+(the user, same day) helped "to some extent": the stopgap, manual driving only.
+
+Fixed in the node, offline-verified on the preflight's own 139 clouds:
+
+    keep-last-1 input                  no backlog; a dropped sweep costs one update, a stale one all
+    exact speed-ups                    127 vs 132 ms median, IDENTICAL cluster lists 139/139
+      (1-D voxel key, gap-banded pair search, sort-and-slice grouping)
+    lateral crop (ego frame)  20 m     63 ms     15 m   13 ms   -- OFF by default (user's choice)
+
+The exact speed-ups are small: the pairs are real. Collapsing tree columns was 50 ms and REJECTED:
+it changes the partitions in 26/40 sweeps. The crop is the only big lever. Turn it on live with
+`ros2 param set /lidar_cluster_detector cluster_max_lateral 15.0`, or launch with
+`CLUSTER_MAX_LATERAL=15` / `run_fusion.sh --cluster-lateral 15`. The detector's 5 s status line
+now prints `age at publish` and the crop. Read age against `measurement_lag`.
+
+**Live, same afternoon** (detector status line; crop changed with `ros2 param set`):
+
+    crop off   ~115 ms/sweep  ~8 Hz   age at publish ~210 ms   (queue fix alone: was 640-690)
+    crop 15 m  ~132 ms/sweep  ~7 Hz   ~235 ms   -- trees stood 10-15 m out here, so no gain
+    crop 10 m     7 ms/sweep  10 Hz      54 ms  -- inside the 0.12 s lag
+
+**10 m is the default since 2026-10-08** (the user's call), in all four places. The right width
+depends on where the treeline is; the 13 ms offline figure for 15 m came from the morning spot.
+
+**Then the pedestrian still dropped while passing, with clusters on it. Not a gate: existence.**
+`camera_expected()` tests transform.py's crop (x 0-150, |y| <= 20 m), not the image, which spans
+only about -17..-20 deg (right) to +11.5 deg (left) of bearing in lidar_tc. Outside the image
+the budget per second is: camera miss -0.8 x 10 Hz = -8, radar miss -0.05 x 30 Hz = -1.5 (inside
++/-45 deg, a static dummy rarely answers), decay -0.2, against at most +0.4 x 10 Hz = +4 from
+clusters. Death about a second after leaving the image, whatever the clusters do
+(`test_clusters_cannot_hold_a_track_the_camera_is_charged_for` reproduces it).
+`camera_miss_in_image_only` (aggregator, live-settable, env `CAMERA_MISS_IN_IMAGE_ONLY`,
+`run_fusion.sh --image-misses`) charges camera misses only where `projection.in_image()` says
+the track projects into the image. **ON by default since 2026-10-08**, after the user watched it
+hold the pedestrian past the image edge live; rollback `false` /
+`run_fusion.sh --crop-misses`. Not yet measured on replay. The risk to watch: ghosts outside
+the image are then killed only by the coast budget (0.5 s / 1.0 s), so a cluster on a bush can
+hold one. Check the tail after the camera last saw an object.
+
+**Grid clustering: no crop needed (built and A/B'd 2026-10-14; THE DEFAULT since 2026-10-20,
+after the 2026-10-15 live passes below -- `--exact-clusters` is the rollback).**
+`ClusterParams.method = "grid"` (`_components_grid`): voxels mark a 0.2 m 2-D occupancy grid;
+each range band (6) stamps a disk of radius (gap/cell - 1)/2 around its cells, and the union is
+labelled with 8-connectivity. Cost scales with occupied cells, not neighbour pairs. Stamping is
+identical to `ndimage.binary_dilation` (139/139 sweeps, and a test) and took that step 15 -> 2 ms.
+
+    treeline sweeps (281, all four 10-08 recordings), IDLE CPU     median   p90
+      exact, no crop                                                47.5    50.3 ms
+      exact, 10 m crop (current default)                             1.9     2.4
+      grid, no crop                                                  6.8     8.4
+      grid, 10 m crop                                                1.6     2.2
+
+CORRECTION to the 10-08 numbers above: the offline 109-132 ms for "exact" were measured while
+the whole perception stack was running on the same machine. Idle, it is ~45 ms; live load is
+~3x. Ratios between arms hold; absolute offline times depend on what else is running.
+
+Coverage, `scripts/lidar_cluster_ab.py --method exact|grid` on selfcal (133 static objects, 172
+deaths). The exact arm reproduces this item's published table to the decimal:
+
+    left the view, kept >= 0.5 s        exact 25.0%   grid 26.0%   (mirror 0.0 / 0.0)
+      tolerating the side gap (miss 5)  exact 47.9%   grid 49.0%   (mirror 1.0 / 1.0)
+    cluster present, by sector          grid equal or better in 7 of 9 cells (biggest drop:
+                                        ahead 40-60 m 52.7 -> 47.3%, where its chance also
+                                        falls 30.9 -> 23.6%)
+    moving objects                      2.6% / 5.1% both -- unchanged, still at chance
+
+Agreement cluster by cluster: ~85-90% of object-sized (<= 6 m) exact clusters have a grid
+cluster within 0.5-1 m. The grid makes 2-4 fewer clusters per sweep in trees (merges a little
+more). To try it live, no restart: `ros2 param set /lidar_cluster_detector cluster_method grid`
+then `... cluster_max_lateral 0.0`. Launch: `CLUSTER_METHOD=grid CLUSTER_MAX_LATERAL=0` or
+`run_fusion.sh --grid-clusters --cluster-lateral 0` (both now the defaults). The detector's
+status line shows method, crop, rate and age at publish.
+
+**Live, 2026-10-15** (`~/fusion_live/2026-10-15/`; static person dummy ~4 m right, no vehicle
+traffic; one pass per speed per arm; the `-b` passes were ~10 m/s, not 5):
+
+    arm                     clustering   age at publish (med / p90)   rate   dummy held after camera
+    exact + 10 m crop       7-11 ms      52-58 / 58-66 ms             10 Hz  15.2 s (5 m/s), 9.1 s (10)
+    grid, no crop           22-26 ms     71-82 / 83-92 ms             10 Hz  10.1 s (5 m/s), 11.0 s (10)
+
+Both held the dummy past the car until the recording ended, 43-69 m behind. No track died ahead
+of or beside the car in any pass. The grid also held a confirmed CONE 29 m to the side out to 66 m
+behind, which the 10 m crop cannot. The 63 s treeline pass at 2 m/s published ONE track (the
+dummy): the "obstacles on the trees" seen in RViz were cluster markers, which never become
+objects or reach the planner. Not yet covered: moving traffic alongside, an autonomous pass.
+On these results the user made grid + no crop the default (2026-10-20).
+
+**Still open, in this order, if age at publish stays above the lag:**
+1. The aggregator applies a late cluster unpredicted. Transport it to `_last_t` with
+   `TwistBuffer.increment` (static world, sustain-only).
+2. `_apply_lidar_clusters` sets `tr.last_update = t` with the cluster's OLD stamp. A cluster
+   older than the coast budget (0.5 s camera-only, 1.0 s with radar) refreshes nothing; it
+   should be `max(...)`.
+3. `camera_expected()` is called without image bounds. Outside the image but inside the +/-20 m
+   crop, every camera frame charges -0.8, which clusters (+0.4 at <= 10 Hz) cannot outpace on a
+   slow pass.
 
 ### 8. Phase 4: radar-only track birth  -- MEASURED 2026-09-18: blocked on traffic, keep it OFF
 `scripts/radar_false_alarm_ab.py` follows each ESR object by track_id (split on gaps and on range

@@ -108,6 +108,31 @@ in the bridge had to change. If a genuinely moving object ever reads static, the
 to look, not the bridge: `ros2 topic echo /perception/objects` shows `velocity_valid` and
 `velocity_covariance` per object.
 
+## Objects now persist after the camera loses them (changed 2026-10-08 and 2026-10-20, upstream)
+
+Before October, an object the vehicle passed vanished from `/perception/objects` about a second
+after it left the camera image, even when LiDAR still saw it. Two upstream fixes changed that:
+camera misses are now charged only inside the image, and 360-degree LiDAR clusters arrive in
+time to hold the track (grid clustering, the full 60 m width at 10 Hz). Measured live on
+2026-10-15, a static pedestrian dummy stayed in the list 9-15 s after the camera last saw it,
+out to 69 m behind the car, and a cone 29 m to the side was held into the rear.
+
+What that means for a consumer:
+- **Expect objects beside and behind the vehicle.** They carry the same message fields as any
+  other object. A collision check that assumed everything is ahead must filter by position.
+- **A held object has no class evidence after the camera lost it.** `class_name` is the
+  majority vote from while the camera saw it. Clusters only say "something is still here".
+- **It is deleted** once nothing has updated it for 0.5 s (camera-only history) or 1.0 s (with
+  radar). That happens when it passes beyond the clusters' 60 m range, or when no cluster lands
+  on it.
+- **Moving objects held this way are not yet measured live.** Cluster updates are
+  position-only, so a held object's velocity comes from its filter, not from new evidence.
+
+Rollbacks, all live on the running nodes: `ros2 param set /object_aggregator
+camera_miss_in_image_only false` (the old early deletion), or
+`ros2 param set /lidar_cluster_detector cluster_method exact` together with
+`cluster_max_lateral 10.0`.
+
 ## The LiDAR offset changed on 2026-09-23
 
 `lidar_offset` went from `(2.393, 0.206)` m -- the value `tracker.py` has always used -- to

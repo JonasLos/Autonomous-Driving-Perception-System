@@ -55,6 +55,9 @@ CMD ["/bin/bash", "-lc", \
         merge_max_dist:=${MERGE_MAX_DIST:-2.5} \
         radar_camera_gate:=${RADAR_CAMERA_GATE:-true} \
         enable_lidar_clusters:=${ENABLE_LIDAR_CLUSTERS:-true} \
+        cluster_max_lateral:=${CLUSTER_MAX_LATERAL:-0.0} \
+        cluster_method:=${CLUSTER_METHOD:-grid} \
+        camera_miss_in_image_only:=${CAMERA_MISS_IN_IMAGE_ONLY:-true} \
         turn_velocity_k:=${TURN_VELOCITY_K:-1.0} \
         enable_road_boundary:=${ENABLE_ROAD_BOUNDARY:-false} \
         road_boundary_occlusion:=${ROAD_BOUNDARY_OCCLUSION:-true} \

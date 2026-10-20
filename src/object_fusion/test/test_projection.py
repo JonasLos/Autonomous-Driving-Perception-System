@@ -136,3 +136,17 @@ def test_camera_ground_position_refuses_without_ground_support_or_above_horizon(
     from object_fusion.projection import camera_ground_position
     assert camera_ground_position(1000.0, 1400.0, np.empty((0, 3))) is None
     assert camera_ground_position(1000.0, 100.0, np.array([[30.0, 0.0, -2.46]] * 10)) is None
+
+
+def test_in_image_follows_the_real_image_edges():
+    """The image spans about -17..-20 deg (right) to +11.5 deg (left) of bearing in lidar_tc."""
+    import math
+
+    from object_fusion.projection import in_image
+
+    def at(r, deg):
+        return [r * math.cos(math.radians(deg)), r * math.sin(math.radians(deg))]
+
+    seen = in_image([at(15, 0), at(15, -10), at(15, 8), at(10, -25), at(15, 20), at(-10, 0)])
+    assert seen.tolist() == [True, True, True, False, False, False]
+    assert in_image(np.empty((0, 2))).size == 0

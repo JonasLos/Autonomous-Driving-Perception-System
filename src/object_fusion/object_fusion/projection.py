@@ -28,7 +28,7 @@ import numpy as np
 from perception_common.configs import PROJ, T1
 from perception_common.utils import inverse_rigid_transform
 
-__all__ = ["image_size_from_proj", "project_to_pixels"]
+__all__ = ["image_size_from_proj", "project_to_pixels", "in_image"]
 
 
 #: The camera's actual image size, from /camera_fl/camera_info on the reference bag.
@@ -90,6 +90,21 @@ def project_to_pixels(xyz, image_wh=None, proj=None, extrinsic=None, return_inde
            np.ascontiguousarray(u[keep], dtype=np.float32),
            np.ascontiguousarray(v[keep], dtype=np.float32))
     return out + (np.flatnonzero(keep),) if return_index else out
+
+
+def in_image(xy, z=-1.4, image_wh=CAMERA_INFO_WH):
+    """Whether each lidar_tc ground position (N, 2) projects INSIDE the camera image.
+
+    ``z`` is a height in lidar_tc (sensor 2.37 m up; -1.4 is ~1 m above the road). The answer
+    barely depends on it: the image spans -16.5..+11.5 deg of bearing at 8 m and -20.3..+11.5
+    at 30 m for any z from the road to 1.8 m up (measured 2026-10-08).
+    """
+    xy = np.atleast_2d(np.asarray(xy, dtype=np.float64)).reshape(-1, 2)
+    out = np.zeros(xy.shape[0], dtype=bool)
+    if xy.shape[0]:
+        xyz = np.column_stack([xy, np.full(xy.shape[0], float(z))])
+        out[project_to_pixels(xyz, image_wh=image_wh, return_index=True)[3]] = True
+    return out
 
 
 def pixel_ray(u, v, proj=None, extrinsic=None):

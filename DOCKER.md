@@ -521,6 +521,9 @@ A/B needs no rebuild. `scripts/run_fusion.sh -h` lists the flag form of each.
 | `ENABLE_CLASS_VOTE` | `true` | `false` (`--no-class-vote`) |
 | `SEGMENTATION_EMPTY_FALLBACK` | `false` | `true`: an all-ground box uses every point |
 | `ENABLE_LIDAR_CLUSTERS` | `true` | `false` (`--no-clusters`): no 360° cluster path |
+| `CLUSTER_METHOD` | `grid` | `exact` (`--exact-clusters`, which also sets the 10 m crop): KD-tree cluster linking, too slow uncropped in trees |
+| `CLUSTER_MAX_LATERAL` | `0.0` | metres to the side (ego frame) to cluster; `0.0` = no crop (`--cluster-lateral M`) |
+| `CAMERA_MISS_IN_IMAGE_ONLY` | `true` | `false` (`--crop-misses`): camera misses charged across the whole crop, which deleted passed objects ~1 s after they left the image |
 | `RADAR_CAMERA_GATE` | `true` | `false`: no camera-referenced radar range gate |
 | `ASSOC_MAX_DIST` / `MERGE_MAX_DIST` | `6.0` / `2.5` | `MERGE_MAX_DIST=inf` is the original merge rule |
 | `TURN_VELOCITY_K` | `1.0` | `0.0` (`--loose-velocity`): `velocity_valid` as before 2026-09-22 |
@@ -529,6 +532,10 @@ A/B needs no rebuild. `scripts/run_fusion.sh -h` lists the flag form of each.
 | `EGO_YAW_CORRECTION_DEG` | `-5.35` | `lidar_tc` → `ego` yaw (`lidar_tc` is yawed, TF says identity) |
 | `PUBLISH_DEBUG_CLOUDS` | `false` | `true` (`--debug-clouds`): ground/non-ground clouds for RViz |
 | `ENABLE_RADAR_ONLY_BIRTH`, `ENABLE_EXTENT_ESTIMATION`, `ENABLE_CAMERA_ONLY_FALLBACK` | `false` | not adopted |
+
+`CLUSTER_METHOD`, `CLUSTER_MAX_LATERAL` and `CAMERA_MISS_IN_IMAGE_ONLY` can also be changed on the
+running nodes without a restart: `ros2 param set /lidar_cluster_detector cluster_method exact`,
+`... cluster_max_lateral 10.0`, `ros2 param set /object_aggregator camera_miss_in_image_only false`.
 
 After changing any of these, confirm it with `scripts/run_fusion.sh --status`, not by trusting
 the command line. A malformed Dockerfile `CMD` once dropped variables silently, and the launch

@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-20
+
+### Fixed
+- **Objects the vehicle passes are no longer dropped as they leave the camera image** (object fusion stack). Two causes, both found on the vehicle:
+  - The 360° cluster detector fell ~0.5 s behind in vegetation. Clustering cost ~150 ms per sweep under live load, and its 5-deep input queue stacked sweeps behind each other, so every cluster was applied half a second late and missed its track. The input queue is now depth 1, and clustering is now grid-based (below).
+  - Camera misses were charged across transform.py's ±20 m crop rather than the camera image. A track just outside the image lost about 8 existence points per second, against at most 4 from clusters, and was deleted about a second later. Misses are now charged only where the track projects into the image (`CAMERA_MISS_IN_IMAGE_ONLY`, default `true`; `--crop-misses` reverts).
+- Seen live on 2026-10-15: a static pedestrian dummy was held 9–15 s past the car, out to 69 m behind, and a cone 29 m to the side was held into the rear.
+
+### Changed
+- **Grid-based cluster linking is the default, with no lateral crop** (`CLUSTER_METHOD=grid`, `CLUSTER_MAX_LATERAL=0.0`). A 2-D occupancy grid replaces the KD-tree neighbour-pair search. Live at a treeline it clusters the full 60 m width in 22–26 ms per sweep at 10 Hz, with clusters 71–82 ms old. On the selfcal replay its coverage of real objects matches or beats the old linking in every sector. `--exact-clusters` restores the old linking with the 10 m crop it needs in trees.
+- The exact linking is also faster, with identical output: packed voxel keys, gap-banded pair search, and grouping by sort.
+
+### Added
+- `scripts/fusion_live_capture.sh`: a GO/NO-GO preflight, one recording per test pass, setting `measurement_lag` live, and a session summary. It starts as few ROS participants as possible.
+- `scripts/fusion_live_check.py`: scores a pass. It reports stream rates and latency, replays the fusion queue's timing from arrival times, and for every track that died ahead of the car says whether a cluster was available and whether it was used.
+- `src/object_fusion/docs/live_cluster_test.md`: the vehicle test card.
+- `scripts/lidar_cluster_ab.py --method exact|grid --max-lateral M`.
+- The cluster detector's status line now shows age at publish, the lateral crop and the method. `run_fusion.sh --status` reads back the cluster detector's settings, and `run_fusion.sh -h` prints its whole help block.
+
 ## 2026-10-05
 
 ### Changed
