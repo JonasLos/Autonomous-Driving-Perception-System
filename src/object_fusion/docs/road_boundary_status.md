@@ -56,6 +56,24 @@ weights from the vehicle checkout; never `git add` them.
    was not changed.
 4. **Obstacle prompt:** `car or truck or person` costs SAM3 rate. `"car"` or `""` recovers it.
 
+## Vehicle test, 2026-10-20: rates on the car
+
+Branch perception on the vehicle, with only SAM3 and SphereFormer running (plus
+`transform_node`; no YOLO, CLRerNet or radar), and the planner in the loop without obstacle
+avoidance:
+
+| topic | rate on the vehicle | offline replay, full perception stack |
+|---|---|---|
+| `/sam3_{left,right}_boundary` | **~7 Hz** | ~4.5 Hz default (~6 Hz with `cuda_graphs` + pinning) |
+| `/sphereformer_{left,right}_boundary` | **~10 Hz** (the LiDAR rate) | 7.2–7.7 Hz |
+
+Both are higher than offline, most likely because the other detectors are off. Plain `lmp_v10c`
+was designed for SAM3 at ~1–2 Hz and showed little improvement at these rates. Next run: the
+same with its guards on, via the new planner launch file
+`~/latest_planner/.../AVA_Local_Planner/launch/lmp_unmarked_v10c_guards.launch.py` (bag
+`lmp_unmarked_v10c_guards_*`). Its `source_mode_transition_frames` (5) counts frames; at ~7 Hz
+that is ~0.7 s, against ~3 s at 1.5 Hz. Raise it (≈20–25) if source switches look abrupt.
+
 ## Testing still open
 
 - **Moving vehicle in traffic.** No recording exists with SphereFormer, SAM3 and odometry
