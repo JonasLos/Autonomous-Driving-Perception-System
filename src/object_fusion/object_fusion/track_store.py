@@ -284,10 +284,11 @@ class Track:
         The numbers are FusedObject's STATUS_* constants, which match this module's.
 
         COASTING must go out as coasting. It used to be folded into TENTATIVE, and that mislabelled
-        almost every long-lived cone: `may_confirm` only re-promotes a camera-only track while
-        it has had at most 5 camera opportunities, so an old camera-only track that misses one
-        cycle stays COASTING for the rest of its life. A consumer that drops tentative tracks --
-        the planner bridge does exactly that -- was dropping them.
+        almost every long-lived cone: `may_confirm` only re-promoted a camera-only track while
+        it had had at most 5 camera opportunities, so an old camera-only track that missed one
+        cycle stayed COASTING for the rest of its life. A consumer that drops tentative tracks --
+        the planner bridge does exactly that -- was dropping them. (Since 2026-10-25 such a track
+        re-promotes once its existence is back over the confirmation threshold.)
         """
         return COASTING if self.status == COASTING else (
             CONFIRMED if self.status == CONFIRMED else TENTATIVE)
@@ -321,7 +322,7 @@ class TrackStore:
     def __init__(self, *, confirm_logodds=CONFIRM_LOGODDS,
                  radar_only_confirm_logodds=RADAR_ONLY_CONFIRM_LOGODDS,
                  p_delete=P_DELETE, radar_only_min_speed=RADAR_ONLY_MIN_SPEED,
-                 enable_radar_only_birth=False):
+                 enable_radar_only_birth=False, camera_late_confirm=True):
         self.tracks: list[Track] = []
         self.confirm_logodds = float(confirm_logodds)
         self.radar_only_confirm_logodds = float(radar_only_confirm_logodds)
@@ -329,6 +330,9 @@ class TrackStore:
         self.radar_only_min_speed = float(radar_only_min_speed)
         #: Default OFF, like every other new capability here. Shadow counters still accrue.
         self.enable_radar_only_birth = bool(enable_radar_only_birth)
+        #: A camera track outside the 3-in-5 window confirms on hits + existence (see may_confirm).
+        #: False restores the window alone.
+        self.camera_late_confirm = bool(camera_late_confirm)
         self.shadow = {"radar_only_candidates": 0, "radar_only_born": 0,
                        "merged": 0, "deleted_left_volume": 0, "deleted_existence": 0,
                        "deleted_diverged": 0, "confirmed": 0}
@@ -353,6 +357,17 @@ class TrackStore:
     def may_confirm(self, tr: Track) -> bool:
         """Confirmation: fast when corroborated, slow and conditional when radar-only."""
         if tr.hits["camera_lidar"] >= 3 and tr.opportunities["camera_lidar"] <= 5:
+            return True
+        # A camera track that missed that window confirms on evidence instead (2026-10-25). The
+        # window decides once: on 2026-10-22 (lmp_marked_lane_lock_20261022_142253) a person born at
+        # 100 m got its third camera hit one frame late, was then hit at ~9 Hz to existence 1.0, and
+        # stayed TENTATIVE to 0.5 m -- the planner bridge drops tentative tracks, so the planner never
+        # saw it. The birth frame counts as an opportunity but not a hit (_apply_camera), so the
+        # window is in effect 3 hits in the next 4 frames. Replayed on all 27 bags of that day
+        # (planner repo tools/bag_analysis/fusion_confirm_ab.py): that person at 91 m, 0.5 s after
+        # birth; 6 other tracks of 2244, none ever ahead within 4 m of the car's path.
+        if (self.camera_late_confirm and tr.sensors_ever & SENSOR_CAMERA
+                and tr.hits["camera_lidar"] >= 3 and tr.logodds >= self.confirm_logodds):
             return True
         both = SENSOR_CAMERA | SENSOR_RADAR
         if (tr.sensors_ever & both) == both:

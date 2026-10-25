@@ -57,6 +57,43 @@ def test_camera_confirms_quickly_on_three_of_five():
     assert s.may_confirm(tr)
 
 
+def test_a_camera_track_that_missed_the_window_confirms_on_existence():
+    """lmp_marked_lane_lock_20261022_142253: hits 1 and 2 frames after birth, then two misses, the
+    third hit at opportunity 6 -- one late. Hit at ~9 Hz from then on, it stayed TENTATIVE to 0.5 m
+    and the planner never saw the person."""
+    s = TrackStore()
+    tr = mk(mask=SENSOR_CAMERA)
+    tr.hits["camera_lidar"], tr.opportunities["camera_lidar"] = 3, 6
+    tr.logodds = 1.0
+    assert not s.may_confirm(tr), "not yet: existence below the confirmation threshold"
+    tr.logodds = 1.6
+    assert s.may_confirm(tr)
+    assert not TrackStore(camera_late_confirm=False).may_confirm(tr), "the window alone, as before"
+
+
+def test_late_confirmation_still_needs_three_camera_hits_and_a_camera():
+    s = TrackStore()
+    tr = mk(mask=SENSOR_CAMERA)
+    tr.hits["camera_lidar"], tr.opportunities["camera_lidar"] = 2, 6
+    tr.logodds = 6.0
+    assert not s.may_confirm(tr)
+    lidar_only = mk(mask=SENSOR_LIDAR)
+    lidar_only.hits["camera_lidar"], lidar_only.opportunities["camera_lidar"] = 3, 6
+    lidar_only.logodds = 6.0
+    assert not s.may_confirm(lidar_only)
+
+
+def test_a_coasting_camera_track_re_promotes_once_its_existence_is_back():
+    from object_fusion.track_store import COASTING
+    s = TrackStore()
+    tr = s.add(mk(stamp=0.0, mask=SENSOR_CAMERA))
+    tr.hits["camera_lidar"], tr.opportunities["camera_lidar"] = 30, 30
+    tr.status = COASTING
+    tr.logodds = 2.0
+    s.promote()
+    assert tr.status == CONFIRMED
+
+
 def test_radar_only_needs_persistence_and_motion_and_slot_continuity():
     s = TrackStore()
     tr = mk(mask=SENSOR_RADAR)
@@ -300,10 +337,10 @@ def test_the_duplicate_it_exists_to_collapse_is_still_merged():
 
 # ------------------------------------------------------------------- published fields
 def test_a_coasting_track_is_published_as_coasting_not_tentative():
-    """An old camera-only track that misses one cycle can never be re-promoted -- may_confirm
-    stops at 5 camera opportunities -- so it coasts for the rest of its life. Folding that into
-    TENTATIVE mislabelled nearly every long-lived cone, and a consumer that drops tentative
-    tracks (the planner bridge) dropped them."""
+    """An old camera-only track that misses one cycle is past may_confirm's 5-opportunity window,
+    and without the existence for the late rule it coasts. Folding that into TENTATIVE mislabelled
+    nearly every long-lived cone, and a consumer that drops tentative tracks (the planner bridge)
+    dropped them."""
     from object_fusion.track_store import COASTING, CONFIRMED, TENTATIVE
     s = TrackStore()
     tr = s.add(mk(stamp=0.0, mask=SENSOR_CAMERA))
@@ -311,7 +348,7 @@ def test_a_coasting_track_is_published_as_coasting_not_tentative():
     tr.status = CONFIRMED
     s.prune(0.05)                                   # not updated by this measurement
     s.promote()
-    assert tr.status == COASTING, "the premise: an old camera-only track cannot re-promote"
+    assert tr.status == COASTING, "the premise: an old camera-only track at log-odds 0 cannot re-promote"
     assert tr.published_status() == COASTING
     assert TENTATIVE == 0 and CONFIRMED == 1 and COASTING == 2, "must equal FusedObject.STATUS_*"
 
