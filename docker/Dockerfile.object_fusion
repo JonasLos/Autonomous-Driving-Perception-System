@@ -56,6 +56,7 @@ CMD ["/bin/bash", "-lc", \
         radar_camera_gate:=${RADAR_CAMERA_GATE:-true} \
         enable_lidar_clusters:=${ENABLE_LIDAR_CLUSTERS:-true} \
         cluster_max_lateral:=${CLUSTER_MAX_LATERAL:-0.0} \
+        cluster_max_range:=${CLUSTER_MAX_RANGE:-120.0} \
         cluster_method:=${CLUSTER_METHOD:-grid} \
         camera_miss_in_image_only:=${CAMERA_MISS_IN_IMAGE_ONLY:-true} \
         turn_velocity_k:=${TURN_VELOCITY_K:-1.0} \

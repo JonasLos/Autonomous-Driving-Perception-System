@@ -19,7 +19,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 _FLOAT = {"ego_yaw_correction_deg", "ego_z_offset", "measurement_lag", "sigma_long",
           "sensor_height", "camera_height_m", "assoc_max_dist", "merge_max_dist",
-          "sticky_sanity_dist", "turn_velocity_k", "cluster_max_lateral",
+          "sticky_sanity_dist", "turn_velocity_k", "cluster_max_lateral", "cluster_max_range",
           "ground_max_range",
           "ground_rejection_min_range", "ground_margin",
           "depth_gate_min_m", "depth_gate_range_frac", "class_vote_window_s",
@@ -103,6 +103,10 @@ _ARGS = {
     # ran ~115 ms/sweep in trees, too slow). Both settable live on /lidar_cluster_detector.
     "cluster_max_lateral": "0.0",
     "cluster_method": "grid",
+    # How far out clusters are made. 120 m since 2026-10-20 (was 60 m): the ceiling set by
+    # ground_max_range, beyond which the non-ground input still holds road returns. Live:
+    #   ros2 param set /lidar_cluster_detector cluster_max_range 60.0   (the rollback)
+    "cluster_max_range": "120.0",
     # Camera misses only inside the image (see object_aggregator_node). ON since 2026-10-08;
     # false is the rollback.
     "camera_miss_in_image_only": "true",
@@ -159,7 +163,7 @@ def generate_launch_description():
              name="lidar_cluster_detector", output="screen",
              condition=IfCondition(LaunchConfiguration("enable_lidar_clusters")),
              parameters=_params("use_sim_time", "ego_yaw_correction_deg",
-                                "cluster_max_lateral", "cluster_method")),
+                                "cluster_max_lateral", "cluster_max_range", "cluster_method")),
         Node(package="object_fusion", executable="camera_lidar_detector",
              name="camera_lidar_detector", output="screen",
              parameters=_params("use_sim_time", "max_pairing_skew", "wait_for_newer",

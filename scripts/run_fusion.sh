@@ -32,6 +32,9 @@
 #                     cluster_method exact (and cluster_max_lateral 10.0)
 #   --cluster-lateral M  CLUSTER_MAX_LATERAL=M     clustering only within M m to the side (ego
 #                     frame); 0.0 = no crop, the default
+#   --cluster-range M CLUSTER_MAX_RANGE=M       clustering out to M m (default 120, the ground
+#                     segmentation's own range; 60 is the pre-2026-10-20 value). Live:
+#                     ros2 param set /lidar_cluster_detector cluster_max_range M
 # Still OFF by default: ENABLE_RADAR_ONLY_BIRTH, ENABLE_EXTENT_ESTIMATION,
 # ENABLE_CAMERA_ONLY_FALLBACK, and the road-boundary node:
 #   --road-boundary   ENABLE_ROAD_BOUNDARY=true     /road_boundary/{sphereformer,sam3}/{left,right}
@@ -67,6 +70,7 @@ export MERGE_MAX_DIST="${MERGE_MAX_DIST:-2.5}"
 export RADAR_CAMERA_GATE="${RADAR_CAMERA_GATE:-true}"
 export ENABLE_LIDAR_CLUSTERS="${ENABLE_LIDAR_CLUSTERS:-true}"
 export CLUSTER_MAX_LATERAL="${CLUSTER_MAX_LATERAL:-0.0}"
+export CLUSTER_MAX_RANGE="${CLUSTER_MAX_RANGE:-120.0}"
 export CLUSTER_METHOD="${CLUSTER_METHOD:-grid}"
 export CAMERA_MISS_IN_IMAGE_ONLY="${CAMERA_MISS_IN_IMAGE_ONLY:-true}"
 # Velocity honesty. 0.0 is the rollback: no covariance inflation and no significance test,
@@ -95,6 +99,7 @@ while [[ $# -gt 0 ]]; do
     --clusters) ENABLE_LIDAR_CLUSTERS="true"; shift ;;   # the default since 2026-09-23
     --no-clusters) ENABLE_LIDAR_CLUSTERS="false"; shift ;;  # rollback
     --cluster-lateral) CLUSTER_MAX_LATERAL="${2:?--cluster-lateral needs metres}"; shift 2 ;;
+    --cluster-range) CLUSTER_MAX_RANGE="${2:?--cluster-range needs metres}"; shift 2 ;;
     --grid-clusters) CLUSTER_METHOD="grid"; shift ;;   # the default since 2026-10-20
     --exact-clusters) CLUSTER_METHOD="exact"; CLUSTER_MAX_LATERAL="10.0"; shift ;;   # rollback
     --image-misses) CAMERA_MISS_IN_IMAGE_ONLY="true"; shift ;;   # the default since 2026-10-08
@@ -132,7 +137,7 @@ case "$ACTION" in
 /object_aggregator publish_mode enable_radar_only_birth ego_yaw_correction_deg measurement_lag assoc_max_dist merge_max_dist radar_camera_gate enable_lidar_clusters turn_velocity_k camera_miss_in_image_only odom_topic
 /camera_lidar_detector projection_topic segmentation_empty_fallback enable_depth_gate enable_class_vote enable_extent_estimation enable_camera_only_fallback
 /ground_projection ground_levelling publish_nonground odom_topic
-/lidar_cluster_detector cluster_max_lateral cluster_method ego_yaw_correction_deg
+/lidar_cluster_detector cluster_max_lateral cluster_max_range cluster_method ego_yaw_correction_deg
 /road_boundary enable_occlusion enable_extraction enable_fit enable_tracking enable_sphereformer enable_sam3
 NODES
     fi
@@ -178,7 +183,7 @@ echo "mode=$MODE  USE_SIM_TIME=$USE_SIM_TIME"
 echo "projection: $PROJECTION_TOPIC   odom: $ODOM_TOPIC   debug clouds: $PUBLISH_DEBUG_CLOUDS"
 echo "live rules: levelling=$GROUND_LEVELLING depth_gate=$ENABLE_DEPTH_GATE "\
      "class_vote=$ENABLE_CLASS_VOTE empty_fallback=$SEGMENTATION_EMPTY_FALLBACK "\
-     "clusters=$ENABLE_LIDAR_CLUSTERS (lateral ${CLUSTER_MAX_LATERAL} m, 0 = off;" \
+     "clusters=$ENABLE_LIDAR_CLUSTERS (range ${CLUSTER_MAX_RANGE} m, lateral ${CLUSTER_MAX_LATERAL} m, 0 = off;" \
      "method $CLUSTER_METHOD)" \
      "camera_miss_in_image_only=$CAMERA_MISS_IN_IMAGE_ONLY" \
      "radar_camera_gate=$RADAR_CAMERA_GATE merge=$MERGE_MAX_DIST"

@@ -8,7 +8,7 @@ an object, and the radar work (item 8) already showed what unrefereed birth cost
 The input is Patchwork++'s NON-GROUND points, so this adds no ground model of its own.
 
 Pipeline, per sweep:
-1. crop to where a cluster can mean something: 2.5-60 m, a height band above the road, outside
+1. crop to where a cluster can mean something: 2.5-120 m, a height band above the road, outside
    the ego vehicle's own footprint;
 2. voxelise (0.2 m) -- clustering raw points costs millions of neighbour pairs in vegetation;
 3. connected components with a RANGE-ADAPTIVE gap: VLP-32C rings spread apart with distance, so
@@ -42,7 +42,13 @@ class ClusterParams:
     #: Nearer than this is mostly the vehicle's own body and mirrors; farther than max, a
     #: VLP-32C object is a handful of returns and a cluster says little.
     min_range: float = 2.5
-    max_range: float = 60.0
+    #: 120 m since 2026-10-20 (was 60 m; the user's call). It is the ceiling, not a tuning: the
+    #: input is ground_projection's non-ground cloud, and Patchwork++ labels ground only out to
+    #: ground_max_range (120 m) -- beyond it road returns would cluster as objects. Live on the
+    #: vehicle, grid method: 33 -> 40-42 ms/sweep (p90 42 -> 58-60), age at publish 92 -> 100 ms,
+    #: still 10 Hz. The grid bands (grid_bands) span twice the range, so a band's largest gap
+    #: exceeds its nearest point's own gap by ~0.24 m instead of ~0.12 m, about one voxel.
+    max_range: float = 120.0
     #: Height band in lidar_tc (sensor 2.37 m above the road): 0.15 m to 3.3 m above ground.
     z_min: float = -2.22
     z_max: float = 0.93

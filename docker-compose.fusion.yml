@@ -43,6 +43,7 @@ services:
       # 360-degree LiDAR clusters sustaining tracks the camera has passed.
       ENABLE_LIDAR_CLUSTERS: "${ENABLE_LIDAR_CLUSTERS:-true}"
       CLUSTER_MAX_LATERAL: "${CLUSTER_MAX_LATERAL:-0.0}"
+      CLUSTER_MAX_RANGE: "${CLUSTER_MAX_RANGE:-120.0}"
       CLUSTER_METHOD: "${CLUSTER_METHOD:-grid}"
       CAMERA_MISS_IN_IMAGE_ONLY: "${CAMERA_MISS_IN_IMAGE_ONLY:-true}"
       TURN_VELOCITY_K: "${TURN_VELOCITY_K:-1.0}"
