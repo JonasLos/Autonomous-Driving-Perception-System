@@ -111,6 +111,16 @@ Continue with the next steps to build all images and run the system as described
 
 If you see all nodes activating and no errors, the YOLO node is running as expected.
 
+### YOLO input size (since 2026-10-22: 1280×960)
+
+`yolo_node` runs the model at `YOLO_IMGSZ_WIDTH`×`YOLO_IMGSZ_HEIGHT`, default 1280×960 (was 640×480), set in
+`docker-compose.yml` and `docker/Dockerfile.yolo` and passed to `yolov9.launch.py` as `imgsz_width`/`imgsz_height`.
+On a recorded approach the person dummy is detected steadily from about 90–100 m instead of 80 m, and the fused
+track is born at ~97 m instead of 75 m. The cost is ~26 ms a frame instead of ~13 ms with the stack running.
+The boxes stay in full-image pixels, so the camera/LiDAR calibration needs no change. Old size:
+`YOLO_IMGSZ_WIDTH=640 YOLO_IMGSZ_HEIGHT=480`, then recreate the container. Check what is running with
+`ros2 param get /yolo/yolo_node imgsz_width`.
+
 ---
 
 ## Zenoh RMW Support

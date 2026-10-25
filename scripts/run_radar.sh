@@ -152,6 +152,8 @@ echo "transform image: :$TRANSFORM_IMAGE_TAG   voxel filter: $VOXEL"
 echo "radar gate: enable_radar_fusion=$ENABLE_RADAR_FUSION  publish_radar_only=$PUBLISH_RADAR_ONLY"
 echo "gpus: yolo=${YOLO_GPU:-0} sphereformer=${SPHEREFORMER_GPU:-0}" \
      "sam3=${SAM3_GPU:-1} clrernet=${CLRERNET_GPU:-1}"
+echo "yolo input size: ${YOLO_IMGSZ_WIDTH:-1280}x${YOLO_IMGSZ_HEIGHT:-960}" \
+     "(YOLO_IMGSZ_WIDTH=640 YOLO_IMGSZ_HEIGHT=480 for the old size)"
 echo "starting: ${SERVICES[*]} radar_node"
 "${COMPOSE[@]}" --profile runtime up -d "${SERVICES[@]}"
 [[ $OBSTACLE_ONLY -eq 0 ]] && "${COMPOSE[@]}" up -d sam3_ros
