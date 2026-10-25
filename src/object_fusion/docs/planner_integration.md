@@ -90,7 +90,10 @@ All three are in `fusion_bridge_core.py` and tested in `test/test_fusion_bridge_
    a second; appending every message would make a car at 10 m/s read 2.5 m/s. The test runs the
    planner's own `kalman_predict` on both histories to prove it.
 3. **Which tracks.** Tentative tracks are skipped. Coasting tracks are kept: most long-lived cones are
-   coasting, because object_fusion stops re-promoting a camera-only track after 5 camera opportunities.
+   coasting, because until 2026-10-25 object_fusion stopped re-promoting a camera-only track after 5
+   camera opportunities. Since then a camera track outside that window confirms (or re-promotes) once it
+   has ≥ 3 camera hits and existence over the confirmation threshold. Before, a person tracked from 100 m
+   at 20 m/s stayed tentative all the way, and the planner never saw it (CHANGELOG 2026-10-25).
 
 ## What `velocity_valid` means now (changed 2026-09-22, upstream)
 
@@ -127,6 +130,12 @@ What that means for a consumer:
   on it.
 - **Moving objects held this way are not yet measured live.** Cluster updates are
   position-only, so a held object's velocity comes from its filter, not from new evidence.
+- **The bridge honours `velocity_valid` (since 2026-10-21, planner side).** A track whose velocity
+  is not valid is published as its current position repeated, so the planner's `kalman_predict`
+  predicts it standing still. On the 10-15 avoidance runs the predicted drift of the standing dummy
+  towards the car fell from as much as 1.5-2.2 m to 0.0 m in 10 of 14 runs. The other 4 are a
+  held track's stale velocity marked valid: HANDOFF item 7, still open, 4. Details in the planner
+  workspace, `docs/obstacle_avoidance_retest_2026-10.md`, change 10.
 
 Rollbacks, all live on the running nodes: `ros2 param set /object_aggregator
 camera_miss_in_image_only false` (the old early deletion), or

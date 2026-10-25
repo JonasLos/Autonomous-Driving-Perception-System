@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-25
+
+### Fixed
+- **A camera track that misses the 3-in-5 confirmation window can still be confirmed** (`track_store.may_confirm`). Before, a camera-only track confirmed only with 3 camera hits within its first 5 camera opportunities, and that window never reopened. On 2026-10-22 at 20 m/s a person born at 100 m got its third hit one frame late; afterwards it was hit at ~9 Hz up to existence 1.0, but it stayed tentative to 0.5 m. The planner bridge drops tentative tracks, so the planner never saw the person and the driver took over. Such a track now also confirms with ≥ 3 camera hits and log-odds ≥ `CONFIRM_LOGODDS` (1.5, the camera+radar threshold). Evaluated from the published existence and camera hits of all 27 lane-lock bags of 2026-10-22 (planner repo `tools/bag_analysis/fusion_confirm_ab.py`): that person would have been confirmed at 91 m, 0.5 s after birth. 6 other tracks of 2244 would be newly confirmed, and none was ever ahead within 4 m of the car's path. A camera-only track that coasts now re-promotes once its existence is back over the threshold. `TrackStore(camera_late_confirm=False)` restores the window alone. To roll back without a rebuild, use `OBJECT_FUSION_IMAGE_TAG=pre-late-confirm-2026-10-25`.
+
+### Not changed, noted
+- The detection that births a camera track counts as a camera opportunity but not a hit (`_apply_camera`: the new track is not in `used`). It is charged −0.8 log-odds, so the 3-in-5 window is in effect 3 hits in the next 4 frames, and a new track that misses its next frame is deleted (−1.6 < logit(0.2)). Counting the birth as a hit would change track deletion as well as confirmation, and needs a full replay with sensor inputs before it is changed.
+
+## 2026-10-22
+
+### Changed
+- **YOLO runs at 1280×960 instead of 640×480** (`YOLO_IMGSZ_WIDTH` / `YOLO_IMGSZ_HEIGHT` in `docker-compose.yml` and `docker/Dockerfile.yolo`, forwarded by `Custom_YOLO_ROS`'s `yolov9.launch.py` as `imgsz_width` / `imgsz_height`). Objects are born only from camera detections, and at 640 the person dummy was detected from about 80 m. Offline on a recorded approach, 1280 detects it steadily from 90–100 m. Live on 2026-10-22, its fused track was born at 97 m instead of 75 m, and on that day's 27 lane-lock runs at 89–136 m. It costs ~26 ms a frame instead of ~13 ms, and fusion output latency was unchanged (~130 ms). The boxes stay in full-image pixels, so the calibration is unaffected. `YOLO_IMGSZ_WIDTH=640 YOLO_IMGSZ_HEIGHT=480` reverts. This is a change to pre-existing files, made at the user's request. See DOCKER.md, "YOLO input size".
+
 ## 2026-10-20
 
 ### Fixed
@@ -11,6 +24,7 @@
 ### Changed
 - **Grid-based cluster linking is the default, with no lateral crop** (`CLUSTER_METHOD=grid`, `CLUSTER_MAX_LATERAL=0.0`). A 2-D occupancy grid replaces the KD-tree neighbour-pair search. Live at a treeline it clusters the full 60 m width in 22–26 ms per sweep at 10 Hz, with clusters 71–82 ms old. On the selfcal replay its coverage of real objects matches or beats the old linking in every sector. `--exact-clusters` restores the old linking with the 10 m crop it needs in trees.
 - The exact linking is also faster, with identical output: packed voxel keys, gap-banded pair search, and grouping by sort.
+- **Clusters are made out to 120 m instead of 60 m** (`CLUSTER_MAX_RANGE`, `--cluster-range M`, launch arg `cluster_max_range`). 120 m is the range to which Patchwork++ labels ground; beyond it, road returns would cluster as objects. Live (grid): 40–42 ms a sweep instead of 33 ms, still 10 Hz. `ros2 param set /lidar_cluster_detector cluster_max_range 60.0` reverts live.
 
 ### Added
 - `scripts/fusion_live_capture.sh`: a GO/NO-GO preflight, one recording per test pass, setting `measurement_lag` live, and a session summary. It starts as few ROS participants as possible.

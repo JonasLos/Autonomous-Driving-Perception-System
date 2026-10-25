@@ -3,9 +3,19 @@
 State as of 2026-10-20. Everything here is NEW. The only pre-existing repository files touched
 are documentation, each with the user's explicit go-ahead: `.gitignore`, `README.md` and
 `CHANGELOG.md` (2026-09-23), `DOCKER.md` (2026-10-05), and `CHANGELOG.md` + `DOCKER.md` again
-(2026-10-20, "document and save everything"). No pre-existing code was modified.
+(2026-10-20, "document and save everything"). No pre-existing code was modified until 2026-10-22: at
+the user's request the YOLO input size went to 1280×960 in `docker-compose.yml`, `docker/Dockerfile.yolo`,
+`scripts/run_radar.sh`, and `Custom_YOLO_ROS`'s `yolov9.launch.py` (which now forwards `imgsz_*`). Keep it.
 
-## RESUME HERE (updated 2026-10-20)
+## RESUME HERE (updated 2026-10-25)
+
+**2026-10-22/25, from the planner side (lane-lock avoidance tests; CHANGELOG has the details).**
+- YOLO at 1280×960 (10-22): the person dummy's track is born at 89–136 m (was 62–70 m on 10-15).
+- `may_confirm` (10-25): a camera track that missed its 3-in-5 window now confirms on ≥ 3 camera hits and log-odds
+  ≥ `CONFIRM_LOGODDS`. On 10-22 a person tracked from 100 m at 20 m/s stayed tentative to 0.5 m (hit one frame
+  late), and the planner never saw it. Image rebuilt 10-25; rollback tag `pre-late-confirm-2026-10-25`.
+- Noted, not changed: `_apply_camera` charges the birth detection as a camera miss (the new track is not in
+  `used`). It needs a replay with sensor inputs before it is changed, because it also sets how fast new tracks die.
 
 **October, in one paragraph** (details: item 7, "Live at a treeline"). On the vehicle, passed
 objects died the moment they left the camera image although the cluster path held them on replay.
@@ -17,6 +27,13 @@ Two causes, both fixed and seen working live:
 2. Camera MISSES were charged across transform.py's +/-20 m crop, not the image (-8/s against
    at most +4/s from clusters). **`camera_miss_in_image_only`** (default since 2026-10-08)
    charges them only where the track projects into the image.
+
+**Cluster range 60 -> 120 m (default since 2026-10-20, the user's call).** 120 m is where
+Patchwork++ stops labelling ground (`ground_max_range`), so it is the ceiling: past it road returns
+would cluster as objects. Live on the vehicle (grid): 33 -> 40-42 ms/sweep (p90 42 -> 58-60), age at
+publish 92 -> 100 ms (p90 105 -> 129), still 10 Hz. Launch arg `cluster_max_range`,
+`run_fusion.sh --cluster-range M` / `CLUSTER_MAX_RANGE`; live `ros2 param set /lidar_cluster_detector
+cluster_max_range 60.0` is the rollback. Radar range was left at 175 m (the ESR's own limit).
 
 On 2026-10-15 a static dummy was held 9-15 s past the car (43-69 m behind) with both cluster
 arms, and grid held a cone 29 m to the side. Live tools: `scripts/fusion_live_capture.sh`
@@ -696,7 +713,9 @@ obstacles from this stack. **The full write-up lives in the planner repo:
 - **Found and fixed here on the way:** the aggregator published COASTING tracks as TENTATIVE, and
   never set `missed_updates`. An old camera-only track that misses one cycle cannot be re-promoted
   (`may_confirm` stops after 5 camera opportunities), so most long-lived cones were going out
-  TENTATIVE, and a consumer that drops tentative tracks would have dropped them.
+  TENTATIVE, and a consumer that drops tentative tracks would have dropped them. (Since 2026-10-25
+  such a track re-promotes once it has ≥ 3 camera hits and existence over the confirmation threshold;
+  see the resume block.)
   `Track.published_status()` / `Track.missed_updates()`, with tests.
 - **Open (to-do 13):** where the LiDAR sits relative to the `/odom_grid` position. Three sources
   disagree: 2.39 m forward (what `tracker.py` uses and the bridge defaults to), 0.66 m (vendor
@@ -1431,6 +1450,15 @@ On these results the user made grid + no crop the default (2026-10-20).
 3. `camera_expected()` is called without image bounds. Outside the image but inside the +/-20 m
    crop, every camera frame charges -0.8, which clusters (+0.4 at <= 10 Hz) cannot outpace on a
    slow pass.
+4. **A track held only by clusters keeps its last velocity, and it can stay `velocity_valid`**
+   (found 2026-10-21 in the 10-15 planner bags). Cluster updates are position-only, so once the
+   camera loses an object nothing corrects its velocity. In 4 of 14 avoidance runs, the standing
+   dummy beside the car (5-13 m, car at 1-3 m/s) was published valid at a steady 1.0-2.0 m/s
+   (exactly 2.03 m/s for 88 frames in `lmp_marked_lane_lock_20261015_110750`). The planner
+   bridge now holds every track with `velocity_valid` false still, so this is the one false
+   motion that still reaches the planner (0.2-0.9 m of predicted drift in those runs). Candidate
+   fix: velocity_valid false once no velocity-observing update (camera or radar) has arrived for
+   ~0.5 s.
 
 ### 8. Phase 4: radar-only track birth  -- MEASURED 2026-09-18: blocked on traffic, keep it OFF
 `scripts/radar_false_alarm_ab.py` follows each ESR object by track_id (split on gaps and on range
