@@ -37,10 +37,11 @@ All of these, plus the tunables (`x_min`, `x_max`, `bin_len`, `occl_margin`, `ed
 - Off by default. Turn it on with `scripts/run_fusion.sh --road-boundary` or
   `ENABLE_ROAD_BOUNDARY=true`; per step, use `ROAD_BOUNDARY_{OCCLUSION,EXTRACTION,FIT,TRACKING}`.
   It needs SphereFormer and SAM3 up, so start `run_radar.sh` **without** `--obstacle-only`.
-- `perception-object-fusion:latest` predates this node. Rebuild it before using `--road-boundary`
-  on the vehicle:
+- The `perception-object-fusion:latest` image contains this node when it was built from this
+  code (any build since 2026-10-07; the Oct 25 vehicle-branch build has it, without the
+  tracker fix). An older image does not; rebuild it with
   `docker compose -f docker-compose.yml -f docker-compose.fusion.yml --profile fusion build object_fusion_node`.
-  A tested image of this code exists as `perception-object-fusion:roadb`; use it with
+  `perception-object-fusion:roadb` is the Oct 7 test image of this code; use it with
   `OBJECT_FUSION_IMAGE_TAG=roadb`.
 - Switching a consumer is a remap; no planner code changes. For example:
   `python3 lmp_v10c.py --ros-args -r /sphereformer_left_boundary:=/road_boundary/sphereformer/left -r /sphereformer_right_boundary:=/road_boundary/sphereformer/right -r /sam3_left_boundary:=/road_boundary/sam3/left -r /sam3_right_boundary:=/road_boundary/sam3/right`.

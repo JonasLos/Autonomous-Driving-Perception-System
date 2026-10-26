@@ -1721,7 +1721,12 @@ and the bridge default is set to it.
 New, OFF by default: `road_boundary_node` publishes `/road_boundary/{sphereformer,sam3}/{left,right}`,
 drop-in twins of the raw boundary topics. A consumer switches by remapping. Design, rollback, the
 measured A/B and what is not yet shown are in `docs/road_boundary.md`; the plan for upstream
-SphereFormer/SAM3 changes (not implemented) is in `docs/road_boundary_upstream_plan.md`.
+SphereFormer/SAM3 changes is in `docs/road_boundary_upstream_plan.md`.
+**Those upstream changes are implemented on branch `upstream_boundary_fixes`** (on GitHub; worktree
+`~/Downloads/ADPS-upstream`; SAM3 part on the submodule branch of the same name), together with a
+`road_boundary` tracker fix that is NOT on this branch. Start from that branch's
+`src/object_fusion/docs/road_boundary_status.md`. It forked at `695a874`, so it lacks this branch's
+later fusion work; merge before running fusion from it.
 
 Key facts:
 - Only the two `perception_input_2026-09-22` bags are roads, and both are stationary. Every
