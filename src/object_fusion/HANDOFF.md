@@ -186,6 +186,27 @@ Rollback is `rm -rf` on those paths plus `docker image rm perception-object-fusi
 
 ## Run it
 
+### One script per perception combination (2026-10-28)
+
+| script | segmentation | also runs | planner |
+|---|---|---|---|
+| `scripts/run_unmarked_v1.sh` | vehicle SphereFormer (`:latest`) + SAM3 (`vehicle_deploy`) | transform, YOLO, radar, fusion | `lmp_unmarked_v10c.launch.py` |
+| `scripts/run_unmarked_v2.sh` | branch SphereFormer (`:upstream`) + SAM3 (`upstream_boundary_fixes`) | same | `lmp_unmarked_v10c.launch.py` |
+| `scripts/run_unmarked_v3.sh` | V2 + `road_boundary` | same | `lmp_unmarked_v10c_guards.launch.py boundary_source:=road_boundary` |
+| `scripts/run_marked.sh` | none | transform, YOLO, radar, **CLRerNet**, fusion | your `lmp_marked_*` launch |
+
+Each takes `--road gravel|paved` (unmarked only: SAM3 prompt `gravel road` at 0.15, or `paved road`),
+`--replay BAG` (sim time; then `scripts/play_rosbag.sh BAG`), `--status` and `--down`. A bring-up
+first removes whatever combination was running, from both checkouts, so switching never hits a
+container-name clash, and it waits for SAM3 before returning. The branch versions come from the
+`upstream_boundary_fixes` worktree (`ADPS_UPSTREAM`, default `~/Downloads/ADPS-upstream`). The
+scripts never stop the zenoh router; `run_radar.sh --down` does, which cuts the drivers off.
+Shared logic: `scripts/lib/perception_stack.sh`. They only call `run_radar.sh` / `run_fusion.sh`,
+so all their env knobs still apply. V1/V2/V3 are the three setups of the pedestrian A/B
+(`~/fusion_data/recordings/ped_ab_results_2026-10-28.txt`).
+
+### Each piece by hand
+
 The defaults ARE the adopted configuration: no flags are needed for either mode. The full
 Docker walkthrough (build order, both modes, every env var) is in the repo's `DOCKER.md`,
 "Object fusion stack".
@@ -1724,7 +1745,7 @@ measured A/B and what is not yet shown are in `docs/road_boundary.md`; the plan 
 SphereFormer/SAM3 changes is in `docs/road_boundary_upstream_plan.md`.
 **Those upstream changes are implemented on branch `upstream_boundary_fixes`** (on GitHub; worktree
 `~/Downloads/ADPS-upstream`; SAM3 part on the submodule branch of the same name), together with a
-`road_boundary` tracker fix that is NOT on this branch. Start from that branch's
+`road_boundary` tracker fix that is now on this branch too (`2a375ee`, 2026-10-28). Start from that branch's
 `src/object_fusion/docs/road_boundary_status.md`. It forked at `695a874`, so it lacks this branch's
 later fusion work; merge before running fusion from it.
 

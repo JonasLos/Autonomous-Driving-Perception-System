@@ -38,8 +38,9 @@ All of these, plus the tunables (`x_min`, `x_max`, `bin_len`, `occl_margin`, `ed
   `ENABLE_ROAD_BOUNDARY=true`; per step, use `ROAD_BOUNDARY_{OCCLUSION,EXTRACTION,FIT,TRACKING}`.
   It needs SphereFormer and SAM3 up, so start `run_radar.sh` **without** `--obstacle-only`.
 - The `perception-object-fusion:latest` image contains this node when it was built from this
-  code (any build since 2026-10-07; the Oct 25 vehicle-branch build has it, without the
-  tracker fix). An older image does not; rebuild it with
+  code (any build since 2026-10-07). The tracker fix (crossed stations dropped, re-init after 3
+  gated frames) is in builds since 2026-10-28 (`2a375ee`); `scripts/run_unmarked_v3.sh` refuses an
+  image without it. An older image does not have the node at all; rebuild it with
   `docker compose -f docker-compose.yml -f docker-compose.fusion.yml --profile fusion build object_fusion_node`.
   `perception-object-fusion:roadb` is the Oct 7 test image of this code; use it with
   `OBJECT_FUSION_IMAGE_TAG=roadb`.

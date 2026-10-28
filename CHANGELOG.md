@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-28
+
+### Added
+- **One script per perception combination** (`scripts/run_unmarked_v1.sh`, `_v2.sh`, `_v3.sh`,
+  `scripts/run_marked.sh`, shared `scripts/lib/perception_stack.sh`):
+
+| script | segmentation | also runs | planner |
+|---|---|---|---|
+| `scripts/run_unmarked_v1.sh` | vehicle SphereFormer (`:latest`) + SAM3 (`vehicle_deploy`) | transform, YOLO, radar, fusion | `lmp_unmarked_v10c.launch.py` |
+| `scripts/run_unmarked_v2.sh` | branch SphereFormer (`:upstream`) + SAM3 (`upstream_boundary_fixes`) | same | `lmp_unmarked_v10c.launch.py` |
+| `scripts/run_unmarked_v3.sh` | V2 + `road_boundary` | same | `lmp_unmarked_v10c_guards.launch.py boundary_source:=road_boundary` |
+| `scripts/run_marked.sh` | none | transform, YOLO, radar, **CLRerNet**, fusion | your `lmp_marked_*` launch |
+
+  Flags `--road gravel|paved`, `--replay BAG`, `--status`, `--down`. Switching combinations removes
+  the previous one from both checkouts first; the zenoh router is never stopped.
+
+### Fixed
+- **`road_boundary` tracker fix** (from `upstream_boundary_fixes`): stations whose left edge lies
+  right of the right edge are dropped, and a station gated three frames running re-initialises.
+  Before, one bad initialisation through an occluded stretch coasted for up to 3 s (a ~4 m, ~1 s
+  swing of `lmp_v10c`'s edge on a replay). The node also reads SphereFormer's `label` field when
+  present. `road_boundary` stays off by default.
+
 ## 2026-10-25
 
 ### Fixed
