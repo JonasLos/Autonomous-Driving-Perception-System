@@ -182,15 +182,29 @@ class RoadBoundaryNode(Node):
             [_yaw(o.pose.orientation) for o in objs],
             [(o.velocity.x, o.velocity.y) if o.velocity_valid else (0.0, 0.0) for o in objs])
 
+    @staticmethod
+    def _uint8_field(msg: PointCloud2, name: str):
+        """A UINT8 field as an array, or None when the cloud does not carry it."""
+        for fld in msg.fields:
+            if fld.name == name and fld.datatype == PointField.UINT8:
+                step = int(msg.point_step)
+                n = len(msg.data) // step if step else 0
+                a = np.frombuffer(bytes(msg.data), dtype=np.uint8)[: n * step].reshape(n, step)
+                return a[:, fld.offset].astype(np.int32)
+        return None
+
     def _on_segmentation(self, msg: PointCloud2):
         f = decode_fields(msg, ("x", "y", "z", "rgb"))
         if f["x"] is None or f["rgb"] is None:
             return
         xyz = np.stack([f["x"], f["y"], f["z"]], axis=1)
         ok = np.isfinite(xyz).all(axis=1)
+        # SphereFormer publishes the class id as a `label` field on the upstream branch; the
+        # colour decode is the fallback for clouds that only carry rgb.
+        label = self._uint8_field(msg, "label")
+        cls = label[ok] if label is not None else decode_semkitti_rgb(f["rgb"][ok])
         t0 = time.perf_counter()
-        res = self._pl.sphereformer_frame(_stamp(msg.header), xyz[ok],
-                                          decode_semkitti_rgb(f["rgb"][ok]))
+        res = self._pl.sphereformer_frame(_stamp(msg.header), xyz[ok], cls)
         # The obstacles are buffered for SAM3 either way; only publishing is gated.
         if self._enabled["sphereformer"]:
             self._publish("sphereformer", msg.header, res, t0)

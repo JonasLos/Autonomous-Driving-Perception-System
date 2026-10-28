@@ -166,6 +166,10 @@ class BoundaryParams:
     gate_m: float = 1.5
     reset_frac: float = 0.6
     reset_min_compared: int = 4
+    # A station whose measurement is gated this many frames running takes the measurement: by
+    # then the TRACK is what is wrong. Without it one bad initialisation coasted for coast_s
+    # (measured: a left edge stuck at -4.4 m, right of the right edge, for ~1 s through lmp_v10c).
+    reinit_after_gated: int = 3
     coast_s: float = 3.0
     # Output.
     output_step: float = 1.0
@@ -494,6 +498,11 @@ def measure(road_xy, road_z, obstacle_xy, p: BoundaryParams, *, occlusion=True,
             push = np.clip(sgn * (raw - out), 0.0, p.max_floor_push)
             out[floor] += sgn * push[floor]
 
+    # A road narrower than min_width (or with its edges crossed) is not a measurement of a road:
+    # a sparse fit extrapolated through an occluded stretch produced a left edge 1.2 m RIGHT of
+    # the right edge on the upstream replay.
+    _drop_crossed(yl, yr, p.min_width)
+
     zf = z.copy()
     if np.isfinite(z).any():
         idx = np.flatnonzero(np.isfinite(z))
@@ -513,6 +522,28 @@ class _Side:
         self.y = np.full(n, np.nan)
         self.var = np.full(n, np.inf)
         self.t_upd = np.full(n, -np.inf)
+        self.n_gated = np.zeros(n, dtype=np.int64)
+
+
+def _drop_crossed(left, right, min_width, t_left=None, t_right=None):
+    """NaN out stations where the edges are closer than ``min_width`` (or crossed).
+
+    Neither side can be trusted there; with update times given, only the side updated longer ago
+    is dropped (the fresher one is the better evidence), else both are.
+    """
+    bad = np.isfinite(left) & np.isfinite(right) & (left - right < min_width)
+    if not bad.any():
+        return bad
+    if t_left is None:
+        left[bad] = np.nan
+        right[bad] = np.nan
+        return bad
+    older_left = bad & (t_left < t_right)
+    older_right = bad & (t_right < t_left)
+    same = bad & ~older_left & ~older_right
+    left[older_left | same] = np.nan
+    right[older_right | same] = np.nan
+    return bad
 
 
 class BoundaryTracker:
@@ -542,6 +573,7 @@ class BoundaryTracker:
         self.width = float("nan")
         self.resets = 0
         self.gated = 0
+        self.reinits = 0
 
     def predict(self, t: float, increment) -> bool:
         """Move the held boundary to time ``t``. False (and a reset) when it cannot be moved."""
@@ -564,6 +596,7 @@ class BoundaryTracker:
         for side in self.sides.values():
             v = np.isfinite(side.y)
             ny, nvar, nt = np.full(xa.size, np.nan), np.full(xa.size, np.inf), np.full(xa.size, -np.inf)
+            ng = np.zeros(xa.size, dtype=np.int64)
             if v.sum() >= 2:
                 pts = (np.column_stack((xa[v], side.y[v])) - d) @ Rt.T
                 order = np.argsort(pts[:, 0])
@@ -576,7 +609,9 @@ class BoundaryTracker:
                 tv = side.t_upd[v][order]
                 j = np.clip(np.searchsorted(px, xa[inside]), 1, px.size - 1)
                 nt[inside] = np.minimum(tv[j - 1], tv[j])
-            side.y, side.var, side.t_upd = ny, nvar, nt
+                gv = side.n_gated[v][order]
+                ng[inside] = np.maximum(gv[j - 1], gv[j])
+            side.y, side.var, side.t_upd, side.n_gated = ny, nvar, nt, ng
         self.t = t
         return True
 
@@ -596,10 +631,19 @@ class BoundaryTracker:
                 side.y[:] = np.nan
                 side.var[:] = np.inf
                 side.t_upd[:] = -np.inf
+                side.n_gated[:] = 0
                 tv[:] = False
                 both[:] = False
                 bad[:] = False
             self.gated += int(bad.sum())
+            side.n_gated[bad] += 1
+            reinit = bad & (side.n_gated >= p.reinit_after_gated)
+            if reinit.any():
+                self.reinits += int(reinit.sum())
+                side.y[reinit] = my[reinit]
+                side.var[reinit] = r[reinit] * 4.0
+                side.t_upd[reinit] = self.t
+                side.n_gated[reinit] = 0
             upd = both & ~bad
             k = side.var[upd] / (side.var[upd] + r[upd])
             side.y[upd] += k * innov[upd]
@@ -609,9 +653,16 @@ class BoundaryTracker:
             side.y[init] = my[init]
             side.var[init] = r[init] * 4.0
             side.t_upd[init] = self.t
+            side.n_gated[upd | init] = 0
             stale = np.isfinite(side.y) & (self.t - side.t_upd > p.coast_s)
             side.y[stale] = np.nan
             side.var[stale] = np.inf
+        L, R = self.sides["l"], self.sides["r"]
+        crossed = _drop_crossed(L.y, R.y, p.min_width, L.t_upd, R.t_upd)
+        for side in (L, R):
+            gone = crossed & ~np.isfinite(side.y)
+            side.var[gone] = np.inf
+            side.n_gated[gone] = 0
         zm = np.isfinite(m.z)
         self.z[zm] = m.z[zm]
         if np.isfinite(m.width):
