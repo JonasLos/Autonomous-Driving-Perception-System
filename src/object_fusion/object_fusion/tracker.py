@@ -48,6 +48,7 @@ __all__ = [
     "radar_h_and_H", "lidar_measurement", "init_from_radar",
     "compensated_range_rate", "camera_radar_range_cap",
     "turn_velocity_sigma", "velocity_is_significant", "TURN_VELOCITY_K",
+    "radar_rate_lag", "RADAR_RATE_LAG_SIGMA_FRACTION",
 ]
 
 # --------------------------------------------------------------------------- radar noise
@@ -324,7 +325,7 @@ def predict(x, P, dt, dpsi, d_xy, Q):
     return x_out, 0.5 * (P_out + P_out.T)
 
 
-def kalman_update(x, P, y, H, R, gate_chi2=None, position_only=False):
+def kalman_update(x, P, y, H, R, gate_chi2=None, position_only=False, velocity_only=False):
     """Joseph-form update. Returns ``(x, P, nis, applied)``.
 
     ``y`` is the innovation ``z - h(x)``, already angle-wrapped by the caller where relevant.
@@ -343,6 +344,9 @@ def kalman_update(x, P, y, H, R, gate_chi2=None, position_only=False):
     footprint centroid while the camera measures the near face, and the association can switch
     between neighbouring clusters, so the difference between consecutive clusters is an offset,
     not motion. Joseph form keeps the result symmetric with the masked gain.
+
+    ``velocity_only`` is the mirror image: it zeroes the POSITION rows of the gain, so a velocity
+    measurement cannot move the position through the position-velocity cross-covariance.
     """
     x = np.asarray(x, dtype=np.float64).reshape(-1)
     P = np.asarray(P, dtype=np.float64)
@@ -359,6 +363,9 @@ def kalman_update(x, P, y, H, R, gate_chi2=None, position_only=False):
     if position_only:
         K = K.copy()
         K[2:, :] = 0.0
+    if velocity_only:
+        K = K.copy()
+        K[:2, :] = 0.0
     x_out = x + K @ y
     I_KH = np.eye(x.size) - K @ H
     P_out = I_KH @ P @ I_KH.T + K @ R @ K.T
@@ -366,7 +373,42 @@ def kalman_update(x, P, y, H, R, gate_chi2=None, position_only=False):
 
 
 # --------------------------------------------------------------------- measurement models
-def radar_h_and_H(x, R_sl, t_sl, v_ego_s):
+#: How much of the lag correction is itself uncertain. The lag is not one constant: on static
+#: targets the slope of the residual zeroes near 0.21 s while the typical error is smallest near
+#: 0.10 s. INVENTED at half of the correction, which spans that range around the middle.
+RADAR_RATE_LAG_SIGMA_FRACTION = 0.5
+
+
+def radar_rate_lag(x, R_sl, t_sl, v_ego_s, lag_s, sigma_fraction=RADAR_RATE_LAG_SIGMA_FRACTION):
+    """The ESR range-rate's lag behind the geometry. Returns ``(bias, extra_sigma)`` in m/s.
+
+    MEASURED 2026-11-09 on raw ESR tracks of static targets (11 bags, 47,854 samples): the
+    compensated range-rate, 0 for a static target, goes -0.35 m/s at X = 2-4 m/s^2, -0.91 at 4-8 and
+    -1.71 at 8-30, where X is how fast the true range-rate is changing:
+
+        d(rho_dot)/dt = |v_rel_perpendicular|^2 / rho
+
+    A reading that is ``lag_s`` old is ``rho_dot - lag_s * X``, so it looks like an approaching
+    object. The filter assumes white 0.2 m/s noise at 30 Hz and absorbs this as velocity. Whether the
+    lag is ESR's internal tracker or latency cannot be separated from these bags, and it does not
+    matter here: range and range-rate agree with each other and disagree with the angle.
+
+    X comes from the state, so it holds for moving targets. Straight ahead X is ~0 and nothing
+    changes. ``lag_s <= 0`` returns zeros.
+    """
+    if lag_s <= 0.0:
+        return 0.0, 0.0
+    x = np.asarray(x, dtype=np.float64).reshape(4)
+    p_s = np.asarray(R_sl, dtype=np.float64).reshape(2, 2) @ x[:2] + np.asarray(t_sl, dtype=np.float64).reshape(2)
+    v_rel = (np.asarray(R_sl, dtype=np.float64).reshape(2, 2) @ x[2:]
+             - np.asarray(v_ego_s, dtype=np.float64).reshape(2))
+    rho = max(float(math.hypot(p_s[0], p_s[1])), 1.0)
+    n = np.array([-p_s[1], p_s[0]]) / rho
+    correction = float(lag_s) * float(n @ v_rel) ** 2 / rho
+    return -correction, float(sigma_fraction) * correction
+
+
+def radar_h_and_H(x, R_sl, t_sl, v_ego_s, rate_lag_s=0.0):
     """Radar measurement ``h(x) = [range, range_rate, azimuth_deg]`` and its Jacobian.
 
     The state is Cartesian in the LiDAR frame (L); the radar measures polar in its own frame
@@ -390,6 +432,10 @@ def radar_h_and_H(x, R_sl, t_sl, v_ego_s):
     azimuth sign. An implementation that disagrees with this expression has a sign bug.
 
     range_rate is POSITIVE = RECEDING, matching EsrTrack.msg.
+
+    ``rate_lag_s`` adds the predicted bias of :func:`radar_rate_lag` to the range-rate prediction.
+    The Jacobian ignores that term: it is second order in the state and at most a correction of a
+    correction.
     """
     x = np.asarray(x, dtype=np.float64).reshape(4)
     R_sl = np.asarray(R_sl, dtype=np.float64).reshape(2, 2)
@@ -414,6 +460,8 @@ def radar_h_and_H(x, R_sl, t_sl, v_ego_s):
     H[1, :2] = (v_rel @ P_perp) @ R_sl
     H[1, 2:] = u @ R_sl
     H[2, :2] = (math.degrees(1.0) * n / rho) @ R_sl
+    if rate_lag_s > 0.0:
+        z[1] += radar_rate_lag(x, R_sl, t_sl, v_ego_s, rate_lag_s)[0]
     return z, H
 
 

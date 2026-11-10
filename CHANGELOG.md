@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-09
+
+### Added (OFF by default, not yet driven)
+- **False velocity on standing obstacles being passed.** A standing pedestrian being passed picked up a velocity pointing at the
+  car (run 145604 of 2026-11-05 braked from 9.7 to 4.2 m/s). Two causes: the ESR range-rate lags the geometry while the bearing
+  sweeps, and position-only clusters never correct velocity once the camera is gone.
+  - `radar_rate_lag_s` (`--radar-rate-lag S`, default 0 = off; 0.1 measured best): models that lag on every track.
+  - `cluster_velocity_enable` (`--cluster-velocity`, default off): LiDAR-cluster velocity once the camera has lost a track.
+    People only (`cluster_velocity_classes`) until standing vehicles are understood.
+  - Replay, 7 bags, both on: standing people during the pass 0.57 -> 0.07 m/s, standing vehicles 0.48 -> 0.31 m/s, real movers
+    keep `velocity_valid` (83.7% -> 83.8%). Output is byte-identical with both off. Details: `src/object_fusion/HANDOFF.md`.
+- Measurement tools: `scripts/radar_rate_lag_ab.py`, `scripts/cluster_velocity_ab.py`, `scripts/velocity_arms_ab.py`.
+
 ## 2026-10-28
 
 ### Added

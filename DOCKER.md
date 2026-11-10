@@ -537,6 +537,9 @@ A/B needs no rebuild. `scripts/run_fusion.sh -h` lists the flag form of each.
 | `RADAR_CAMERA_GATE` | `true` | `false`: no camera-referenced radar range gate |
 | `ASSOC_MAX_DIST` / `MERGE_MAX_DIST` | `6.0` / `2.5` | `MERGE_MAX_DIST=inf` is the original merge rule |
 | `TURN_VELOCITY_K` | `1.0` | `0.0` (`--loose-velocity`): `velocity_valid` as before 2026-09-22 |
+| `RADAR_RATE_LAG_S` | `0.0` | seconds of ESR range-rate lag to model (`--radar-rate-lag S`); `0.0` = off, `0.1` measured best |
+| `CLUSTER_VELOCITY_ENABLE` | `false` | `true` (`--cluster-velocity`): LiDAR-cluster velocity once the camera has lost a track |
+| `CLUSTER_VELOCITY_CLASSES` / `_WINDOW` / `_SIGMA` | `person` / `1.0` / `0.3` | which classes, fit window [s], velocity sigma [m/s] |
 | `PUBLISH_MODE` | `filtered` | `passthrough` (`--passthrough`): raw camera+LiDAR position |
 | `ODOM_TOPIC` | `/novatel/oem7/odom` | twist only; `/novatel/oem7/odom_grid`'s twist is identical |
 | `EGO_YAW_CORRECTION_DEG` | `-5.35` | `lidar_tc` → `ego` yaw (`lidar_tc` is yawed, TF says identity) |

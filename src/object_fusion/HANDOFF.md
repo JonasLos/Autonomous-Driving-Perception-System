@@ -7,7 +7,11 @@ are documentation, each with the user's explicit go-ahead: `.gitignore`, `README
 the user's request the YOLO input size went to 1280×960 in `docker-compose.yml`, `docker/Dockerfile.yolo`,
 `scripts/run_radar.sh`, and `Custom_YOLO_ROS`'s `yolov9.launch.py` (which now forwards `imgsz_*`). Keep it.
 
-## RESUME HERE (updated 2026-10-25)
+## RESUME HERE (updated 2026-11-09)
+
+**2026-11-09: false velocity on standing obstacles being passed. Built, both switches OFF; see the section of that
+name.** Decision pending: turn on `radar_rate_lag_s` 0.1 and `cluster_velocity_enable`, then rebuild the image and drive it.
+Follow-up owed: why the cluster velocity fit is worse on standing vehicles (it is limited to people until then).
 
 **2026-10-22/25, from the planner side (lane-lock avoidance tests; CHANGELOG has the details).**
 - YOLO at 1280×960 (10-22): the person dummy's track is born at 89–136 m (was 62–70 m on 10-15).
@@ -830,6 +834,60 @@ of the turning arrows. The remaining 0.4% are straight-line measurement jumps, n
   by 3.4 points -- read that as this metric's run-to-run spread before reading anything into a
   comparison.
 
+## False velocity on standing obstacles being passed (2026-11-09)
+
+In 2026-11-05 run `145604` a standing dummy got `velocity_valid` for 0.3 s while the car passed it, the planner
+projected it 0.77 m towards the car, every plan failed clearance and the car braked from 9.7 to 4.2 m/s.
+
+**Cause 1: the ESR range-rate lags the geometry** (`scripts/radar_rate_lag_ab.py`, static targets, 11 raw-radar bags, 47,854
+samples). `range_rate + u.v_ego` should be 0. Against `X = v^2 sin^2(az) / r`, how fast the true range-rate is changing:
+
+    X [m/s^2]     0-0.1   0.3-1   1-2    2-4    4-8    8-30
+    median [m/s]  -0.02   -0.09  -0.16  -0.35  -0.91  -1.71
+
+At a fixed bearing it grows as range shrinks, so it is not an azimuth scale error. Range and range-rate agree with each other
+and disagree with the angle; ESR tracker lag and latency cannot be separated from these bags. It is not one constant: the slope
+zeroes near 0.21 s, the typical error is smallest near 0.10 s, which agrees with `measured_calibration.yaml` finding no constant
+radar offset. The filter assumes white 0.2 m/s noise at 30 Hz and absorbs the bias as velocity pointing at the car.
+
+**Cause 2: nothing corrects it once the camera is gone.** Cluster updates are position-only, so the velocity freezes.
+
+**Fix, both OFF by default.** `radar_rate_lag_s` (every track, `tracker.radar_rate_lag`): predicts the bias from the state, in
+gating and update, with extra range-rate sigma of half the correction. `cluster_velocity_enable` (`cluster_velocity.py`, people
+only via `cluster_velocity_classes`): once the camera is stale 0.5 s, a 1 s median-of-slopes fit of the track's own clusters in
+a ground-fixed odometric frame is applied as a velocity-only update, at most every half window; and a person with no camera,
+radar or fit update for 0.5 s loses `velocity_valid`. With both off, `object_ab.py --full-ab --radar-holdout 4` is byte-identical to
+the previous commit.
+
+**Replay, real node, 7 bags paired** (`scripts/velocity_arms_ab.py`; recordings `~/fusion_data/recordings/clustervel_2026-11-09/arms`):
+
+    during the pass (camera stale, car > 2 m/s)   off     lag 0.1 + clusters
+    standing people: median speed                 0.57    0.07 m/s
+    standing people: radial velocity, X 4-30      -0.48   -0.02 m/s
+    standing people: velocity_valid               0.00%   0.32%
+    standing vehicles: median speed               0.48    0.31 m/s
+    standing vehicles: velocity_valid             3.04%   1.20%
+    real movers: frames velocity_valid            83.7%   83.8%
+
+Lag sweep, standing people, median pass speed on 6 bags: 0.10 s 0.11, 0.15 s 0.10, 0.20 s 0.12, 0.25 s 0.15 m/s; standing vehicles
+0.28 at 0.10 s against 0.36 at 0.15 s. Clusters alone gave 0.07 overall but left -0.3 to -0.5 m/s radial ahead of the car, so
+radar does outweigh them, and the lag model does most of the work; the fit fired only a few dozen times across these drives.
+Orphans and duplicates did not move (22.7% and 0.0% both arms; a coarse 3 m check of confirmed tracks, not `live_orphans.py`,
+whose marker topics were not recorded). The 11-05 bags hold no raw radar or clusters, so they cannot be replayed:
+**the fix has not been tested on the failing runs or on the car.**
+
+**Is a cluster velocity usable?** (`scripts/cluster_velocity_ab.py`, 1 s fit.) Movers: median error 0.71 m/s against the filter
+(n=421), pass. Standing, car above 5 m/s: 11% read above 0.5 m/s against a 10% limit set beforehand, FAIL. Standing people 0%,
+standing vehicles 15%, which is why the fit is limited to people.
+
+**Still to investigate, in order:**
+1. Why standing vehicles fail the fit. Unconfirmed: the cluster centre shifts as different faces come into view, or some
+   "standing" vehicles are creeping (the label allows 0.3 m/s). Do this before widening `cluster_velocity_classes`.
+2. On `raw_2026-10-20` the fit's mover error stays about 0.8 m/s at every window length, so it is a consistent offset between
+   the fit and the filter, not noise. Which of the two is off is not known.
+3. False velocity while the camera IS watching: 45% of the false frames on the 10-29 planner bags, not explained by this work.
+4. Why the lag exists (ESR internal filter or latency): needs a bag with a known time reference.
+
 ## Radar matching in the harnesses, fixed (2026-09-15) -- to-do item 3
 
 Every "range error vs radar" number in these harnesses depends on deciding which radar return is
@@ -1477,9 +1535,10 @@ On these results the user made grid + no crop the default (2026-10-20).
    dummy beside the car (5-13 m, car at 1-3 m/s) was published valid at a steady 1.0-2.0 m/s
    (exactly 2.03 m/s for 88 frames in `lmp_marked_lane_lock_20261015_110750`). The planner
    bridge now holds every track with `velocity_valid` false still, so this is the one false
-   motion that still reaches the planner (0.2-0.9 m of predicted drift in those runs). Candidate
-   fix: velocity_valid false once no velocity-observing update (camera or radar) has arrived for
-   ~0.5 s.
+   motion that still reaches the planner (0.2-0.9 m of predicted drift in those runs). The candidate
+   fix (velocity_valid false after ~0.5 s without camera or radar) was scored on 2026-11-09 and
+   leaves 85-94% of the false frames, because radar counts as support and radar is the cause. See
+   "False velocity on standing obstacles being passed".
 
 ### 8. Phase 4: radar-only track birth  -- MEASURED 2026-09-18: blocked on traffic, keep it OFF
 `scripts/radar_false_alarm_ab.py` follows each ESR object by track_id (split on gaps and on range

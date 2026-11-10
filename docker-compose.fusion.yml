@@ -47,6 +47,12 @@ services:
       CLUSTER_METHOD: "${CLUSTER_METHOD:-grid}"
       CAMERA_MISS_IN_IMAGE_ONLY: "${CAMERA_MISS_IN_IMAGE_ONLY:-true}"
       TURN_VELOCITY_K: "${TURN_VELOCITY_K:-1.0}"
+      # False velocity on standing obstacles being passed; off until the replay is reported.
+      RADAR_RATE_LAG_S: "${RADAR_RATE_LAG_S:-0.0}"
+      CLUSTER_VELOCITY_ENABLE: "${CLUSTER_VELOCITY_ENABLE:-false}"
+      CLUSTER_VELOCITY_WINDOW: "${CLUSTER_VELOCITY_WINDOW:-1.0}"
+      CLUSTER_VELOCITY_SIGMA: "${CLUSTER_VELOCITY_SIGMA:-0.3}"
+      CLUSTER_VELOCITY_CLASSES: "${CLUSTER_VELOCITY_CLASSES:-person}"
       # Obstacle-robust road boundaries (own topics only); off until measured.
       ENABLE_ROAD_BOUNDARY: "${ENABLE_ROAD_BOUNDARY:-false}"
       ROAD_BOUNDARY_OCCLUSION: "${ROAD_BOUNDARY_OCCLUSION:-true}"

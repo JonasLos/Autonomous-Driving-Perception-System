@@ -205,7 +205,8 @@ class Track:
                  "radar_slot", "class_votes", "size", "yaw", "yaw_source",
                  "last_radar_update", "last_camera_update", "last_existence_t",
                  "camera_rejected", "extent_l", "extent_w", "last_cam_xy",
-                 "size_measured", "consecutive_rejects", "forced_updates")
+                 "size_measured", "consecutive_rejects", "forced_updates",
+                 "cluster_history", "last_cluster_velocity_update")
 
     def __init__(self, x, P, stamp, sensor_mask=0):
         self.id = Track._next_id
@@ -246,6 +247,10 @@ class Track:
         #: track from rejecting its own measurements forever.
         self.consecutive_rejects = 0
         self.forced_updates = 0
+        #: Fixed-frame cluster positions and the last velocity fit applied (cluster_velocity.py).
+        #: Both stay empty unless cluster_velocity_enable is set.
+        self.cluster_history = None
+        self.last_cluster_velocity_update = None
         #: One-sided running extent, length and width. Extent from a partial view is only ever
         #: an UNDER-estimate, so a mean is biased low and never recovers.
         self.extent_l = None

@@ -50,7 +50,12 @@ from object_fusion.measurement_queue import DEFAULT_LAG_S, Measurement, Measurem
 from object_fusion.tracker import (
     CAMERA_GATE_CHI2, RADAR_GATE_CHI2, gated_update, compensated_range_rate, init_from_radar, kalman_update,
     lidar_measurement, predict, process_noise, radar_R, radar_h_and_H, range_is_trustworthy,
-    TURN_VELOCITY_K, turn_velocity_sigma, velocity_is_significant, wrap_deg,
+    RADAR_SIGMA_RANGE_RATE, TURN_VELOCITY_K, radar_rate_lag, turn_velocity_sigma,
+    velocity_is_significant, wrap_deg,
+)
+from object_fusion.cluster_velocity import (
+    CAMERA_STALE_S, DEFAULT_CLASSES, DEFAULT_SIGMA, DEFAULT_WINDOW_S, ClusterHistory, OdomFrame,
+    median_slope_velocity, parse_classes, velocity_measurement, velocity_observed,
 )
 from object_fusion.detection_geometry import ExtentFilter
 from object_fusion.track_store import (
@@ -169,6 +174,20 @@ class ObjectAggregatorNode(Node):
         # filter is running with odometry. Anything > 0 is the honest rule at that strength.
         self._turn_velocity_k = float(
             self.declare_parameter("turn_velocity_k", TURN_VELOCITY_K).value)
+        # Stopping the false velocity on standing obstacles being passed (2026-11-09), both OFF until
+        # the four-arm replay is reported. radar_rate_lag_s models the ESR range-rate's lag behind
+        # the geometry, for every track (tracker.radar_rate_lag); 0 is off. cluster_velocity_enable
+        # applies a windowed velocity fit from a track's own LiDAR clusters once the camera has lost
+        # it, for cluster_velocity_classes only (cluster_velocity.py has why that is people).
+        self._radar_rate_lag_s = float(self.declare_parameter("radar_rate_lag_s", 0.0).value)
+        self._cluster_velocity_enable = bool(
+            self.declare_parameter("cluster_velocity_enable", False).value)
+        self._cluster_velocity_window = float(
+            self.declare_parameter("cluster_velocity_window", DEFAULT_WINDOW_S).value)
+        self._cluster_velocity_sigma = float(
+            self.declare_parameter("cluster_velocity_sigma", DEFAULT_SIGMA).value)
+        self._cluster_velocity_classes = parse_classes(
+            self.declare_parameter("cluster_velocity_classes", DEFAULT_CLASSES).value)
         # Outer bound on a sticky ByteTrack claim. Generous on purpose: the claim is meant to
         # survive the 14 m road-adoption jump that breaks a position-only associator, and only
         # to refuse a RECYCLED id that would teleport a track.
@@ -190,6 +209,8 @@ class ObjectAggregatorNode(Node):
                                             ParameterDescriptor(read_only=True)).value)
 
         self._twist = TwistBuffer(duration=8.0)
+        self._odom_frame = OdomFrame()
+        self._cluster_velocity_updates = 0
         self._queue = MeasurementQueue(lag=self._lag)
         self._store = TrackStore(enable_radar_only_birth=self._enable_radar_only_birth)
         self._tf_buffer = tf2_ros.Buffer()
@@ -250,6 +271,9 @@ class ObjectAggregatorNode(Node):
             "sigma_long": (self, "_sigma_long"),
             "sigma_lat": (self, "_sigma_lat"),
             "turn_velocity_k": (self, "_turn_velocity_k"),
+            "radar_rate_lag_s": (self, "_radar_rate_lag_s"),
+            "cluster_velocity_window": (self, "_cluster_velocity_window"),
+            "cluster_velocity_sigma": (self, "_cluster_velocity_sigma"),
         })
         if not ok:
             return SetParametersResult(successful=False, reason=reason)
@@ -268,6 +292,12 @@ class ObjectAggregatorNode(Node):
                 self._camera_miss_in_image_only = bool(p.value)
                 self.get_logger().warning(
                     f"camera_miss_in_image_only -> {self._camera_miss_in_image_only}")
+            elif p.name == "cluster_velocity_enable":
+                self._cluster_velocity_enable = bool(p.value)
+                self.get_logger().warning(
+                    f"cluster_velocity_enable -> {self._cluster_velocity_enable}")
+            elif p.name == "cluster_velocity_classes":
+                self._cluster_velocity_classes = parse_classes(p.value)
         return SetParametersResult(successful=True)
 
     def _accrue(self, tr, sensor, hit, expected, t):
@@ -362,6 +392,7 @@ class ObjectAggregatorNode(Node):
                 f"Dropping {len(self._store.tracks)} tracks and the odometry buffer.")
             self._store = TrackStore(enable_radar_only_birth=self._enable_radar_only_birth)
             self._twist = TwistBuffer(duration=8.0)
+            self._odom_frame.reset()
             self._last_t = t
             self._rewinds += 1
             self._dt_stats.clear()
@@ -375,6 +406,11 @@ class ObjectAggregatorNode(Node):
                 # limited. Silently skipping every measurement is indistinguishable from a
                 # quiet scene, which is exactly how this went unnoticed the first time.
                 self._skipped_no_odom += 1
+                # The fixed frame cannot span the gap, so positions on either side of it are not
+                # comparable.
+                self._odom_frame.reset()
+                for tr in self._store.tracks:
+                    tr.cluster_history = None
                 self._last_t = max(self._last_t, t)
                 now = self._now()
                 if self._last_odom_warn is None or now - self._last_odom_warn > 5.0:
@@ -390,6 +426,7 @@ class ObjectAggregatorNode(Node):
             Q = process_noise(dt, self._sigma_long, self._sigma_lat)
             for tr in self._store.tracks:
                 tr.x, tr.P = predict(tr.x, tr.P, dt, dpsi, d_lidar, Q)
+            self._odom_frame.advance(self._last_t, t, dpsi, d_lidar)
         # NEVER let the prediction clock run backwards. A measurement released out of capture
         # order -- the camera path is slower than the radar's, and `late` counts hundreds of them
         # per drive -- used to rewind _last_t, so the NEXT measurement predicted across an
@@ -437,6 +474,8 @@ class ObjectAggregatorNode(Node):
                 tr.sensors_ever |= SENSOR_LIDAR
                 tr.sensors_this_cycle |= SENSOR_LIDAR
                 self._accrue(tr, "lidar", True, True, t)
+            if self._cluster_velocity_enable:
+                self._apply_cluster_velocity(tr, cl[di], t)
         # NO MISS IS CHARGED. A cluster is evidence of PRESENCE only: the coverage measurement
         # (scripts/lidar_cluster_ab.py --coverage) finds a cluster on an object that is certainly
         # there only 40-70% of the time, depending on sector and range, so "no cluster" says
@@ -444,6 +483,41 @@ class ObjectAggregatorNode(Node):
         # 10 Hz, and measured on a full replay loop it killed tracks wholesale: median lifetime
         # 2.07 -> 0.31 s and the track count 194 -> 313, because the camera then re-births what
         # the existence decay had just deleted.
+
+    def _cluster_velocity_applies(self, tr) -> bool:
+        return tr.class_name() in self._cluster_velocity_classes
+
+    def _apply_cluster_velocity(self, tr, cluster_xy, t):
+        """Correct a camera-lost track's velocity from a window of its own clusters.
+
+        The history is filled on association, not on the position update's gate, so a track that has
+        drifted still collects the evidence that would correct it. A fit is applied at most once
+        per half window, because overlapping windows are not independent measurements.
+        """
+        if not self._cluster_velocity_applies(tr):
+            return
+        fixed = self._odom_frame.to_fixed(t, cluster_xy)
+        if fixed is None:
+            return
+        if tr.cluster_history is None:
+            tr.cluster_history = ClusterHistory()
+        tr.cluster_history.add(t, fixed)
+        window = self._cluster_velocity_window
+        if tr.last_camera_update is not None and t - tr.last_camera_update <= CAMERA_STALE_S:
+            return
+        if (tr.last_cluster_velocity_update is not None
+                and t - tr.last_cluster_velocity_update < 0.5 * window):
+            return
+        v_fixed = median_slope_velocity(tr.cluster_history.array(), t, window)
+        if v_fixed is None:
+            return
+        y, H, R = velocity_measurement(tr.x, self._odom_frame.velocity_to_sensor(v_fixed),
+                                       self._cluster_velocity_sigma)
+        tr.x, tr.P, _, applied = kalman_update(tr.x, tr.P, y, H, R, gate_chi2=CAMERA_GATE_CHI2,
+                                               velocity_only=True)
+        if applied:
+            tr.last_cluster_velocity_update = t
+            self._cluster_velocity_updates += 1
 
     def _apply_camera(self, msg: Detection3DArray, t):
         """Associate, update and birth from one camera+LiDAR measurement array.
@@ -569,15 +643,18 @@ class ObjectAggregatorNode(Node):
                           for tr in self._store.tracks]
         pairs, _info = associate_radar(self._store.tracks, sweep, R_sl, t_sl, v_ego_s,
                                        max_azimuth_err_deg=1.0, max_range_err=60.0,
-                                       camera_ref=camera_ref)
+                                       camera_ref=camera_ref, rate_lag_s=self._radar_rate_lag_s)
         matched = {di for _, di in pairs}
         for ti, di in pairs:
             tr = self._store.tracks[ti]
-            z_pred, H = radar_h_and_H(tr.x, R_sl, t_sl, v_ego_s)
+            z_pred, H = radar_h_and_H(tr.x, R_sl, t_sl, v_ego_s,
+                                      rate_lag_s=self._radar_rate_lag_s)
+            rate_sigma = float(np.hypot(RADAR_SIGMA_RANGE_RATE, radar_rate_lag(
+                tr.x, R_sl, t_sl, v_ego_s, self._radar_rate_lag_s)[1]))
             y = np.array([sweep.range[di] - z_pred[0],
                           sweep.range_rate[di] - z_pred[1],
                           float(wrap_deg(sweep.azimuth[di] - z_pred[2]))])
-            tr.x, tr.P, _, applied = kalman_update(tr.x, tr.P, y, H, radar_R(),
+            tr.x, tr.P, _, applied = kalman_update(tr.x, tr.P, y, H, radar_R(sigma_rate=rate_sigma),
                                                    gate_chi2=RADAR_GATE_CHI2)
             if applied:
                 tr.hits["radar"] += 1
@@ -673,6 +750,13 @@ class ObjectAggregatorNode(Node):
                 filtered and self._twist.newest() is not None
                 and (k <= 0.0
                      or velocity_is_significant(tr.x[2:], np.asarray(tr.P)[2:, 2:], extra)))
+            # A person nothing has measured the velocity of for 0.5 s has no velocity to claim. The
+            # filter still holds the number; it is simply no longer evidence.
+            if (o.velocity_valid and self._cluster_velocity_enable
+                    and self._cluster_velocity_applies(tr)
+                    and not velocity_observed(t, (tr.last_camera_update, tr.last_radar_update,
+                                                  tr.last_cluster_velocity_update))):
+                o.velocity_valid = False
             o.existence_probability = float(tr.existence)
             o.track_status = tr.published_status()
             o.missed_updates = tr.missed_updates(t)
@@ -765,6 +849,8 @@ class ObjectAggregatorNode(Node):
             f"radar_only candidates={s['radar_only_candidates']} born={s['radar_only_born']} | "
             f"merged={s['merged']} confirmed={s['confirmed']} | "
             + (f"cluster updates={self._cluster_updates} | " if self._enable_lidar_clusters else "")
+            + (f"cluster velocity updates={self._cluster_velocity_updates} | "
+               if self._cluster_velocity_enable else "")
             + 
             f"queue={len(self._queue)} late={self._queue.late} "
             f"odom_held={self._twist.held} odom_starved={self._twist.starved} "

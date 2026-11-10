@@ -20,6 +20,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 _FLOAT = {"ego_yaw_correction_deg", "ego_z_offset", "measurement_lag", "sigma_long",
           "sensor_height", "camera_height_m", "assoc_max_dist", "merge_max_dist",
           "sticky_sanity_dist", "turn_velocity_k", "cluster_max_lateral", "cluster_max_range",
+          "radar_rate_lag_s", "cluster_velocity_window", "cluster_velocity_sigma",
           "ground_max_range",
           "ground_rejection_min_range", "ground_margin",
           "depth_gate_min_m", "depth_gate_range_frac", "class_vote_window_s",
@@ -27,6 +28,7 @@ _FLOAT = {"ego_yaw_correction_deg", "ego_z_offset", "measurement_lag", "sigma_lo
           "sigma_lat", "output_timeout", "max_pairing_skew", "wait_for_newer",
           "projection_buffer_duration", "min_range", "max_range", "min_amplitude"}
 _BOOL = {"enable_radar_only_birth", "enable_extent_estimation", "use_sim_time",
+         "cluster_velocity_enable",
          "enable_centroid_correction", "enable_camera_only_fallback",
          "publish_debug_clouds", "segmentation_empty_fallback", "enable_depth_gate",
          "enable_class_vote", "ground_levelling", "radar_camera_gate", "camera_miss_in_image_only",
@@ -114,6 +116,14 @@ _ARGS = {
     # and velocity_valid means "distinguishable from standing still". 0.0 is the rollback --
     # no inflation, no significance test, velocity_valid as it was before 2026-09-22.
     "turn_velocity_k": "1.0",
+    # False velocity on standing obstacles being passed (2026-11-09). Both OFF until the replay is
+    # reported: radar_rate_lag_s models the ESR range-rate lag (0 = off, every track);
+    # cluster_velocity_enable fits velocity from LiDAR clusters once the camera has lost a track.
+    "radar_rate_lag_s": "0.0",
+    "cluster_velocity_enable": "false",
+    "cluster_velocity_window": "1.0",
+    "cluster_velocity_sigma": "0.3",
+    "cluster_velocity_classes": "person",
     "sticky_sanity_dist": "20.0",
     # Obstacle-robust road boundaries on /road_boundary/{sphereformer,sam3}/{left,right}. OFF by
     # default: nothing consumes them until a consumer remaps onto them, and the raw topics are
@@ -185,7 +195,10 @@ def generate_launch_description():
                                 "sigma_lat", "output_timeout", "odom_topic",
                                 "assoc_max_dist", "merge_max_dist", "radar_camera_gate",
                                 "enable_lidar_clusters", "sticky_sanity_dist",
-                                "turn_velocity_k", "camera_miss_in_image_only")),
+                                "turn_velocity_k", "camera_miss_in_image_only",
+                                "radar_rate_lag_s", "cluster_velocity_enable",
+                                "cluster_velocity_window", "cluster_velocity_sigma",
+                                "cluster_velocity_classes")),
         Node(package="object_fusion", executable="road_boundary",
              name="road_boundary", output="screen",
              condition=IfCondition(LaunchConfiguration("enable_road_boundary")),

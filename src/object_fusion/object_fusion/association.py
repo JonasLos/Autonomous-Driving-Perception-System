@@ -107,7 +107,8 @@ def associate_radar(tracks, sweep, R_sl, t_sl, v_ego_s, *,
                     max_azimuth_err_deg=1.0,
                     max_range_err=60.0,
                     radar_R=None,
-                    camera_ref=None):
+                    camera_ref=None,
+                    rate_lag_s=0.0):
     """Associate radar detections to predicted tracks, in the radar's own polar space.
 
     ``tracks`` is a sequence with ``.x`` (4,) and ``.P`` (4,4). ``sweep`` exposes ``range``,
@@ -130,8 +131,11 @@ def associate_radar(tracks, sweep, R_sl, t_sl, v_ego_s, *,
     the radar origin (None where there is none). Where given and inside the camera's range-trust
     bound, a return further from it than ``tracker.camera_radar_range_cap`` is refused -- see that
     function for the measurement behind it.
+
+    ``rate_lag_s``: the ESR range-rate lag model (``tracker.radar_rate_lag``), so that gating and
+    the update agree on what the radar should have read. 0 is the original behaviour.
     """
-    from object_fusion.tracker import radar_h_and_H, radar_R as default_radar_R
+    from object_fusion.tracker import radar_h_and_H, radar_rate_lag, radar_R as default_radar_R
 
     R_meas = default_radar_R() if radar_R is None else np.asarray(radar_R, dtype=np.float64)
     rng = np.asarray(sweep.range, dtype=np.float64)
@@ -150,8 +154,11 @@ def associate_radar(tracks, sweep, R_sl, t_sl, v_ego_s, *,
     from object_fusion.tracker import camera_radar_range_cap
 
     for i, tr in enumerate(tracks):
-        z_pred, H = radar_h_and_H(tr.x, R_sl, t_sl, v_ego_s)
-        S = H @ np.asarray(tr.P, dtype=np.float64) @ H.T + R_meas
+        z_pred, H = radar_h_and_H(tr.x, R_sl, t_sl, v_ego_s, rate_lag_s=rate_lag_s)
+        R_i = R_meas
+        if rate_lag_s > 0.0:
+            R_i = R_meas + np.diag([0.0, radar_rate_lag(tr.x, R_sl, t_sl, v_ego_s, rate_lag_s)[1] ** 2, 0.0])
+        S = H @ np.asarray(tr.P, dtype=np.float64) @ H.T + R_i
         try:
             Sinv = np.linalg.inv(S)
         except np.linalg.LinAlgError:
