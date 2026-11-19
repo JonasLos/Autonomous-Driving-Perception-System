@@ -108,7 +108,7 @@ def associate_radar(tracks, sweep, R_sl, t_sl, v_ego_s, *,
                     max_range_err=60.0,
                     radar_R=None,
                     camera_ref=None,
-                    rate_lag_s=0.0):
+                    rate_lag_s=0.0, a_ego_s=None):
     """Associate radar detections to predicted tracks, in the radar's own polar space.
 
     ``tracks`` is a sequence with ``.x`` (4,) and ``.P`` (4,4). ``sweep`` exposes ``range``,
@@ -134,6 +134,7 @@ def associate_radar(tracks, sweep, R_sl, t_sl, v_ego_s, *,
 
     ``rate_lag_s``: the ESR range-rate lag model (``tracker.radar_rate_lag``), so that gating and
     the update agree on what the radar should have read. 0 is the original behaviour.
+    ``a_ego_s``: the radar origin's acceleration in S, for the lag model's ego-acceleration term.
     """
     from object_fusion.tracker import radar_h_and_H, radar_rate_lag, radar_R as default_radar_R
 
@@ -154,10 +155,11 @@ def associate_radar(tracks, sweep, R_sl, t_sl, v_ego_s, *,
     from object_fusion.tracker import camera_radar_range_cap
 
     for i, tr in enumerate(tracks):
-        z_pred, H = radar_h_and_H(tr.x, R_sl, t_sl, v_ego_s, rate_lag_s=rate_lag_s)
+        z_pred, H = radar_h_and_H(tr.x, R_sl, t_sl, v_ego_s, rate_lag_s=rate_lag_s, a_ego_s=a_ego_s)
         R_i = R_meas
         if rate_lag_s > 0.0:
-            R_i = R_meas + np.diag([0.0, radar_rate_lag(tr.x, R_sl, t_sl, v_ego_s, rate_lag_s)[1] ** 2, 0.0])
+            R_i = R_meas + np.diag([0.0, radar_rate_lag(tr.x, R_sl, t_sl, v_ego_s, rate_lag_s,
+                                                        a_ego_s=a_ego_s)[1] ** 2, 0.0])
         S = H @ np.asarray(tr.P, dtype=np.float64) @ H.T + R_i
         try:
             Sinv = np.linalg.inv(S)

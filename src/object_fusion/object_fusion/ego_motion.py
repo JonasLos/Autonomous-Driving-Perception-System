@@ -137,6 +137,10 @@ class TwistBuffer:
     def newest(self):
         return self._q[-1] if self._q else None
 
+    def covers(self, stamp: float) -> bool:
+        """Is ``stamp`` inside the buffered span? Then :meth:`at` interpolates without counting."""
+        return bool(self._q) and self._q[0].stamp <= stamp <= self._q[-1].stamp
+
     def at(self, stamp: float):
         """Twist interpolated to ``stamp``, or ``None`` if it cannot be served honestly.
 

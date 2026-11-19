@@ -184,3 +184,56 @@ def test_lag_uses_relative_velocity_so_it_holds_for_a_moving_target():
     """A target pacing the car has no relative motion, so the range-rate is not changing."""
     bias, _ = radar_rate_lag(np.array([5.0, -5.0, 10.0, 0.0]), R_ID, T0, np.array([10.0, 0.0]), 0.2)
     assert bias == pytest.approx(0.0)
+
+
+# -------------------------------------------------------------- the radar lag under ego acceleration
+def test_braking_makes_a_standing_object_ahead_read_as_approaching():
+    """Raw ESR, static targets ahead: s = +0.167 s * accel, so braking reads as approaching."""
+    x = np.array([20.0, 0.0, 0.0, 0.0])
+    bias, sigma = radar_rate_lag(x, R_ID, T0, np.array([3.0, 0.0]), 0.1, a_ego_s=np.array([-3.0, 0.0]))
+    assert bias == pytest.approx(-0.3) and sigma == pytest.approx(RADAR_RATE_LAG_SIGMA_FRACTION * 0.3)
+
+
+def test_speeding_up_reads_as_receding_and_the_sigma_stays_positive():
+    x = np.array([20.0, 0.0, 0.0, 0.0])
+    bias, sigma = radar_rate_lag(x, R_ID, T0, np.array([3.0, 0.0]), 0.1, a_ego_s=np.array([2.0, 0.0]))
+    assert bias == pytest.approx(0.2) and sigma == pytest.approx(RADAR_RATE_LAG_SIGMA_FRACTION * 0.2)
+
+
+def test_acceleration_along_the_road_does_not_touch_a_target_abeam():
+    x = np.array([0.0, -10.0, 0.0, 0.0])
+    v_ego = np.array([0.0, 0.0])
+    assert radar_rate_lag(x, R_ID, T0, v_ego, 0.1, a_ego_s=np.array([-4.0, 0.0])) == pytest.approx((0.0, 0.0))
+
+
+def test_no_acceleration_given_is_exactly_the_11_09_model():
+    x = np.array([5.0, -5.0, 0.0, 0.0])
+    v_ego = np.array([10.0, 0.0])
+    assert radar_rate_lag(x, R_ID, T0, v_ego, 0.2, a_ego_s=None) == radar_rate_lag(x, R_ID, T0, v_ego, 0.2)
+    z0, _ = radar_h_and_H(x, R_ID, T0, v_ego, rate_lag_s=0.2)
+    z1, _ = radar_h_and_H(x, R_ID, T0, v_ego, rate_lag_s=0.2, a_ego_s=None)
+    assert np.array_equal(z0, z1)
+
+
+def test_acceleration_reaches_the_range_rate_prediction():
+    x = np.array([20.0, 0.0, 0.0, 0.0])
+    v_ego = np.array([3.0, 0.0])
+    z0, _ = radar_h_and_H(x, R_ID, T0, v_ego, rate_lag_s=0.1)
+    z1, _ = radar_h_and_H(x, R_ID, T0, v_ego, rate_lag_s=0.1, a_ego_s=np.array([-3.0, 0.0]))
+    assert z1[1] - z0[1] == pytest.approx(-0.3)
+
+
+def test_lag_off_ignores_acceleration():
+    assert radar_rate_lag(np.array([20.0, 0.0, 0.0, 0.0]), R_ID, T0, np.zeros(2), 0.0,
+                          a_ego_s=np.array([-5.0, 0.0])) == (0.0, 0.0)
+
+
+def test_twist_buffer_covers_only_its_span():
+    from object_fusion.ego_motion import EgoTwist, TwistBuffer
+    b = TwistBuffer()
+    assert not b.covers(1.0)
+    b.add(EgoTwist(1.0, 1.0, 0.0, 0.0))
+    b.add(EgoTwist(2.0, 2.0, 0.0, 0.0))
+    assert b.covers(1.5) and b.covers(1.0) and not b.covers(0.9) and not b.covers(2.1)
+    b.at(1.5)
+    assert b.held == 0 and b.starved == 0

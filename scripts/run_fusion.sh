@@ -36,7 +36,8 @@
 #                     segmentation's own range; 60 is the pre-2026-10-20 value). Live:
 #                     ros2 param set /lidar_cluster_detector cluster_max_range M
 #   --radar-rate-lag S  RADAR_RATE_LAG_S=S          model the ESR range-rate lag on every track
-#                     (default 0.0 = off; candidate 0.2). Live: ros2 param set /object_aggregator
+#                     (default 0.0 = off; 0.1 measured best). RADAR_RATE_LAG_ACCEL=false drops the
+#                     ego-acceleration term (2026-11-13). Live: ros2 param set /object_aggregator
 #   --cluster-velocity  CLUSTER_VELOCITY_ENABLE=true  LiDAR-cluster velocity once the camera has
 #                     lost a track (default off), CLUSTER_VELOCITY_CLASSES (default person)
 # Still OFF by default: ENABLE_RADAR_ONLY_BIRTH, ENABLE_EXTENT_ESTIMATION,
@@ -82,6 +83,7 @@ export CAMERA_MISS_IN_IMAGE_ONLY="${CAMERA_MISS_IN_IMAGE_ONLY:-true}"
 export TURN_VELOCITY_K="${TURN_VELOCITY_K:-1.0}"
 # False velocity on standing obstacles being passed; off until the replay is reported.
 export RADAR_RATE_LAG_S="${RADAR_RATE_LAG_S:-0.0}"
+export RADAR_RATE_LAG_ACCEL="${RADAR_RATE_LAG_ACCEL:-true}"
 export CLUSTER_VELOCITY_ENABLE="${CLUSTER_VELOCITY_ENABLE:-false}"
 export CLUSTER_VELOCITY_WINDOW="${CLUSTER_VELOCITY_WINDOW:-1.0}"
 export CLUSTER_VELOCITY_SIGMA="${CLUSTER_VELOCITY_SIGMA:-0.3}"
@@ -146,7 +148,7 @@ case "$ACTION" in
           echo -n "  $node $p: "; ros2 param get "$node" "$p" 2>/dev/null || echo "?"
         done
       done <<'NODES'
-/object_aggregator publish_mode enable_radar_only_birth ego_yaw_correction_deg measurement_lag assoc_max_dist merge_max_dist radar_camera_gate enable_lidar_clusters turn_velocity_k radar_rate_lag_s cluster_velocity_enable cluster_velocity_window cluster_velocity_sigma cluster_velocity_classes camera_miss_in_image_only odom_topic
+/object_aggregator publish_mode enable_radar_only_birth ego_yaw_correction_deg measurement_lag assoc_max_dist merge_max_dist radar_camera_gate enable_lidar_clusters turn_velocity_k radar_rate_lag_s radar_rate_lag_accel cluster_velocity_enable cluster_velocity_window cluster_velocity_sigma cluster_velocity_classes camera_miss_in_image_only odom_topic
 /camera_lidar_detector projection_topic segmentation_empty_fallback enable_depth_gate enable_class_vote enable_extent_estimation enable_camera_only_fallback
 /ground_projection ground_levelling publish_nonground odom_topic
 /lidar_cluster_detector cluster_max_lateral cluster_max_range cluster_method ego_yaw_correction_deg
@@ -200,7 +202,7 @@ echo "live rules: levelling=$GROUND_LEVELLING depth_gate=$ENABLE_DEPTH_GATE "\
      "camera_miss_in_image_only=$CAMERA_MISS_IN_IMAGE_ONLY" \
      "radar_camera_gate=$RADAR_CAMERA_GATE merge=$MERGE_MAX_DIST"
 echo "velocity: turn_velocity_k=$TURN_VELOCITY_K (0 = the pre-2026-09-22 always-valid rule)" \
-     "radar_rate_lag_s=$RADAR_RATE_LAG_S (0 = off)" \
+     "radar_rate_lag_s=$RADAR_RATE_LAG_S (0 = off), accel term $RADAR_RATE_LAG_ACCEL" \
      "cluster_velocity=$CLUSTER_VELOCITY_ENABLE (window ${CLUSTER_VELOCITY_WINDOW} s, classes $CLUSTER_VELOCITY_CLASSES)"
 echo "road boundary: enabled=$ENABLE_ROAD_BOUNDARY occlusion=$ROAD_BOUNDARY_OCCLUSION "\
      "extraction=$ROAD_BOUNDARY_EXTRACTION fit=$ROAD_BOUNDARY_FIT tracking=$ROAD_BOUNDARY_TRACKING"

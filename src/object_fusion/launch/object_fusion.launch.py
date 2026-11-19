@@ -28,7 +28,7 @@ _FLOAT = {"ego_yaw_correction_deg", "ego_z_offset", "measurement_lag", "sigma_lo
           "sigma_lat", "output_timeout", "max_pairing_skew", "wait_for_newer",
           "projection_buffer_duration", "min_range", "max_range", "min_amplitude"}
 _BOOL = {"enable_radar_only_birth", "enable_extent_estimation", "use_sim_time",
-         "cluster_velocity_enable",
+         "cluster_velocity_enable", "radar_rate_lag_accel",
          "enable_centroid_correction", "enable_camera_only_fallback",
          "publish_debug_clouds", "segmentation_empty_fallback", "enable_depth_gate",
          "enable_class_vote", "ground_levelling", "radar_camera_gate", "camera_miss_in_image_only",
@@ -120,6 +120,8 @@ _ARGS = {
     # reported: radar_rate_lag_s models the ESR range-rate lag (0 = off, every track);
     # cluster_velocity_enable fits velocity from LiDAR clusters once the camera has lost a track.
     "radar_rate_lag_s": "0.0",
+    # 2026-11-13: also model the lag under ego acceleration. Only acts when radar_rate_lag_s > 0.
+    "radar_rate_lag_accel": "true",
     "cluster_velocity_enable": "false",
     "cluster_velocity_window": "1.0",
     "cluster_velocity_sigma": "0.3",
@@ -196,7 +198,8 @@ def generate_launch_description():
                                 "assoc_max_dist", "merge_max_dist", "radar_camera_gate",
                                 "enable_lidar_clusters", "sticky_sanity_dist",
                                 "turn_velocity_k", "camera_miss_in_image_only",
-                                "radar_rate_lag_s", "cluster_velocity_enable",
+                                "radar_rate_lag_s", "radar_rate_lag_accel",
+                                "cluster_velocity_enable",
                                 "cluster_velocity_window", "cluster_velocity_sigma",
                                 "cluster_velocity_classes")),
         Node(package="object_fusion", executable="road_boundary",

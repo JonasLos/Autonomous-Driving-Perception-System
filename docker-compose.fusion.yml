@@ -49,6 +49,7 @@ services:
       TURN_VELOCITY_K: "${TURN_VELOCITY_K:-1.0}"
       # False velocity on standing obstacles being passed; off until the replay is reported.
       RADAR_RATE_LAG_S: "${RADAR_RATE_LAG_S:-0.0}"
+      RADAR_RATE_LAG_ACCEL: "${RADAR_RATE_LAG_ACCEL:-true}"
       CLUSTER_VELOCITY_ENABLE: "${CLUSTER_VELOCITY_ENABLE:-false}"
       CLUSTER_VELOCITY_WINDOW: "${CLUSTER_VELOCITY_WINDOW:-1.0}"
       CLUSTER_VELOCITY_SIGMA: "${CLUSTER_VELOCITY_SIGMA:-0.3}"

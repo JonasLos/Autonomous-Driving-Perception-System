@@ -6,7 +6,8 @@
 Each DIR holds one recording per bag, with /perception/objects and odometry. Tracks are labelled
 per arm from their own whole-life world displacement. Only the bags present in EVERY arm are
 scored, so arms are compared on the same drives. X is how fast the true range-rate is changing,
-v^2 sin^2(az) / r; radial velocity is negative towards the car.
+v^2 sin^2(az) / r; radial velocity is negative towards the car. The acceleration table covers
+standing objects dead ahead while the car brakes or speeds up, where the ESR lag also shows (2026-11-13).
 """
 import argparse
 import bisect
@@ -23,6 +24,7 @@ from mcap_ros2.decoder import DecoderFactory
 CAM = 1
 OFFSET = (0.67, -0.10)
 XBINS = ((0, .3), (.3, 1), (1, 2), (2, 4), (4, 30))
+ABINS = ((-9, -2), (-2, -.7), (-.7, .7), (.7, 2), (2, 9))
 ODOMS = ("/novatel/oem7/odom_grid", "/novatel/oem7/odom")
 
 
@@ -44,14 +46,17 @@ def score_bag(path):
                                      o.velocity_valid, o.contributions_this_frame, o.class_name) for o in m.objects]))
     rows = sorted(next(odom[k] for k in ODOMS if odom[k]))
     stamps = [r[0] for r in rows]
+    o = np.array(rows)
+    acc = (o[:, 4] - np.interp(o[:, 0] - .2, o[:, 0], o[:, 4])) / .2
     tracks = collections.defaultdict(list)
     for t, objs in objects:
-        p = rows[min(bisect.bisect_left(stamps, t), len(rows) - 1)]
+        i = min(bisect.bisect_left(stamps, t), len(rows) - 1)
+        p, a_ego = rows[i], acc[i]
         c, s = math.cos(p[3]), math.sin(p[3])
         for k, x, y, vx, vy, valid, bits, name in objs:
             ax, ay = x + OFFSET[0], y + OFFSET[1]
             tracks[k].append((t, p[1] + c * ax - s * ay, p[2] + s * ax + c * ay, x, y, vx, vy, valid, bits,
-                              p[4], name == "person"))
+                              p[4], name == "person", a_ego))
     out = []
     for rs in tracks.values():
         rs.sort(key=lambda r: r[0])
@@ -76,12 +81,13 @@ def score_bag(path):
         vr = (a[:, 5] * a[:, 3] + a[:, 6] * a[:, 4]) / r
         out.append(np.c_[np.full(len(a), label), a[:, 10], a[:, 7], tc, a[:, 9], r,
                          np.hypot(a[:, 5], a[:, 6]), vr,
-                         a[:, 9] ** 2 * (a[:, 4] / r) ** 2 / r, a[:, 3] > 0, np.full(len(a), life)])
-    return np.vstack(out) if out else np.zeros((0, 11))
+                         a[:, 9] ** 2 * (a[:, 4] / r) ** 2 / r, a[:, 3] > 0, np.full(len(a), life),
+                         a[:, 11], np.abs(np.degrees(np.arctan2(a[:, 4], a[:, 3])))])
+    return np.vstack(out) if out else np.zeros((0, 13))
 
 
 def report(name, z):
-    label, person, valid, tc, ego, r, speed, vr, x, ahead, life = z.T
+    label, person, valid, tc, ego, r, speed, vr, x, ahead, life, acc, az = z.T
     still, moving, valid = label == 0, label == 1, valid > 0
     def row(title, m):
         p = m & (tc > .5) & (ego > 2)
@@ -96,6 +102,12 @@ def report(name, z):
         m = still & (person > 0) & (ahead > 0) & (ego > 2) & (x >= lo) & (x < hi)
         cells.append(f"{lo}-{hi}: {np.median(vr[m]):+.2f} ({int(m.sum())})" if m.sum() > 10 else f"{lo}-{hi}: -")
     print("  person radial velocity by X: " + "  ".join(cells))
+    cells = []
+    for lo, hi in ABINS:
+        m = still & (ahead > 0) & (az < 20) & (r > 5) & (r < 45) & (ego > .3) & (acc >= lo) & (acc < hi)
+        cells.append(f"{lo}..{hi}: {np.median(vr[m]):+.2f} {100 * valid[m].mean():4.1f}% ({int(m.sum())})"
+                     if m.sum() > 10 else f"{lo}..{hi}: -")
+    print("  standing ahead by ego accel (radial, valid%): " + "  ".join(cells))
     m = moving & valid
     print(f"  movers: frames {int(moving.sum())}, valid {100 * valid[moving].mean():.1f}%, "
           f"|speed - life speed| median {np.median(np.abs(speed[m] - life[m])) if m.any() else float('nan'):.2f} m/s")

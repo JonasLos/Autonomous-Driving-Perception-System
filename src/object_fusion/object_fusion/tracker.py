@@ -379,7 +379,7 @@ def kalman_update(x, P, y, H, R, gate_chi2=None, position_only=False, velocity_o
 RADAR_RATE_LAG_SIGMA_FRACTION = 0.5
 
 
-def radar_rate_lag(x, R_sl, t_sl, v_ego_s, lag_s, sigma_fraction=RADAR_RATE_LAG_SIGMA_FRACTION):
+def radar_rate_lag(x, R_sl, t_sl, v_ego_s, lag_s, sigma_fraction=RADAR_RATE_LAG_SIGMA_FRACTION, a_ego_s=None):
     """The ESR range-rate's lag behind the geometry. Returns ``(bias, extra_sigma)`` in m/s.
 
     MEASURED 2026-11-09 on raw ESR tracks of static targets (11 bags, 47,854 samples): the
@@ -395,6 +395,18 @@ def radar_rate_lag(x, R_sl, t_sl, v_ego_s, lag_s, sigma_fraction=RADAR_RATE_LAG_
 
     X comes from the state, so it holds for moving targets. Straight ahead X is ~0 and nothing
     changes. ``lag_s <= 0`` returns zeros.
+
+    EGO ACCELERATION (2026-11-13). The same lag shows when the car speeds up or brakes, because the
+    full rate of change of the range-rate is
+
+        d(rho_dot)/dt = |v_rel_perpendicular|^2 / rho + u . (a_target - a_ego)
+
+    Measured on raw ESR, static targets ahead with X < 0.3 (34,287 samples): the compensated
+    range-rate is +0.167 s * ego acceleration (binned 0.12-0.27 s), the same lag as above. Braking
+    in front of a standing dummy (2026-11-12 run 105125) made it read -0.9 m/s, approaching, with
+    the camera live. ``a_ego_s`` is the inertial acceleration of the radar origin in S; the target's
+    is taken as 0, which is the constant-velocity model the filter already assumes. None keeps the
+    2026-11-09 model exactly.
     """
     if lag_s <= 0.0:
         return 0.0, 0.0
@@ -404,11 +416,14 @@ def radar_rate_lag(x, R_sl, t_sl, v_ego_s, lag_s, sigma_fraction=RADAR_RATE_LAG_
              - np.asarray(v_ego_s, dtype=np.float64).reshape(2))
     rho = max(float(math.hypot(p_s[0], p_s[1])), 1.0)
     n = np.array([-p_s[1], p_s[0]]) / rho
-    correction = float(lag_s) * float(n @ v_rel) ** 2 / rho
-    return -correction, float(sigma_fraction) * correction
+    rate_change = float(n @ v_rel) ** 2 / rho
+    if a_ego_s is not None:
+        rate_change -= float((p_s / rho) @ np.asarray(a_ego_s, dtype=np.float64).reshape(2))
+    correction = float(lag_s) * rate_change
+    return -correction, float(sigma_fraction) * abs(correction)
 
 
-def radar_h_and_H(x, R_sl, t_sl, v_ego_s, rate_lag_s=0.0):
+def radar_h_and_H(x, R_sl, t_sl, v_ego_s, rate_lag_s=0.0, a_ego_s=None):
     """Radar measurement ``h(x) = [range, range_rate, azimuth_deg]`` and its Jacobian.
 
     The state is Cartesian in the LiDAR frame (L); the radar measures polar in its own frame
@@ -433,7 +448,8 @@ def radar_h_and_H(x, R_sl, t_sl, v_ego_s, rate_lag_s=0.0):
 
     range_rate is POSITIVE = RECEDING, matching EsrTrack.msg.
 
-    ``rate_lag_s`` adds the predicted bias of :func:`radar_rate_lag` to the range-rate prediction.
+    ``rate_lag_s`` adds the predicted bias of :func:`radar_rate_lag` to the range-rate prediction,
+    including the ego-acceleration term when ``a_ego_s`` is given.
     The Jacobian ignores that term: it is second order in the state and at most a correction of a
     correction.
     """
@@ -461,7 +477,7 @@ def radar_h_and_H(x, R_sl, t_sl, v_ego_s, rate_lag_s=0.0):
     H[1, 2:] = u @ R_sl
     H[2, :2] = (math.degrees(1.0) * n / rho) @ R_sl
     if rate_lag_s > 0.0:
-        z[1] += radar_rate_lag(x, R_sl, t_sl, v_ego_s, rate_lag_s)[0]
+        z[1] += radar_rate_lag(x, R_sl, t_sl, v_ego_s, rate_lag_s, a_ego_s=a_ego_s)[0]
     return z, H
 
 

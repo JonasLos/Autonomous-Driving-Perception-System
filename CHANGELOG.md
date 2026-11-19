@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-13
+
+### Added (acts only when `radar_rate_lag_s` > 0, still 0 by default; not yet driven)
+- **The radar lag model also covers ego acceleration** (`radar_rate_lag_accel`, default true; `RADAR_RATE_LAG_ACCEL=false`
+  restores the 11-09 model). On the 11-12 drive, braking in front of the standing dummy made it read -0.9 m/s with the camera
+  live: the same ESR lag, seen through acceleration instead of a sweeping bearing. Raw ESR, static targets ahead: the error
+  was +0.167 s x acceleration; with the term at 0.15 s every acceleration bin is within 0.05 m/s. Replay, 7 bags: braking
+  -0.13 -> -0.02 m/s, standing people `velocity_valid` 0.69% -> 0.44%, movers 83.8% -> 84.5%. Byte-identical with the lag
+  off. Measured 0.15 s fits both cases, so `--radar-rate-lag 0.15` is the candidate. Details: `src/object_fusion/HANDOFF.md`.
+- `scripts/velocity_arms_ab.py` prints standing objects ahead by ego acceleration.
+
+### Changed
+- **`scripts/run_marked.sh` runs with the false-velocity fix ON**: `RADAR_RATE_LAG_S=0.15`, `RADAR_RATE_LAG_ACCEL=true`,
+  `CLUSTER_VELOCITY_ENABLE=true`. The node defaults and the other run scripts stay off. Roll back with
+  `RADAR_RATE_LAG_S=0 CLUSTER_VELOCITY_ENABLE=false scripts/run_marked.sh`. Image rebuilt the same day.
+
 ## 2026-11-09
 
 ### Added (OFF by default, not yet driven)

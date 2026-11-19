@@ -86,6 +86,10 @@ REWIND_S = 1.0
 #: means the camera has missed the object for two frames, and an object can move.
 CAMERA_REF_MAX_AGE_S = 0.3
 
+#: Baseline of the ego-acceleration difference for the radar lag model. The INS twist is 100 Hz and
+#: smooth; 0.2 s keeps the noise well under the 0.1 m/s^2 that matters (0.1 s lag -> 0.01 m/s).
+ACCEL_DIFF_S = 0.2
+
 #: Position sigma of a cluster centroid, both axes. A cluster is the whole object's footprint,
 #: not a face, so it is isotropic -- unlike the camera+LiDAR measurement, which is far better
 #: across the ray than along it. INVENTED; the cluster A/B's ~1 m association gate is the evidence
@@ -180,6 +184,9 @@ class ObjectAggregatorNode(Node):
         # applies a windowed velocity fit from a track's own LiDAR clusters once the camera has lost
         # it, for cluster_velocity_classes only (cluster_velocity.py has why that is people).
         self._radar_rate_lag_s = float(self.declare_parameter("radar_rate_lag_s", 0.0).value)
+        # 2026-11-13: the same lag shows under ego acceleration (braking in front of a standing
+        # dummy read -0.9 m/s). Only acts when radar_rate_lag_s > 0; false restores the 11-09 model.
+        self._radar_rate_lag_accel = bool(self.declare_parameter("radar_rate_lag_accel", True).value)
         self._cluster_velocity_enable = bool(
             self.declare_parameter("cluster_velocity_enable", False).value)
         self._cluster_velocity_window = float(
@@ -292,6 +299,9 @@ class ObjectAggregatorNode(Node):
                 self._camera_miss_in_image_only = bool(p.value)
                 self.get_logger().warning(
                     f"camera_miss_in_image_only -> {self._camera_miss_in_image_only}")
+            elif p.name == "radar_rate_lag_accel":
+                self._radar_rate_lag_accel = bool(p.value)
+                self.get_logger().warning(f"radar_rate_lag_accel -> {self._radar_rate_lag_accel}")
             elif p.name == "cluster_velocity_enable":
                 self._cluster_velocity_enable = bool(p.value)
                 self.get_logger().warning(
@@ -358,6 +368,22 @@ class ObjectAggregatorNode(Node):
             return None, None
         v = frames.ego_to_lidar([[tw.vx, tw.vy]], correction_deg=self._ego_yaw_deg)[0]
         return tw, v
+
+    def _ego_accel_in_lidar(self, t, tw, v_lidar):
+        """Inertial ego acceleration in lidar_tc at ``t``, or None. For the radar lag model only.
+
+        Body-frame velocity differenced over ACCEL_DIFF_S, plus omega x v for the rotation of the
+        frame. The earlier sample is only read from inside the buffered span, so it never counts as
+        held or starved odometry. Lever-arm terms (omega^2 L, alpha L) are a few cm/s^2 and ignored.
+        """
+        if not self._twist.covers(t - ACCEL_DIFF_S):
+            return None
+        tw0 = self._twist.at(t - ACCEL_DIFF_S)
+        if tw0 is None:
+            return None
+        v0 = frames.ego_to_lidar([[tw0.vx, tw0.vy]], correction_deg=self._ego_yaw_deg)[0]
+        w = tw.omega
+        return (np.asarray(v_lidar) - np.asarray(v0)) / ACCEL_DIFF_S + w * np.array([-v_lidar[1], v_lidar[0]])
 
     def _dt_summary(self):
         """Per sensor: how many measurements could not advance the clock, and the median step.
@@ -632,6 +658,10 @@ class ObjectAggregatorNode(Node):
         if tw is None:
             return
         v_ego_s = R_sl @ v_lidar
+        a_ego_s = None
+        if self._radar_rate_lag_s > 0.0 and self._radar_rate_lag_accel:
+            a_lidar = self._ego_accel_in_lidar(t, tw, v_lidar)
+            a_ego_s = None if a_lidar is None else R_sl @ a_lidar
         sweep = _Sweep(msg.detections)
 
         camera_ref = None
@@ -643,14 +673,15 @@ class ObjectAggregatorNode(Node):
                           for tr in self._store.tracks]
         pairs, _info = associate_radar(self._store.tracks, sweep, R_sl, t_sl, v_ego_s,
                                        max_azimuth_err_deg=1.0, max_range_err=60.0,
-                                       camera_ref=camera_ref, rate_lag_s=self._radar_rate_lag_s)
+                                       camera_ref=camera_ref, rate_lag_s=self._radar_rate_lag_s,
+                                       a_ego_s=a_ego_s)
         matched = {di for _, di in pairs}
         for ti, di in pairs:
             tr = self._store.tracks[ti]
             z_pred, H = radar_h_and_H(tr.x, R_sl, t_sl, v_ego_s,
-                                      rate_lag_s=self._radar_rate_lag_s)
+                                      rate_lag_s=self._radar_rate_lag_s, a_ego_s=a_ego_s)
             rate_sigma = float(np.hypot(RADAR_SIGMA_RANGE_RATE, radar_rate_lag(
-                tr.x, R_sl, t_sl, v_ego_s, self._radar_rate_lag_s)[1]))
+                tr.x, R_sl, t_sl, v_ego_s, self._radar_rate_lag_s, a_ego_s=a_ego_s)[1]))
             y = np.array([sweep.range[di] - z_pred[0],
                           sweep.range_rate[di] - z_pred[1],
                           float(wrap_deg(sweep.azimuth[di] - z_pred[2]))])

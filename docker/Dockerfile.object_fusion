@@ -61,6 +61,7 @@ CMD ["/bin/bash", "-lc", \
         camera_miss_in_image_only:=${CAMERA_MISS_IN_IMAGE_ONLY:-true} \
         turn_velocity_k:=${TURN_VELOCITY_K:-1.0} \
         radar_rate_lag_s:=${RADAR_RATE_LAG_S:-0.0} \
+        radar_rate_lag_accel:=${RADAR_RATE_LAG_ACCEL:-true} \
         cluster_velocity_enable:=${CLUSTER_VELOCITY_ENABLE:-false} \
         cluster_velocity_window:=${CLUSTER_VELOCITY_WINDOW:-1.0} \
         cluster_velocity_sigma:=${CLUSTER_VELOCITY_SIGMA:-0.3} \

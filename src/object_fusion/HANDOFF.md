@@ -7,11 +7,14 @@ are documentation, each with the user's explicit go-ahead: `.gitignore`, `README
 the user's request the YOLO input size went to 1280×960 in `docker-compose.yml`, `docker/Dockerfile.yolo`,
 `scripts/run_radar.sh`, and `Custom_YOLO_ROS`'s `yolov9.launch.py` (which now forwards `imgsz_*`). Keep it.
 
-## RESUME HERE (updated 2026-11-09)
+## RESUME HERE (updated 2026-11-13)
 
-**2026-11-09: false velocity on standing obstacles being passed. Built, both switches OFF; see the section of that
-name.** Decision pending: turn on `radar_rate_lag_s` 0.1 and `cluster_velocity_enable`, then rebuild the image and drive it.
-Follow-up owed: why the cluster velocity fit is worse on standing vehicles (it is limited to people until then).
+**2026-11-09/13: false velocity on standing obstacles; see "False velocity on standing obstacles being passed".** Driven
+11-12 with the fix on: standing dummy in the pass 0.47 -> 0.05 m/s. What remained was the same ESR lag under ego
+acceleration (braking in front of the dummy read -0.9 m/s); the 11-13 `radar_rate_lag_accel` term covers it, default true but
+acting only when `radar_rate_lag_s` > 0, which is still 0 by default. Raw ESR and replay favour `radar_rate_lag_s` 0.15 with
+the term. **`scripts/run_marked.sh` now runs with 0.15 + accel + cluster fit ON** (11-13, image rebuilt); node defaults and
+the other scripts stay off. Not yet driven with the accel term. Follow-up owed: why the cluster velocity fit is worse on standing vehicles (people only until then).
 
 **2026-10-22/25, from the planner side (lane-lock avoidance tests; CHANGELOG has the details).**
 - YOLO at 1280×960 (10-22): the person dummy's track is born at 89–136 m (was 62–70 m on 10-15).
@@ -887,6 +890,55 @@ standing vehicles 15%, which is why the fit is limited to people.
    the fit and the filter, not noise. Which of the two is off is not known.
 3. False velocity while the camera IS watching: 45% of the false frames on the 10-29 planner bags, not explained by this work.
 4. Why the lag exists (ESR internal filter or latency): needs a bag with a known time reference.
+
+### Driven 2026-11-12, and the ego-acceleration term (2026-11-13)
+
+**The drive** (`~/latest_planner/lmp_marked_lane_lock_20261112_*`, 17 runs, dummy plus parked car at 5/10/15/20 m/s). Those
+bags hold `/perception/objects` but no raw radar or clusters, and the switches were not logged; the output carries the fix's
+signature. Against the 30 runs of 11-05: standing person in the pass 0.47 -> 0.05 m/s, radial at X 4-30 -0.42 -> -0.03,
+`velocity_valid` 1.27% -> 0.14%; the dummy was never valid in 13 of 17 runs; the parked car never valid.
+
+**What remained.** In run `105125` the planner yielded at 14.7 m/s (`pass (no margin)` -> `yield`), braked to ~1 m/s
+about 9 m short of the dummy, then crept. The first valid velocity on the dummy came ~1.3 s AFTER the yield, so it did not
+cause the stop; during the creep the dummy read -0.9 m/s (approaching) while braking and +0.6 while pulling away, camera
+live. That is the same ESR lag seen through ego ACCELERATION, which the 11-09 model (X only) does not cover:
+
+    d(rho_dot)/dt = |v_rel_perp|^2 / rho + u . (a_target - a_ego)
+
+Raw ESR, static targets dead ahead with X < 0.3 (34,287 samples, the same bags as above): `s = +0.167 s * accel`, binned
+0.12-0.27 s. The published objects show it on both days (+0.07 s on 11-05, +0.11 s on 11-12); 11-12 just braked near the
+dummy more. The sign rules out a late INS twist, which would read the other way.
+
+**The change.** `radar_rate_lag(..., a_ego_s)` uses the full rate: bias `-lag * (X - u.a_ego)`, sigma the same fraction of
+its absolute value. The node differences the INS body velocity over `ACCEL_DIFF_S` = 0.2 s and adds omega x v
+(`_ego_accel_in_lidar`); target acceleration is taken as 0, the filter's own CV assumption. Switch `radar_rate_lag_accel`
+(default true, acts only when `radar_rate_lag_s` > 0; false is the 11-09 model exactly). `TwistBuffer.covers` keeps the
+earlier lookup from counting as held odometry. Tests in `test_cluster_velocity.py`; `object_ab.py --full-ab
+--radar-holdout 4 --measurements rows_gate2.pkl` byte-identical to `e02b1dd` with the lag off.
+
+**Offline, raw ESR static targets** (63,659 samples), median residual after the model:
+
+    lag   model            a -9..-2  -2..-0.7  -0.7..0.7  0.7..2  2..9   X 2-8 (pass)  all |res| p90
+          none             -0.40     -0.19     -0.02      +0.19   +0.33  -0.48         0.33
+    0.10  11-09 (X only)   -0.39     -0.18     -0.02      +0.19   +0.33  -0.14         0.27
+    0.10  11-13 (X - u.a)  -0.11     -0.09     -0.02      +0.07   +0.11  -0.13         0.21
+    0.15  11-09 (X only)   -0.38     -0.18     -0.02      +0.19   +0.34  +0.02         0.27
+    0.15  11-13 (X - u.a)  +0.03     -0.05     -0.02      +0.02   +0.00  +0.04         0.21
+
+One lag, 0.15 s, zeroes both the pass and the acceleration terms.
+
+**Replay, real node, same 7 bags, cluster fit on in all three** (arms `both`, `accel010`, `accel015`):
+
+                                                  11-09 lag 0.1   +accel 0.1   +accel 0.15
+    standing ahead, braking -2..-0.7: radial      -0.13           -0.06        -0.02 m/s   (n=417)
+    standing people: velocity_valid, whole drive  0.69%           0.47%        0.44%
+    standing vehicles: velocity_valid             0.65%           0.50%        0.53%
+    standing people in the pass: median speed     0.07            0.07         0.07 m/s
+    standing people, radial X 4-30                -0.02           -0.02        +0.03 m/s
+    real movers: frames velocity_valid            83.8%           84.3%        84.5%
+
+These bags hold no hard braking or hard acceleration (no bin beyond -2 or +0.7 m/s^2 with more than 10 samples), so the
+105125 case itself is covered only by the raw-ESR table. **Not driven.**
 
 ## Radar matching in the harnesses, fixed (2026-09-15) -- to-do item 3
 

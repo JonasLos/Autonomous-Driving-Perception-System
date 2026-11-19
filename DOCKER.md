@@ -537,7 +537,8 @@ A/B needs no rebuild. `scripts/run_fusion.sh -h` lists the flag form of each.
 | `RADAR_CAMERA_GATE` | `true` | `false`: no camera-referenced radar range gate |
 | `ASSOC_MAX_DIST` / `MERGE_MAX_DIST` | `6.0` / `2.5` | `MERGE_MAX_DIST=inf` is the original merge rule |
 | `TURN_VELOCITY_K` | `1.0` | `0.0` (`--loose-velocity`): `velocity_valid` as before 2026-09-22 |
-| `RADAR_RATE_LAG_S` | `0.0` | seconds of ESR range-rate lag to model (`--radar-rate-lag S`); `0.0` = off, `0.1` measured best |
+| `RADAR_RATE_LAG_S` | `0.0` | seconds of ESR range-rate lag to model (`--radar-rate-lag S`); `0.0` = off; `0.15` measured best with the acceleration term (2026-11-13), `0.1` without |
+| `RADAR_RATE_LAG_ACCEL` | `true` | the lag model also covers ego acceleration (braking/speeding up); acts only when `RADAR_RATE_LAG_S` > 0; `false` = the 2026-11-09 model |
 | `CLUSTER_VELOCITY_ENABLE` | `false` | `true` (`--cluster-velocity`): LiDAR-cluster velocity once the camera has lost a track |
 | `CLUSTER_VELOCITY_CLASSES` / `_WINDOW` / `_SIGMA` | `person` / `1.0` / `0.3` | which classes, fit window [s], velocity sigma [m/s] |
 | `PUBLISH_MODE` | `filtered` | `passthrough` (`--passthrough`): raw camera+LiDAR position |
